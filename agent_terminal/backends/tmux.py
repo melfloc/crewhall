@@ -120,9 +120,16 @@ class TmuxBackend(Backend):
             "-c",
             cwd,
             command,
+            # Same tmux command queue as new-session: a command that exits at once
+            # must leave a dead pane (with its exit status), not a vanished session.
+            ";",
+            "set-option",
+            "-t",
+            name,
+            "remain-on-exit",
+            "on",
         )
         self.tmux_name = name
-        self._run("set-option", "-t", name, "remain-on-exit", "on")
         self._run("set-option", "-t", name, "@at_backend", "tmux")
         self._run("set-option", "-t", name, "@at_command", spec.display())
         self._run("set-option", "-t", name, "@at_created", str(self.session.created_at))

@@ -15,6 +15,12 @@ class _Base(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="at-set-")
         self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
+        # A private executable: the settings check rejects binaries writable by other
+        # users, and a CI toolchain's python often is.
+        self.exe = os.path.join(self.d, "fake-agent")
+        with open(self.exe, "w") as fh:
+            fh.write("#!/bin/sh\nexit 0\n")
+        os.chmod(self.exe, 0o755)
         env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self.d})
         env.start(); self.addCleanup(env.stop)
         for var in ("CREWHALL_HOOKS", "CREWHALL_CONVERSATIONS", "CREWHALL_PERMISSION_WAIT",
@@ -96,13 +102,11 @@ class Providers(_Base):
         self.assertEqual(settings.enabled_kinds(), ["claude"])
 
     def test_command_override_args_and_model(self):
-        import sys
-
         self.assertIsNone(settings.provider_command("claude"))
-        settings.patch({"providers.claude.command": f"{sys.executable} --flag",
+        settings.patch({"providers.claude.command": f"{self.exe} --flag",
                         "providers.claude.default_args": "--verbose",
                         "providers.claude.default_model": "opus"}, confirm=True)
-        self.assertEqual(settings.provider_command("claude"), [sys.executable, "--flag"])
+        self.assertEqual(settings.provider_command("claude"), [self.exe, "--flag"])
         self.assertEqual(settings.provider_args("claude"), ["--model", "opus", "--verbose"])
         # an explicit model on the agent wins over the provider default
         self.assertEqual(settings.provider_args("claude", ["--model", "haiku"]), ["--verbose"])
@@ -134,15 +138,14 @@ class Providers(_Base):
 
 class AppliedByTheController(_Base):
     def test_disabled_provider_cannot_start_agents_and_command_is_overridden(self):
-        import sys
 
         from agent_terminal import Controller
 
         c = Controller(adopt=False)
-        settings.patch({"providers.claude.command": sys.executable, "providers.claude.default_model": "opus"},
+        settings.patch({"providers.claude.command": self.exe, "providers.claude.default_model": "opus"},
                        confirm=True)
         cmd = c._launch_command("claude", ["--a"])
-        self.assertEqual(cmd[0], sys.executable)
+        self.assertEqual(cmd[0], self.exe)
         settings.patch({"providers.claude.enabled": False})
         with self.assertRaises(ValueError) as cm:
             c.create_agent("claude", name="x")
