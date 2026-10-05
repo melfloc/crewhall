@@ -9,7 +9,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -23,7 +23,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -35,7 +35,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -50,7 +50,7 @@ jobs:
   privacy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # the scan also walks the git history
       - uses: actions/setup-python@v5
@@ -64,5 +64,5 @@ jobs:
     if: github.event_name == 'schedule' && vars.REAL_AGENT_RUNNER != ''
     runs-on: ${{ vars.REAL_AGENT_RUNNER }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: AT_RUN_CLAUDE=1 AT_RUN_OPENCODE=1 AT_RUN_CODEX=1 python -m unittest discover
