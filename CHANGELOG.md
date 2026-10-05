@@ -5,6 +5,27 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.63.0] — 2026-10-05
+
+_Fase 2d: worktrees git de agentes remotos._
+
+Threat model:
+
+- Todo se ejecuta como scripts `sh` fijos por SSH con las partes variables como
+  argumentos posicionales (nunca interpoladas): una ruta de repo con `$(…)`, `;` o
+  backticks es literal. Los nombres de equipo/agente pasan por el mismo sanitizador
+  que en local.
+- El borrado se confina al directorio gestionado del host
+  (`$XDG_STATE_HOME/crewhall/worktrees`): rutas fuera de él o con `..` se rechazan
+  (nunca se borra un repo ni un directorio ajeno).
+- Un host caído devuelve estado **desconocido** y conservador (sucio y sin fusionar,
+  `unknown: true`): nunca se declara limpio ni seguro de borrar. Un directorio que
+  no es repo cae al workspace compartido con aviso visible, no en silencio.
+
+- `workspace_mode: worktree` ahora también funciona con `host` (antes se ignoraba
+  en silencio). Nuevo `crewhall/remote_worktrees.py`; `list_worktrees` e
+  `discard_worktree` cubren los worktrees remotos gestionados (`host` en cada fila).
+
 ## [0.62.0] — 2026-10-05
 
 _Fase 2c: historial y actividad de agentes remotos (transcripts de Claude por SSH)._

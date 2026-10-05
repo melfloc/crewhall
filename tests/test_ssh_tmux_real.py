@@ -90,6 +90,7 @@ class SshdHarness:
         # Remote Claude config dir for transcript tests (never the real ~/.claude).
         self.claude_dir = os.path.join(self.dir, "claude")
         os.makedirs(os.path.join(self.claude_dir, "projects", "proj"))
+        self.state_dir = os.path.join(self.dir, "state")  # remote worktree root parent
         self._proc: subprocess.Popen | None = None
         self._build()
 
@@ -122,7 +123,7 @@ class SshdHarness:
                 "PermitRootLogin no\n"
                 "PrintMotd no\n"
                 "LogLevel ERROR\n"
-                f"SetEnv CLAUDE_CONFIG_DIR={self.claude_dir}\n"
+                f"SetEnv CLAUDE_CONFIG_DIR={self.claude_dir} XDG_STATE_HOME={self.state_dir}\n"
             )
 
     def start(self) -> None:
@@ -541,6 +542,99 @@ class SshTranscriptRealTests(unittest.TestCase):
         t0 = time.monotonic()
         self.assertFalse(transcripts.read_history(self.UUID, host=self.host)["available"])
         self.assertLess(time.monotonic() - t0, 20)
+
+
+def _git(cwd, *args):
+    return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True)
+
+
+@unittest.skipUnless(HAVE and shutil.which("git"), "ssh/sshd/tmux/git not installed")
+class SshWorktreeRealTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.sshd = SshdHarness()
+        cls.sshd.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.sshd.cleanup()
+
+    def setUp(self):
+        self.host = {**self.sshd.host_config(), "name": HOST_ALIAS}
+        self.root = tempfile.mkdtemp(prefix="ati-sshwt-", dir="/tmp")
+        env = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": os.path.join(self.root, "run")})
+        env.start(); self.addCleanup(env.stop)
+        os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, self.sshd.state_dir, ignore_errors=True)
+        self.repo = os.path.join(self.root, "repo")
+        os.makedirs(self.repo)
+        _git(self.repo, "init", "-q", "-b", "main")
+        _git(self.repo, "config", "user.email", "t@example.com")
+        _git(self.repo, "config", "user.name", "t")
+        with open(os.path.join(self.repo, "a.txt"), "w") as fh:
+            fh.write("a\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-q", "-m", "init")
+
+    def test_lifecycle_dirty_unmerged_and_confined_removal(self):
+        from crewhall import remote_worktrees as rw
+
+        self.assertTrue(rw.is_git_repo(self.host, self.repo))
+        self.assertFalse(rw.is_git_repo(self.host, self.root))
+        path = rw.create(self.host, self.repo, "team;x", "agent$(id)")
+        self.assertTrue(path.startswith(os.path.join(self.sshd.state_dir, "crewhall", "worktrees")))
+        self.assertTrue(os.path.isdir(path))
+        self.assertEqual(rw.status(self.host, path, repo=self.repo)["branch"], "at/team-x/agent-id")
+        self.assertEqual(rw.can_remove(self.host, path, repo=self.repo), (True, "clean"))
+
+        with open(os.path.join(path, "new.txt"), "w") as fh:
+            fh.write("x")
+        self.assertFalse(rw.can_remove(self.host, path, repo=self.repo)[0])  # dirty
+        _git(path, "add", "-A")
+        _git(path, "-c", "user.email=t@e.com", "-c", "user.name=t", "commit", "-q", "-m", "w")
+        self.assertIn("not merged", rw.can_remove(self.host, path, repo=self.repo)[1])
+
+        with self.assertRaises(rw.WorktreeError):
+            rw.create(self.host, self.repo, "team;x", "agent$(id)")  # already exists
+        for outside in ("/tmp", self.repo, os.path.join(path, "..", "..", "..", "..")):
+            with self.assertRaises(rw.WorktreeError):
+                rw.remove(self.host, outside, force=True)
+        self.assertTrue(os.path.isdir(self.repo))
+        rw.remove(self.host, path, force=True)
+        self.assertFalse(os.path.exists(path))
+
+    def test_hostile_repo_path_is_literal_and_unknown_state_is_conservative(self):
+        from crewhall import remote_worktrees as rw
+
+        evil = "/tmp/x $(touch /tmp/ati-wt-pwn) ; `touch /tmp/ati-wt-pwn2`"
+        self.assertFalse(rw.is_git_repo(self.host, evil))
+        self.assertFalse(os.path.exists("/tmp/ati-wt-pwn"))
+        self.assertFalse(os.path.exists("/tmp/ati-wt-pwn2"))
+        path = rw.create(self.host, self.repo, "t", "a")
+        self.sshd.stop()
+        self.addCleanup(self.sshd.start)
+        st = rw.status(self.host, path, repo=self.repo)
+        self.assertTrue(st["dirty"] and st["unmerged"] and st["unknown"])
+        ok, why = rw.can_remove(self.host, path, repo=self.repo)
+        self.assertFalse(ok)
+        self.assertIn("unknown", why)
+
+    def test_controller_creates_lists_and_cleans_remote_worktrees(self):
+        settings.patch({"hosts": {HOST_ALIAS: self.sshd.host_config()}})
+        c = Controller(adopt=False, persist=False)
+        path = c._make_worktree("a1", "agent", "team", self.repo, HOST_ALIAS)
+        self.assertNotEqual(path, self.repo)
+        self.assertTrue(os.path.isdir(path))
+        listing = [w for w in c.list_worktrees() if w["agent_id"] == "a1"]
+        self.assertEqual(listing[0]["host"], HOST_ALIAS)
+        self.assertFalse(listing[0]["dirty"])
+        c._cleanup_worktree("a1")
+        self.assertFalse(os.path.exists(path))
+        # not a repo -> shared workspace with a visible warning, never silent
+        same = c._make_worktree("a2", "agent2", "team", self.root, HOST_ALIAS)
+        self.assertEqual(same, self.root)
+        self.assertIn("not a git repository", c._worktree_warnings["a2"])
 
 
 if __name__ == "__main__":
