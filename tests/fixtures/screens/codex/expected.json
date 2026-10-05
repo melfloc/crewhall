@@ -1,0 +1,7 @@
+{
+  "ready.txt": {"state": "ready", "evidence_contains": "placeholder"},
+  "working.txt": {"state": "working", "evidence_contains": "esc to interrupt"},
+  "waiting.txt": {"state": "waiting_input", "evidence_contains": "completed"},
+  "trust.txt": {"state": "starting", "evidence_contains": "trust"},
+  "starting.txt": {"state": "starting", "evidence_contains": "not mounted"}
+}

@@ -1,0 +1,68 @@
+name: ci
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *"   # nightly: also runs the real-agent tests when configured
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check agent_terminal tests scripts
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      # The suite uses its own tmux socket (tests/__init__.py): it never touches
+      # a developer's live agents.
+      - run: python -m unittest discover
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the scan also walks the git history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/privacy_scan.py
+
+  real-agents:
+    # Needs the real CLIs and credentials; runs only on the nightly schedule and
+    # only when a runner with them is configured.
+    if: github.event_name == 'schedule' && vars.REAL_AGENT_RUNNER != ''
+    runs-on: ${{ vars.REAL_AGENT_RUNNER }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: AT_RUN_CLAUDE=1 AT_RUN_OPENCODE=1 AT_RUN_CODEX=1 python -m unittest discover

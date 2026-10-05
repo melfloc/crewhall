@@ -1,0 +1,6 @@
+╭──────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.158.0)                    │
+╰──────────────────────────────────────────────╯
+› Ask Codex to do anything
+  GPT-5.6-Terra medium · /home/user/project
+  ← for agents · ? for shortcuts

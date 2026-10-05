@@ -1,0 +1,8 @@
+# Reusable agent profiles:  crewhall agent create -n rev --profile revisor
+# Allowed keys: kind, args, cwd, backend
+[profile.revisor]
+kind = "claude"
+args = "--agent reviewer"
+
+[profile.rapido]
+kind = "opencode"

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "teams": [
+    {"team_id": "team_aaaaaaaaaaaa", "name": "frente1", "agent_ids": ["sess_111111111111", "sess_222222222222"],
+     "created_at": 1790000000.0, "workspace": "/tmp"}
+  ],
+  "agents": [
+    {"agent_id": "sess_111111111111", "name": "orquestador", "kind": "claude", "backend": "pty",
+     "cwd": "/tmp", "cols": 120, "rows": 40, "env": {}},
+    {"agent_id": "sess_222222222222", "name": "ejecutor", "kind": "opencode", "backend": "pty",
+     "cwd": "/tmp", "cols": 120, "rows": 40, "env": {"FOO": "bar"}, "created_at": 1790000001.0}
+  ]
+}

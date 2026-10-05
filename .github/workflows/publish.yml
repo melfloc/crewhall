@@ -1,0 +1,29 @@
+# Publish to PyPI with Trusted Publishing.
+#
+# DISABLED by design: it only runs from a manual dispatch (`workflow_dispatch`),
+# never automatically. Publishing is a deliberate, human action. Before the first
+# run: reserve the `crewhall` name on PyPI, configure Trusted Publishing for this
+# repository/workflow and create the `pypi` environment (with required reviewers).
+name: publish
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm'
+        required: true
+
+jobs:
+  pypi:
+    if: github.event.inputs.confirm == 'publish'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC for Trusted Publishing (no API token stored)
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,52 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+agent_terminal/_build_info.json
+releases/
+
+# temp native libs unpacked by Bun/agent CLIs when TMPDIR leaks into a project
+*.so
+
+# personal working notes (never versioned)
+NOTES.md
+GAPS.md
+
+# personal working plan (not versioned)
+PROMPT-MAESTRO-FASE-3.md
+
+# environments / tooling caches
+.env
+.env.*
+!.env.example
+venv/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+*.sock
+
+# editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# local agent tooling and tool-managed instruction files (injected per machine)
+.claude/
+.codex/
+.opencode/
+CLAUDE.md
+AGENTS.md
+
+# local secrets and runtime state, never to be published
+*.pem
+*.key
+web-token
+allowed_signers
+audit.jsonl
+state.json

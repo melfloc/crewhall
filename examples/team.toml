@@ -1,0 +1,13 @@
+# crewhall team file. Create it with:  crewhall agent team up team.toml
+[team]
+name = "demo"
+workspace = "~/Projects"          # shared working directory (relative paths: next to this file)
+
+[[agent]]
+name = "orquestador"
+kind = "claude"                    # claude | opencode
+args = "--agent orquestador"       # extra CLI arguments, shell-style
+
+[[agent]]
+name = "revisor"
+profile = "revisor"                # defaults from profiles.toml
