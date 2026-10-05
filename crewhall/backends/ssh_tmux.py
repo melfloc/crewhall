@@ -172,33 +172,31 @@ class SshTmuxBackend(TmuxBackend):
             for key, value in (spec.env or {}).items()
             if key and value is not None
         ]
-        tmux_args = [
-            "new-session", "-d", "-s", name,
-            "-x", str(spec.cols), "-y", str(spec.rows),
-        ]
+        head = ["new-session", "-d", "-s", name, "-x", str(spec.cols), "-y", str(spec.rows)]
         if cwd:
-            tmux_args += ["-c", cwd]
-        tmux_args += [
-            shlex.join(argv),
-            ";", "set-option", "-t", name, "remain-on-exit", "on",
-        ]
+            head += ["-c", cwd]
+        tail = [";", "set-option", "-t", name, "remain-on-exit", "on"]
+        tmux = ["tmux", "-L", self.remote_socket, "-f", "/dev/null"]
         if env_items:
-            # Secrets travel over stdin, are stored in a 0600 remote temp file,
-            # sourced and removed before the agent execs: never in argv/ps.
+            # Secrets travel over stdin into a 0600 remote temp file. The *pane*
+            # command (not this ssh client) sources and removes it before the
+            # agent execs, so the env also reaches panes created on an already
+            # running tmux server, and never appears in argv/ps.
             env_data = "".join(
                 f"export {key}={shlex.quote(value)}\n" for key, value in env_items
             )
             remote = (
-                'umask 077; f=$(mktemp "${TMPDIR:-/tmp}/at-env-XXXXXX"); '
-                'cat >"$f"; '
-                "exec sh -c '. \"$0\" && rm -f \"$0\" && exec \"$@\"' \"$f\" "
-                + shlex.join(
-                    ["tmux", "-L", self.remote_socket, "-f", "/dev/null", *tmux_args]
-                )
+                'umask 077; f=$(mktemp "${TMPDIR:-/tmp}/at-env-XXXXXX"); cat >"$f"; '
+                'c="/bin/sh -c \'. \\"\\$0\\" && rm -f \\"\\$0\\" && exec \\"\\$@\\"\' $f "'
+                + shlex.quote(shlex.join(argv))
+                + "; exec "
+                + shlex.join([*tmux, *head])
+                + ' "$c" '
+                + shlex.join(tail)
             )
             proc = self._ssh_run(remote, input=env_data)
         else:
-            proc = self._run(*tmux_args)
+            proc = self._run(*head, shlex.join(argv), *tail)
         if proc.returncode != 0:
             if proc.returncode == 255:
                 raise HostUnreachable(

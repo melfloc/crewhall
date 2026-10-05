@@ -264,6 +264,18 @@ class SshTmuxRealTests(unittest.TestCase):
         local_ps = self._local_process_table()
         self.assertNotIn(secret, local_ps)
 
+    def test_env_reaches_second_agent_on_running_tmux_server(self):
+        first = self._create(env={"AGENT_TAG": "first"})
+        first.write("echo T1=$AGENT_TAG")
+        first.send_enter()
+        first.read_until("T1=first", timeout=15)
+        # The remote tmux server is now running: a new pane must still get its env.
+        second = self._create(env={"AGENT_TAG": "second_TOPSECRET"})
+        second.write("echo T2=$AGENT_TAG")
+        second.send_enter()
+        self.assertIn("T2=second_TOPSECRET", second.read_until("T2=second_TOPSECRET", timeout=15))
+        self.assertNotIn("second_TOPSECRET", self._sh("ps -eo args"))
+
     def test_hostile_values_are_literal_not_executed(self):
         payload = "$(touch /tmp/ati-pwned-inj)"
         session = self._create(env={"PAYLOAD": payload})
