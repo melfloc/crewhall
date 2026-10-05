@@ -64,7 +64,7 @@ reversible, with a compatibility layer. Nothing is published.
 Distribution and maturity (nothing is published).
 
 ### Added
-- `LICENSE` (MIT; the copyright holder is left as `<TITULAR>` ⛔ until you set it),
+- `LICENSE` (MIT),
   `SECURITY.md` (how to report, threat model, hardening checklist) and `CONTRIBUTING.md`.
 - **README in English** (`README.md`); the Spanish original is kept as `README.es.md`.
   `ARCHITECTURE.md`, `ADAPTERS.md`, `INSTALL.md` and `RELEASING.md` start with an

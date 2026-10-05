@@ -3,8 +3,8 @@
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities **privately**: use the repository's
-"Report a vulnerability" (GitHub private advisory) or email the maintainer
-listed in `pyproject.toml`. Do not open a public issue for a security bug.
+"Report a vulnerability" (GitHub private advisory) at
+<https://github.com/melfloc/crewhall/security/advisories/new>. Do not open a public issue for a security bug.
 Include: what you did, what happened, the version (`crewhall --version`)
 and, if possible, a minimal reproduction.
 
