@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crewhall"
+version = "0.57.0"
+description = "Backend-agnostic control of interactive CLI/TUI sessions (tmux or PTY)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "melfloc" }]
+keywords = ["agents", "cli", "tmux", "pty", "orchestration", "mcp", "claude", "opencode", "codex"]
+dependencies = []
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: System :: Systems Administration",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/melfloc/crewhall"
+Documentation = "https://github.com/melfloc/crewhall#readme"
+Issues = "https://github.com/melfloc/crewhall/issues"
+Changelog = "https://github.com/melfloc/crewhall/blob/main/CHANGELOG.md"
+
+[project.scripts]
+# `agent-terminal` is kept as a compatibility alias for the old name.
+crewhall = "agent_terminal.cli:main"
+agent-terminal = "agent_terminal.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agent_terminal*"]
+
+# The Web UI is a static page (index.html + css/js) that must ship inside the wheel.
+[tool.setuptools.package-data]
+"agent_terminal.web" = ["static/*", "static/js/*"]
+"agent_terminal" = ["_build_info.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP"]
+# UP042: keep ``(str, Enum)`` for their exact ``str()``/``name`` semantics.
+ignore = ["E501", "B008", "UP037", "UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use compact ``a; b`` assertion pairs by convention.
+"tests/**" = ["E702"]

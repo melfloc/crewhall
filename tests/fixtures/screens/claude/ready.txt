@@ -1,0 +1,4 @@
+ ▐▛███▛█   Claude Code v2.1.284
+▝▜█████▀  Sonnet 5.5 · Claude Pro
+❯ Try "write a test for <filepath>"
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

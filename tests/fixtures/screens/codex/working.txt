@@ -1,0 +1,4 @@
+› Run the tests
+• Working (3s • esc to interrupt)
+  ⠼ GPT-5.6-Terra medium · /home/user/project
+  ← for agents · ? for shortcuts

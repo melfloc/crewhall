@@ -1,0 +1,7 @@
+ ▐▛███▛█   Claude Code v2.1.284
+▝▜█████▀  Sonnet 5.5 · Claude Pro
+❯ What is 17 times 3? Reply with just the number.
+● 51
+✻ Baked for 1s · done 4:04 PM
+❯ 
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

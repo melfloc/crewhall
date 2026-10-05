@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>crewhall</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<svg width="0" height="0" class="svg-defs" aria-hidden="true">
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20v-1a5 5 0 0 1 5-5h3a5 5 0 0 1 5 5v1M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20v-1a5 5 0 0 0-3-4.6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-11 11M22 2l-7 20-4-9-9-4z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+</svg>
+
+<div class="app">
+  <header class="topbar">
+    <button class="btn icon ghost" id="menuBtn" aria-label="Open agents list"><svg class="ic"><use href="#i-menu"/></svg></button>
+    <div class="brand"><span class="logo">&gt;_</span><span class="brand-name">AGENT-TERMINAL</span><small id="version"></small></div>
+    <div class="summary" id="summary" aria-live="polite"></div>
+    <span class="spacer"></span>
+    <button class="btn icon ghost" id="missionBtn" aria-label="Mission control" title="Mission control — every agent and the message flow"><svg class="ic"><use href="#i-activity"/></svg></button>
+    <button class="btn icon ghost" id="timelineBtn" aria-label="Timeline" title="Timeline — work / wait / error periods per agent"><svg class="ic"><use href="#i-list"/></svg></button>
+    <button class="btn icon ghost" id="usageBtn" aria-label="Cost and usage" title="Cost and usage — tokens, cost and active time"><svg class="ic"><use href="#i-shield"/></svg></button>
+    <button class="btn icon ghost" id="cleanBtn" aria-label="Clean up" title="Clean up — temp leftovers, old backups and old releases"><svg class="ic"><use href="#i-trash"/></svg></button>
+    <button class="btn ghost inbox-btn init-hidden" id="inboxBtn" aria-label="Needs your answer" title="Pending permissions and questions from all agents"><svg class="ic"><use href="#i-shield"/></svg><span class="inbox-n" id="inboxN">0</span></button>
+    <button class="btn icon ghost notify-btn init-hidden" id="notifyBtn" aria-label="Enable notifications" aria-pressed="false" title="Enable browser notifications"><svg class="ic"><use href="#i-bell"/></svg></button>
+    <span class="conn" id="conn" role="status">connecting…</span>
+    <button class="btn icon ghost" id="logoutBtn" aria-label="Session and access" title="Session &amp; access — connected devices, sign out"><svg class="ic"><use href="#i-lock"/></svg></button>
+    <button class="btn icon ghost" id="settingsBtn" aria-label="Settings" title="Settings — providers, access, maintenance, emergency reset"><svg class="ic"><use href="#i-gear"/></svg></button>
+    <button class="btn icon ghost" id="themeBtn" aria-label="Toggle theme" title="Toggle light / dark theme"></button>
+  </header>
+  <div class="shell" id="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-top">
+        <div class="search" id="searchBox">
+          <svg class="ic"><use href="#i-search"/></svg>
+          <input class="input" id="q" placeholder="Search agents…  ( / )" autocomplete="off" spellcheck="false" aria-label="Search agents">
+          <button class="btn icon sm ghost clear" id="qClear" aria-label="Clear search"><svg class="ic sm"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="filters" id="filters" role="group" aria-label="Filter agents"></div>
+      </div>
+      <nav class="nav" id="nav" aria-label="Agents" aria-live="polite"></nav>
+      <div class="side-foot">
+        <button class="btn primary" id="newAgentLink"><svg class="ic"><use href="#i-plus"/></svg>New agent</button>
+        <button class="btn" id="newTeamLink"><svg class="ic"><use href="#i-users"/></svg>New team</button>
+        <button class="btn" id="bundleLink"><svg class="ic"><use href="#i-folder"/></svg>Export / import</button>
+        <button class="btn update-badge init-hidden" id="updateBadge"><svg class="ic"><use href="#i-refresh"/></svg>Restart pending</button>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+    <section class="content">
+      <div class="head" id="head"></div>
+      <div class="progress" id="progress"></div>
+      <div class="tabs init-hidden" id="tabs" role="tablist">
+        <button class="tab on" id="tab-hist" role="tab"><svg class="ic"><use href="#i-msg"/></svg>Conversation</button>
+        <button class="tab" id="tab-live" role="tab"><svg class="ic"><use href="#i-activity"/></svg>Live</button>
+        <button class="tab" id="tab-proc" role="tab" title="Commands the agent is running"><svg class="ic"><use href="#i-terminal"/></svg>Processes</button>
+        <div class="hist-search init-hidden" id="histSearch">
+          <svg class="ic sm"><use href="#i-search"/></svg>
+          <input id="hist-q" placeholder="Search in conversation…" autocomplete="off" aria-label="Search in conversation">
+          <span id="hist-find"></span>
+          <button class="btn icon sm ghost" id="hist-qClear" aria-label="Clear search"><svg class="ic sm"><use href="#i-x"/></svg></button>
+        </div>
+        <span id="hist-note"></span>
+      </div>
+      <div class="pane" id="pane">
+        <div class="welcome" id="welcome">
+          <div class="art"><svg class="ic lg ic-32"><use href="#i-terminal"/></svg></div>
+          <h2>No agent selected</h2>
+          <p>Pick an agent from the list to read its conversation, watch its live output and send it input.</p>
+          <button class="btn primary" id="welcomeNew"><svg class="ic"><use href="#i-plus"/></svg>Create an agent</button>
+        </div>
+        <pre class="term" id="term" tabindex="0"></pre>
+        <div class="procs" id="procs"><div class="inner" id="procs-in"></div></div>
+        <div class="hist" id="hist">
+          <div class="hist-inner"><div id="hist-top"></div><div id="hist-list" aria-live="polite"></div><div id="hist-status" aria-live="polite"></div></div>
+        </div>
+        <button class="btn primary sm jump" id="jump"><svg class="ic sm"><use href="#i-down"/></svg>Jump to latest</button>
+      </div>
+      <div class="termbar init-hidden" id="termbar">
+        <span class="follow on" id="follow" role="button" tabindex="0">● follow</span>
+        <button class="btn sm ghost" id="copyTerm"><svg class="ic sm"><use href="#i-copy"/></svg>Copy output</button>
+      </div>
+      <div class="asks" id="asks"></div>
+      <div class="composer-wrap init-hidden" id="composer-wrap">
+        <div class="composer" id="composer">
+          <span class="state-ic" id="composer-ic"></span>
+          <button class="btn icon ghost sm" id="tplBtn" type="button" aria-label="Prompt templates" title="Prompt templates"><svg class="ic sm"><use href="#i-list"/></svg></button>
+          <textarea id="input" rows="1" placeholder="Type and press Enter to send to the agent…  (Shift+Enter for a new line)" autocomplete="off" aria-label="Message for the agent"></textarea>
+          <button class="btn primary" id="send"><svg class="ic"><use href="#i-send"/></svg>Send</button>
+        </div>
+      </div>
+      <div class="keys-wrap init-hidden" id="keys-wrap">
+        <div class="keys" id="keys">
+          <div class="grp"><button data-key="ESC">Esc</button><button data-key="CTRL_C" class="danger">Ctrl+C</button><button data-key="CTRL_D">Ctrl+D</button><button data-key="CTRL_B">Ctrl+B</button><button data-key="CTRL_O" title="Claude: toggle full transcript view">Ctrl+O</button></div>
+          <div class="grp"><button data-key="PAGE_UP">PgUp</button><button data-key="PAGE_DOWN">PgDn</button><button data-key="HOME">Home</button><button data-key="END">End</button></div>
+          <div class="grp"><button data-key="UP" aria-label="Up">↑</button><button data-key="DOWN" aria-label="Down">↓</button><button data-key="LEFT" aria-label="Left">←</button><button data-key="RIGHT" aria-label="Right">→</button></div>
+        </div>
+      </div>
+      <div class="log" id="log">
+        <div class="log-head" id="log-head" role="button" tabindex="0"><svg class="ic sm"><use href="#i-list"/></svg>Message log<span class="chip" id="log-n">0</span><span class="spacer"></span><svg class="ic sm chev"><use href="#i-chev"/></svg></div>
+        <div class="activity" id="activity"></div>
+      </div>
+    </section>
+  </div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<dialog id="newAgent">
+  <form method="dialog">
+    <h3>New agent</h3>
+    <p class="sub">Starts a coding agent in its own session.</p>
+    <div class="field"><label for="na-name">Name</label><input class="input" id="na-name" required autocomplete="off" placeholder="e.g. reviewer"></div>
+    <div class="grid-2">
+      <div class="field"><label for="na-kind">Harness</label><select class="select" id="na-kind"></select></div>
+      <div class="field"><label for="na-backend">Backend</label><select class="select" id="na-backend"></select></div>
+    </div>
+    <div class="field"><label for="na-team">Team <span class="muted">(optional)</span></label><select class="select" id="na-team"></select></div>
+    <details class="adv"><summary>Advanced</summary><div class="stack">
+      <div class="field"><label for="na-args">Command arguments</label><input class="input mono" id="na-args" placeholder="--agent name" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="na-cwd">Working directory</label><input class="input mono" id="na-cwd" placeholder="/absolute/path"><div class="hint" id="na-cwd-hint"></div></div>
+      <div class="field"><label for="na-workspace-mode">Workspace isolation</label>
+        <select class="select" id="na-workspace-mode">
+          <option value="shared">Shared workspace (default)</option>
+          <option value="worktree">Own git worktree + branch</option>
+        </select>
+        <div class="hint">"Own git worktree" creates a branch <span class="mono">at/&lt;team&gt;/&lt;agent&gt;</span> in a worktree under the state directory. Only when the workspace is a git repo; otherwise it falls back to shared. It is removed on delete only if clean and merged.</div></div>
+    </div></details>
+    <div class="err" id="na-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button class="btn" type="button" value="cancel" id="na-cancel">Cancel</button>
+      <button class="btn primary" value="ok" id="na-ok">Create agent</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="dlg"></dialog>
+<dialog id="onb" class="onb-dlg" aria-label="Welcome"></dialog>
+<div class="palette-wrap init-hidden" id="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="palette-top"><svg class="ic"><use href="#i-search"/></svg>
+      <input id="palette-q" placeholder="Type a command…  (Esc to close)" autocomplete="off" spellcheck="false" aria-label="Command">
+    </div>
+    <div class="palette-list" id="palette-list" role="listbox"></div>
+  </div>
+</div>
+<dialog id="usageDlg" class="usage" aria-label="Cost and usage">
+  <div class="inbox-top"><h3>Cost &amp; usage</h3><span class="spacer"></span>
+    <button class="btn icon ghost" id="usageClose" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+  <div class="usage-body" id="usage-body"></div>
+</dialog>
+<dialog id="timelineDlg" class="timeline" aria-label="Agent timeline">
+  <div class="inbox-top"><h3>Timeline</h3><span class="spacer"></span>
+    <span class="chip" id="tl-day"></span>
+    <button class="btn icon ghost" id="timelineClose" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+  <div class="timeline-body" id="timeline-body"></div>
+</dialog>
+<dialog id="settingsDlg" class="settings" aria-label="Settings">
+  <div class="inbox-top">
+    <h3>Settings</h3>
+    <span class="spacer"></span>
+    <button class="btn icon ghost" id="settingsClose" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="settings-grid">
+    <nav class="settings-nav" id="settings-nav" role="tablist" aria-label="Settings sections"></nav>
+    <div class="settings-body" id="settings-body"></div>
+  </div>
+</dialog>
+<dialog id="missionDlg" class="mission" aria-label="Mission control">
+  <div class="inbox-top">
+    <h3>Mission control</h3>
+    <span class="spacer"></span>
+    <button class="btn icon ghost" id="missionClose" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="mission-body" id="mission-body"></div>
+</dialog>
+<dialog id="inboxDlg" class="inbox" aria-label="Needs your answer">
+  <div class="inbox-top">
+    <h3>Needs your answer</h3>
+    <span class="spacer"></span>
+    <button class="btn icon ghost" id="inboxClose" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="inbox-list" id="inbox-list"></div>
+</dialog>
+
+<script src="/static/js/core.js"></script>
+<script src="/static/js/transport.js"></script>
+<script src="/static/js/sidebar.js"></script>
+<script src="/static/js/agent.js"></script>
+<script src="/static/js/timeline.js"></script>
+<script src="/static/js/usage.js"></script>
+<script src="/static/js/cleaning.js"></script>
+<script src="/static/js/version.js"></script>
+<script src="/static/js/inbox.js"></script>
+<script src="/static/js/access.js"></script>
+<script src="/static/js/bundle.js"></script>
+<script src="/static/js/settings.js"></script>
+<script src="/static/js/archived.js"></script>
+<script src="/static/js/onboarding.js"></script>
+<script src="/static/js/mission.js"></script>
+<script src="/static/js/notify.js"></script>
+<script src="/static/js/palette.js"></script>
+<script src="/static/js/composer.js"></script>
+<script src="/static/js/conversation.js"></script>
+<script src="/static/js/actions.js"></script>
+<script src="/static/js/main.js"></script>
+</body>
+</html>

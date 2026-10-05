@@ -1,0 +1,7 @@
+body{margin:0;display:grid;place-items:center;height:100vh;background:#0f1115;
+color:#e6e6e6;font:14px ui-monospace,monospace}
+form{display:flex;flex-direction:column;gap:10px;background:#171a21;border:1px solid #2a2f3a;
+border-radius:6px;padding:24px;width:min(360px,90vw)}
+input{background:#0f1115;border:1px solid #2a2f3a;color:#e6e6e6;padding:9px;border-radius:4px;font:inherit}
+button{background:#0f1115;border:1px solid #58a6ff;color:#58a6ff;padding:9px;border-radius:4px;font:inherit;cursor:pointer}
+.err{color:#f85149;font-size:12px;min-height:16px}
