@@ -627,13 +627,13 @@ class Responsive(UiBase):
         self._add_agent("a")
         lines = render_text(self.model, 80, 24)
         self.assertEqual(len(lines), 24)
-        self.assertIn("AGENT TERMINAL", "\n".join(lines))
+        self.assertIn("CREWHALL", "\n".join(lines))
         self.assertNotIn("terminal too small", "\n".join(lines))
 
     def test_sizes(self):
         self._add_agent("a")
         for width, height in ((100, 30), (120, 40)):
-            self.assertIn("AGENT TERMINAL", "\n".join(render_text(self.model, width, height)))
+            self.assertIn("CREWHALL", "\n".join(render_text(self.model, width, height)))
 
     def test_too_small(self):
         self.assertIn("terminal too small", "\n".join(render_text(self.model, 60, 16)))

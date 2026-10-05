@@ -130,7 +130,7 @@ class InPlaceRefresh(Base):
         tail = b"\r\n\r\ndespues del bloque\r\n"
         self.assertTrue(after.endswith(tail))
         self.assertNotIn(b"old", after)
-        self.assertIn(b"Agent-terminal collaboration", after)
+        self.assertIn(b"Crewhall collaboration", after)
 
     def test_ambiguous_markers_leave_the_file_byte_identical(self):
         cases = {

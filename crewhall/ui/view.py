@@ -28,7 +28,7 @@ def render(model: AppModel, width: int, height: int) -> list[Line]:
 
     lines: list[Line] = []
     summary = f"{len(model.agents)} agents \u00b7 {len(model.teams)} teams "
-    lines.append([(" AGENT TERMINAL", "title"), (summary.rjust(max(0, width - 15)), "title")])
+    lines.append([(" CREWHALL", "title"), (summary.rjust(max(0, width - 15)), "title")])
     lines.append([("\u2500" * width, "border")])
 
     body_h = max(1, height - 4)

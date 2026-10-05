@@ -19,6 +19,16 @@ tmux or a native PTY, exposes a semantic state per agent, and adds a peer-to-pee
 team-scoped messaging layer with an authoritative identity — so agents can assign
 work, request an answer and hand off tasks, not just run side by side.
 
+## Screenshots
+
+The Web UI: live agent view, and Mission control with every agent and the message flow.
+
+| Dark | Light |
+| --- | --- |
+| ![Live agent view, dark theme](docs/images/agent-live-dark.png) | ![Live agent view, light theme](docs/images/agent-live-light.png) |
+
+![Mission control](docs/images/mission-control-dark.png)
+
 ## The differentiating claim
 
 > **Peer-to-peer agent messaging with authoritative identity, Team limits, reliable

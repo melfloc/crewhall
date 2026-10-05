@@ -38,6 +38,14 @@ del `AgentRegistry`, no guarda `Harness`/sesión/pane y **no** orquesta. `Messag
 solo conoce identidad de agente y `Harness.send()`, nunca OpenCode/Claude/tmux/PTY.
 La `UI` es un **cliente del daemon** (el `Controller` residente) y no salta capas.
 
+## Capturas
+
+| Oscuro | Claro |
+| --- | --- |
+| ![Vista de un agente en vivo, tema oscuro](docs/images/agent-live-dark.png) | ![Vista de un agente en vivo, tema claro](docs/images/agent-live-light.png) |
+
+![Mission control](docs/images/mission-control-dark.png)
+
 ## 1. Problema
 
 Queremos tener simultáneamente varias sesiones interactivas (Claude Code, OpenCode,
@@ -388,7 +396,7 @@ hardcodean en el renderer.
 ### Layout (jerarquía visual)
 
 ```
- AGENT TERMINAL                                            3 agents · 2 teams
+  CREWHALL                                                  3 agents · 2 teams
 ────────────────────────────────────────────────────────────────────────────
 WORKSPACE                        │auditor   [claude]
 TEAMS                            │claude · tmux · WAITING

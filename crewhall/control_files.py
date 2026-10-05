@@ -62,7 +62,7 @@ def managed_section() -> str:
     return "\n".join(
         [
             BEGIN,
-            "## Agent-terminal collaboration",
+            "## Crewhall collaboration",
             "",
             "This project is being worked on inside crewhall.",
             "",

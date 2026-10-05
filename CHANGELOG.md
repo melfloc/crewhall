@@ -16,6 +16,8 @@ _The Python package is renamed to match the product._
 - Fixes found by the first public CI run: `remain-on-exit` is set atomically with
   `new-session` (a command that exits at once no longer loses its exit status), and the
   settings tests no longer depend on a world-writable interpreter.
+- The Web UI header, the curses UI title and the control-file heading now say `crewhall`
+  (they still read `agent-terminal`); README gains screenshots (`docs/images/`).
 
 ## [0.57.0] — 2026-10-05
 

@@ -269,7 +269,7 @@ class WebServerTest(unittest.TestCase):
     def test_index_served(self):
         status, body = self._get("/")
         self.assertEqual(status, 200)
-        self.assertIn(b"AGENT-TERMINAL", body)
+        self.assertIn(b"CREWHALL", body)
 
     def test_static_assets_are_served_with_their_types(self):
         status, body = self._get("/static/app.css")

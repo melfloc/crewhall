@@ -184,7 +184,7 @@ class UiRealFlow(unittest.TestCase):
         self.assertEqual({a["name"] for a in self.model.agents}, {"a", "b", "c"})
 
         screen = "\n".join(render_text(self.model, 100, 30))
-        self.assertIn("AGENT TERMINAL", screen)
+        self.assertIn("CREWHALL", screen)
 
 
 if __name__ == "__main__":
