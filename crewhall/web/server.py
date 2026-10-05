@@ -113,7 +113,7 @@ ALLOWED_OPS = {
     "frontend_status", "frontend_set", "reset_plan", "reset_apply",
     "agent_archive_list", "agent_archive_get",
     "request_list", "request_cancel",
-    "worktree_list", "worktree_discard",
+    "worktree_list", "worktree_discard", "host_list",
 }
 
 
@@ -129,8 +129,12 @@ def _snapshot(client: Client) -> dict[str, Any]:
     from .. import __version__
 
     # The page reloads itself when this changes (an update must not leave a stale UI open).
+    try:
+        hosts = client.call("host_list")["hosts"]
+    except RpcError:
+        hosts = []
     return {"agents": agents, "teams": teams, "messages": messages,
-            "requests": requests, "version": __version__}
+            "requests": requests, "hosts": hosts, "version": __version__}
 
 
 class Handler(BaseHTTPRequestHandler):

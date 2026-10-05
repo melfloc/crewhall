@@ -571,3 +571,7 @@ dialog.settings { width:min(980px,96vw); max-height:90vh; }
   padding:5px 8px; background:var(--surface-2); border-radius:5px; font-size:12.5px; }
 .mc-req .st { text-transform:uppercase; font-size:11px; color:var(--muted); }
 .mc-req .t { color:var(--muted); }
+/* Remote host state (agents running over SSH). */
+.chip.host-ok { color:var(--ready); }
+.chip.host-reconnecting { background:var(--work-soft); color:var(--work); }
+.chip.host-unreachable { background:var(--err-soft); color:var(--err); }

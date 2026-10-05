@@ -346,6 +346,21 @@ def cmd_agent_new_session(args: argparse.Namespace) -> int:
     return 3
 
 
+def cmd_host_list(args: argparse.Namespace) -> int:
+    hosts = _client(args).call("host_list")["hosts"]
+    if args.json:
+        print(json.dumps(hosts, indent=2))
+        return 0
+    if not hosts:
+        print("no hosts configured (see INSTALL.md, 'Hosts remotos por SSH')")
+        return 0
+    print(f"{'HOST':<16} {'DESTINATION':<28} {'STATE':<13} {'TUNNEL':<13} AGENTS")
+    for h in hosts:
+        tunnel = h["tunnel_state"] or ("on" if h["tunnel"] else "off")
+        print(f"{h['name']:<16} {h['ssh']:<28} {h['state']:<13} {tunnel:<13} {h['agents']}")
+    return 0
+
+
 def cmd_agent_list(args: argparse.Namespace) -> int:
     team = getattr(args, "team", None)
     if team:
@@ -1153,6 +1168,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("attach", help="attach a terminal to a tmux session")
     p.add_argument("target")
     p.set_defaults(func=cmd_attach)
+
+    p = sub.add_parser("host", help="remote SSH hosts")
+    hsub = p.add_subparsers(dest="host_command", required=True)
+    h = hsub.add_parser("list", help="configured hosts and what is observed about them")
+    h.add_argument("--json", action="store_true")
+    h.set_defaults(func=cmd_host_list)
 
     p = sub.add_parser("agent", help="control CLI agents through a semantic harness")
     asub = p.add_subparsers(dest="agent_command", required=True)

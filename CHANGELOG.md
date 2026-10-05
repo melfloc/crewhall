@@ -5,6 +5,22 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.64.0] — 2026-10-05
+
+_Fase 2e: estado de host en la CLI, el Web UI y la TUI. Cierra la Fase 2 (SSH)._
+
+- **Datos honestos**: el estado de un host (`ok` / `unreachable` / `reconnecting` /
+  `unknown`) se deriva solo de lo observado (último resultado SSH del backend, sondeo
+  de readopción, supervisor del túnel); sin ninguna observación es `unknown`, nunca
+  `ok`. El listado de agentes (sondeado a menudo) **no hace llamadas de red** nuevas.
+- Nueva op `host_list` y `crewhall host list [--json]` (estado, túnel, agentes).
+- `agent_list` añade `host` y `host_state` a los agentes remotos; el snapshot del
+  Web UI incluye `hosts`.
+- Web UI: chip de host con color por estado, aviso «host unreachable/reconnecting —
+  el agente sigue ejecutándose allí; el estado puede estar desactualizado» y el
+  compositor se deshabilita mientras el host no responde. TUI: `@host (estado)` en
+  la cabecera.
+
 ## [0.63.0] — 2026-10-05
 
 _Fase 2d: worktrees git de agentes remotos._

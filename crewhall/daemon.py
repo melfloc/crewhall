@@ -390,6 +390,9 @@ class Server:
             self._viewer_seen = time.monotonic()
         return {"agents": self.controller.list_agents()}
 
+    def _op_host_list(self, request: dict[str, Any]) -> dict[str, Any]:
+        return {"hosts": self.controller.host_status()}
+
     def _op_agent_info(self, request: dict[str, Any]) -> dict[str, Any]:
         harness = self.controller.get_agent(request["target"])
         return {"agent": self.controller.agent_summary(harness)}

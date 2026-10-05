@@ -205,23 +205,31 @@ function renderHead(){
       el("span", {className:"chip mono model", id:"agent-model", title:modelOf(a) ? "Model running this agent" : "Model not observed yet"},
         ic("activity","sm"), modelOf(a) || "model n/d"),
       el("span", {className:"chip mono", title:"Backend"}, ic("terminal","sm"), a.backend||"—"),
+      a.host ? el("span", {className:`chip mono host-${a.host_state||"unknown"}`, id:"agent-host",
+        title:`Remote host · ${a.host_state||"unknown"}`}, ic("terminal","sm"),
+        `${a.host} · ${a.host_state==="unreachable" ? "unreachable, retrying" : a.host_state||"n/d"}`) : null,
       a.cwd ? copyChip("folder", a.cwd, "Path copied") : null,
       a.pid != null ? copyChip("activity", `pid ${a.pid}`, "PID copied") : null,
       a.worktree ? copyChip("folder", a.worktree.branch, "Branch copied") : null,
       el("span", {className:"chip", title:"Teams"}, ic("users","sm"), teams.join(", ") || "no team")),
+    a.host_state === "unreachable" || a.host_state === "reconnecting"
+      ? el("div", {className:"evidence", id:"agent-host-banner"},
+          `⚠ host ${a.host} ${a.host_state === "reconnecting" ? "is reconnecting" : "is unreachable"} — the agent keeps running there; state may be stale`) : null,
     a.worktree_warning ? el("div", {className:"evidence"}, "⚠ " + a.worktree_warning) : null,
     a.evidence ? el("div", {className:"evidence", title:a.evidence}, a.evidence) : null);
   // Gate input by agent state: while WORKING/STARTING the agent rejects input
   // (no queue by design), so disable and explain instead of silently failing.
   $("tab-hist").style.display = a.history ? "" : "none";
   if(!a.history && S.view==="hist") setView("live");
-  const usable = (st === "ready" || st === "waiting_input");
+  const hostDown = a.host_state === "unreachable" || a.host_state === "reconnecting";
+  const usable = (st === "ready" || st === "waiting_input") && !hostDown;
   const dead = (st === "exited" || st === "error");
   const box = $("input"), btn = $("send");
   box.disabled = !usable; btn.disabled = !usable;
   $("composer").classList.toggle("locked", !usable);
   $("composer-ic").replaceChildren(...(st==="working" ? [dot("working")] : st==="starting" ? [dot("starting")] : dead ? [ic("alert")] : []));
-  if (dead) box.placeholder = `${a.name||a.agent_id} is ${st} — start it again to interact`;
+  if (hostDown) box.placeholder = `Host ${a.host} is ${a.host_state === "reconnecting" ? "reconnecting" : "unreachable"} — input is disabled until it is back`;
+  else if (dead) box.placeholder = `${a.name||a.agent_id} is ${st} — start it again to interact`;
   else if (st === "working") box.placeholder = "Agent working… input is disabled until it finishes";
   else if (st === "starting") box.placeholder = "Agent starting…";
   else box.placeholder = "Type and press Enter to send to the agent…";

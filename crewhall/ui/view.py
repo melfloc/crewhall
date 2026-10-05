@@ -137,6 +137,10 @@ def _session_head(model: AppModel, width: int, height: int) -> list[Line]:
             f"{name}   [{agent['kind']}] \u00b7 {agent['backend']} \u00b7 "
             f"{model.state_word(agent['state'])}"
         )
+        if agent.get("host"):
+            line += f"  \u00b7  @{agent['host']}"
+            if agent.get("host_state") in ("unreachable", "reconnecting"):
+                line += f" ({agent['host_state']})"
         if model.focus == "interactive":
             line += "  \u00b7  INTERACTIVE"
         head: list[Line] = [[(line, _state_style(agent["state"]))]]

@@ -198,7 +198,15 @@ restringido (solo identidad, mensajes y requests de agentes con token; nada del
 plano de control). Requiere `crewhall` instalado en el host remoto. El agente recibe
 `CREWHALL_SOCKET` apuntando a ese socket y `CREWHALL_GATEWAY=1`.
 
+**Qué funciona en un agente remoto.** Crear, escribir, capturar, redimensionar,
+terminar y readoptar; mensajería, hooks y permisos (con `tunnel`); historial y
+actividad de Claude (transcript leído por SSH); worktrees (`workspace_mode:
+worktree`, bajo `$XDG_STATE_HOME/crewhall/worktrees` del host); y estado del host
+(`crewhall host list`, Web UI y TUI). **No** hay inspección de procesos remotos
+(n/d), ni servidor local de OpenCode, ni MCP: el estado cae a la pantalla.
+
 ```bash
+crewhall host list
 crewhall agent create --kind opencode --name reviewer --host prod1 --wait
 crewhall agent capture reviewer --recent
 crewhall attach reviewer

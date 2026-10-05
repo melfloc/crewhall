@@ -138,6 +138,8 @@ class Controller:
         self._agent_args: dict[str, list[str]] = {}
         # Configured SSH host per agent (None = local), kept for restart/restore.
         self._agent_hosts: dict[str, str | None] = {}
+        # Last adoption probe per host: (reachable, wall-clock time).
+        self._host_health: dict[str, tuple[bool, float]] = {}
         # Reverse SSH tunnels + restricted gateways for hosts with tunnel=true.
         self.remote_links = RemoteLinks()
         self.remote_links.host_of = self._host_of_agent
@@ -794,8 +796,10 @@ class Controller:
             for name in list(settings.hosts()):
                 try:
                     self._adopt_remote_host(name, settings.host(name))
+                    self._host_health[name] = (True, time.time())
                 except HostUnreachable:
                     failed = True
+                    self._host_health[name] = (False, time.time())
                     log.warning("ssh host %s unreachable; will retry", name)
                 except Exception:
                     failed = True
@@ -1313,6 +1317,48 @@ class Controller:
     def get_agent(self, target: str) -> Harness:
         return self.agents.resolve(target)
 
+    def _agent_host_state(self, harness: Harness) -> str | None:
+        """``ok`` / ``unreachable`` / ``reconnecting`` for a remote agent (None = local).
+
+        Passive: derived from the last SSH outcome the backend saw and the tunnel
+        supervisor, never from a new network call (the listing is polled).
+        """
+        host = self._agent_hosts.get(harness.agent_id)
+        if not host:
+            return None
+        if harness.session.backend.meta().get("host_unreachable"):
+            return "unreachable"
+        if self.remote_links.states().get(host) == "reconnecting":
+            return "reconnecting"
+        return "ok"
+
+    def host_status(self) -> list[dict[str, Any]]:
+        """Configured hosts with what is *observed* about them (``unknown`` if nothing)."""
+        links = self.remote_links.states()
+        out: list[dict[str, Any]] = []
+        for name, cfg in settings.hosts().items():
+            mine = [h for h in self.agents.all() if self._agent_hosts.get(h.agent_id) == name]
+            states = [self._agent_host_state(h) for h in mine]
+            health = self._host_health.get(name)
+            tunnel = links.get(name) if cfg.get("tunnel") else None
+            if "unreachable" in states:
+                state = "unreachable"
+            elif tunnel == "reconnecting" or "reconnecting" in states:
+                state = "reconnecting"
+            elif mine:
+                state = "ok"
+            elif health is not None:
+                state = "ok" if health[0] else "unreachable"
+            else:
+                state = "unknown"
+            out.append({
+                "name": name, "ssh": cfg["ssh"], "port": cfg["port"],
+                "tunnel": bool(cfg.get("tunnel")), "tunnel_state": tunnel,
+                "state": state, "agents": len(mine),
+                "checked_at": health[1] if health else None,
+            })
+        return out
+
     def list_agents(self) -> list[dict[str, Any]]:
         return [self.agent_summary(harness) for harness in self.agents.all()]
 
@@ -1499,6 +1545,10 @@ class Controller:
         warning = self._worktree_warnings.get(harness.agent_id)
         if warning:
             summary["worktree_warning"] = warning
+        host = self._agent_hosts.get(harness.agent_id)
+        if host:
+            summary["host"] = host
+            summary["host_state"] = self._agent_host_state(harness)
         return summary
 
     _ACTIVITY_TTL = 1.5
