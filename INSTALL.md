@@ -156,6 +156,51 @@ Antes del primer uso en una carpeta nueva, abre `claude` una vez ahí y acepta e
 **Seguridad:** quien tenga el token puede crear y operar agentes en esa máquina (ejecutan código con tu
 usuario). Trátalo como una contraseña; rótalo si se filtra y usa `crewhall off` cuando no lo necesites.
 
+## Hosts remotos por SSH
+
+El daemon local puede crear y operar agentes cuyo TUI corre en `tmux` dentro de
+**otro equipo**, alcanzado por SSH. Los agentes remotos aparecen en el mismo
+registro que los locales (`crewhall agent list`) y `host` se expone en `SessionInfo`.
+
+Requisitos en el servidor remoto (no los instala crewhall):
+
+- `tmux` instalado.
+- `claude`/`opencode`/`codex` instalados **con el login ya hecho** en ese equipo.
+- Un **usuario dedicado no-root** (nunca root) con su `~/.ssh/authorized_keys`.
+- Una **clave dedicada** para crewhall (no reutilices tu clave personal).
+- El host key del servidor **fijado de antemano** en el `known_hosts` local: la
+  verificación es estricta (`StrictHostKeyChecking=yes`).
+
+Configura cada host en `~/.config/crewhall/settings.json` (0600). Por defecto no
+hay ninguno (cerrado):
+
+```json
+{
+  "hosts": {
+    "prod1": {
+      "ssh": "deploy@prod1",
+      "port": 22,
+      "identity": "~/.ssh/id_crewhall",
+      "known_hosts": "~/.ssh/known_hosts",
+      "tmux_socket": "crewhall"
+    }
+  }
+}
+```
+
+`identity` y `known_hosts` deben ser ficheros regulares del usuario; la clave de
+identidad, con permisos 0600/0400. Se rechazan claves desconocidas, destinos con
+espacios o metacaracteres y cualquier opción SSH arbitraria.
+
+```bash
+crewhall agent create --kind opencode --name reviewer --host prod1 --wait
+crewhall agent capture reviewer --recent
+crewhall attach reviewer
+```
+
+Si el host se cae, el agente se muestra como `host_unreachable` (en `meta`), **no**
+pasa a `exited`, y se reconecta solo cuando el host vuelve.
+
 ## Actualizar y desinstalar
 
 ```bash

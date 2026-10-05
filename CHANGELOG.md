@@ -5,6 +5,44 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.59.0] — 2026-10-05
+
+_Agentes en tmux sobre otro equipo, alcanzado por SSH._
+
+Threat model (hosts remotos por SSH):
+
+- Un host configurado **no puede debilitar el transporte**: las opciones SSH son
+  fijas (`BatchMode`, `StrictHostKeyChecking=yes`, `ForwardAgent/X11=no`,
+  `ClearAllForwardings`, timeouts cortos, `ControlMaster` en un directorio privado
+  0700). Nunca se acepta una opción SSH arbitraria del usuario.
+- El destino, el `cwd` remoto, el socket de tmux y cada argumento se pasan como
+  elementos de `argv` y se re-citan con `shlex` para la shell remota: un nombre de
+  host, ruta o agente con metacaracteres no puede inyectar un segundo comando en
+  ninguno de los dos lados.
+- La clave de identidad debe ser un fichero regular del usuario con permisos
+  0600/0400; el `known_hosts` fijado es opcional pero se valida (regular, del
+  usuario, no escribible por otros). La verificación de host sigue siendo estricta.
+- Los secretos del agente viajan por el **stdin** de SSH a un fichero temporal
+  remoto 0600 que se sourcea y se borra antes del `exec`: no aparecen en `ps`
+  local ni remoto.
+- Un fallo de SSH (código 255) se expone como `host_unreachable` y **nunca** marca
+  al agente como `exited`; la sesión se reintenta y se recupera sola.
+
+- **Nuevo backend `ssh-tmux`**: `TmuxBackend` sobre SSH, con las mismas operaciones
+  (start/write/capture/resize/terminate/adopt). Una sesión remota se namespacea
+  (`<host>__<session_id>`) para no chocar nunca con una local.
+- **Nueva tabla `hosts`** en `settings.json` (cerrada por defecto): `ssh`, `port`,
+  `identity`, `known_hosts`, `tmux_socket`. Validación estricta que rechaza
+  espacios, `-` inicial, metacaracteres de shell, saltos de línea, claves
+  desconocidas y valores inseguros.
+- Specs y teams aceptan `host`; con host el backend es siempre `ssh-tmux` (`pty` se
+  rechaza) y `cwd` es una ruta remota (no se expande en local).
+- `SessionInfo`/`to_dict` ganan `host`; el daemon readopta las sesiones remotas por
+  cada host configurado en un hilo aparte, tolerando hosts caídos sin bloquear el
+  arranque.
+- `crewhall agent create --host <name>` y `crewhall attach` operan agentes remotos;
+  sin dependencias nuevas (`ssh`/`tmux` del sistema).
+
 ## [0.58.0] — 2026-10-05
 
 _The Python package is renamed to match the product._

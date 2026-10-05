@@ -35,6 +35,8 @@ class SessionSpec:
     shell: bool = False
     name: str | None = None
     shell_path: str = "/bin/bash"
+    # Name of a configured SSH host (see ``settings.hosts``); None means local.
+    host: str | None = None
 
     def argv(self) -> list[str]:
         if isinstance(self.command, str):
@@ -57,6 +59,7 @@ class SessionSpec:
             "rows": self.rows,
             "shell": self.shell,
             "name": self.name,
+            "host": self.host,
         }
 
 
@@ -92,6 +95,7 @@ class SessionInfo:
     last_input_at: float | None = None
     last_output_at: float | None = None
     exited_at: float | None = None
+    host: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -110,6 +114,7 @@ class SessionInfo:
             "last_input_at": self.last_input_at,
             "last_output_at": self.last_output_at,
             "exited_at": self.exited_at,
+            "host": self.host,
             "meta": self.meta,
         }
 

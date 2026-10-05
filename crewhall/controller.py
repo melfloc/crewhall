@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import secrets
 import threading
@@ -12,7 +13,8 @@ from typing import Any
 from . import brand, hooks, paths, settings
 from .usage import parse_usage
 from . import activity as act
-from .backends import get_backend
+from .backends import HostUnreachable, get_backend
+from .backends import ssh_tmux as ssh_tmux_backend
 from .backends import tmux as tmux_backend
 from .control_files import ensure_managed_section
 from .harness import AgentInfo, Harness, HarnessError, get_harness
@@ -25,6 +27,8 @@ from .persistence import StateStore
 from .session import InteractiveSession
 from .team import Team, TeamRegistry
 from .types import SessionSpec, Status, new_session_id, parse_agent_args
+
+log = logging.getLogger("crewhall.controller")
 
 
 
@@ -131,6 +135,8 @@ class Controller:
         # Extra CLI arguments per agent (e.g. ``--agent reviewer``), kept so a
         # restored/restarted agent is relaunched with the same command line.
         self._agent_args: dict[str, list[str]] = {}
+        # Configured SSH host per agent (None = local), kept for restart/restore.
+        self._agent_hosts: dict[str, str | None] = {}
         # Agent lifecycle hooks (Claude ``--settings``): an exact turn-complete
         # signal pushed to the daemon instead of guessed from the screen.
         self.hooks_enabled = settings.get("agents.hooks")
@@ -685,6 +691,10 @@ class Controller:
             pass
 
     def _adopt_tmux(self) -> None:
+        self._adopt_local_tmux()
+        self._start_remote_adopter()
+
+    def _adopt_local_tmux(self) -> None:
         for meta in tmux_backend.existing_sessions():
             if meta.get("backend") != "tmux":
                 continue
@@ -708,10 +718,73 @@ class Controller:
                 continue
             self.registry.add(session)
 
+    # -- remote hosts ------------------------------------------------------
+    # Adoption runs off the startup path: a host that is down must never delay
+    # the daemon. Each host is retried in the background until it answers.
+    REMOTE_ADOPT_RETRY = 30.0
+    REMOTE_ADOPT_IDLE = 120.0
+
+    def _start_remote_adopter(self) -> None:
+        if not settings.hosts():
+            return
+        stop = threading.Event()
+        self._remote_adopt_stop = stop
+        threading.Thread(
+            target=self._remote_adopt_loop, args=(stop,), name="ssh-adopt", daemon=True
+        ).start()
+
+    def _remote_adopt_loop(self, stop: threading.Event) -> None:
+        delay = 0.0
+        while not stop.is_set():
+            if delay:
+                stop.wait(delay)
+                if stop.is_set():
+                    return
+            failed = False
+            for name in list(settings.hosts()):
+                try:
+                    self._adopt_remote_host(name, settings.host(name))
+                except HostUnreachable:
+                    failed = True
+                    log.warning("ssh host %s unreachable; will retry", name)
+                except Exception:
+                    failed = True
+                    log.exception("could not adopt sessions on ssh host %s", name)
+            delay = self.REMOTE_ADOPT_RETRY if failed else self.REMOTE_ADOPT_IDLE
+
+    def _adopt_remote_host(self, name: str, cfg: dict[str, Any]) -> None:
+        for meta in ssh_tmux_backend.existing_sessions(cfg):
+            if meta.get("backend") != "tmux":
+                continue
+            sid = meta["session_id"]
+            try:
+                self.registry.resolve(sid)
+                continue
+            except SessionNotFound:
+                pass
+            created = meta.get("created_at")
+            try:
+                created_f = float(created) if created else None
+            except ValueError:
+                created_f = None
+            spec = SessionSpec(command=meta.get("command") or sid, host=name)
+            try:
+                session = InteractiveSession.adopt(
+                    ssh_tmux_backend.SshTmuxBackend(cfg), spec, sid, created_at=created_f
+                )
+            except Exception:
+                continue
+            self.registry.add(session)
+
+    def _backend_for(self, backend_name: str | None, host_name: str | None) -> Any:
+        if host_name:
+            return get_backend("ssh-tmux", host=settings.host(host_name))
+        return get_backend(backend_name)
+
     def create(self, spec: SessionSpec, backend_name: str | None = None) -> InteractiveSession:
-        if not spec.cwd:
+        if not spec.cwd and not spec.host:
             spec.cwd = os.getcwd()
-        session = InteractiveSession(get_backend(backend_name), spec)
+        session = InteractiveSession(self._backend_for(backend_name, spec.host), spec)
         session.start()
         self.registry.add(session)
         return session
@@ -753,13 +826,19 @@ class Controller:
         created_at: float | None = None,
         args: Any = None,
         workspace_mode: str | None = None,
+        host: str | None = None,
     ) -> Harness:
         harness_cls = get_harness(kind)
         if not settings.provider_enabled(kind):
             raise ValueError(f"provider {kind!r} is disabled in Settings")
         given = parse_agent_args(args)
         extra_args = [*settings.provider_args(kind, given), *given]  # provider defaults first
-        if backend is None and settings.get("agents.default_backend") != "auto":
+        if host:
+            settings.host(host)  # reject an unknown host before doing any work
+            if backend == "pty":
+                raise ValueError(f"the pty backend cannot reach the remote host {host!r}")
+            backend = "ssh-tmux"
+        elif backend is None and settings.get("agents.default_backend") != "auto":
             backend = settings.get("agents.default_backend")
         env = {**settings.provider_env(kind), **(env or {})}
         conversation_id = self._new_conversation_id(kind, extra_args)
@@ -767,7 +846,7 @@ class Controller:
         mcp_args, mcp_file = self._mcp_for(kind, harness_cls)
         if name and any(h.name == name for h in self.agents.all()):
             raise ValueError(f'agent name "{name}" already exists')
-        cwd = self.resolve_cwd(cwd, team)
+        cwd = cwd if host else self.resolve_cwd(cwd, team)
         session_id = agent_id or new_session_id()
         agent_name = name or session_id
         mode = workspace_mode
@@ -777,7 +856,7 @@ class Controller:
                 mode = getattr(t, "workspace_mode", None)
             except Exception:  # noqa: BLE001
                 mode = None
-        if mode == "worktree":
+        if mode == "worktree" and not host:
             cwd = self._make_worktree(session_id, agent_name, team, cwd)
         agent_env = self._build_agent_env(session_id, agent_name, [], env)
         if link:
@@ -791,8 +870,11 @@ class Controller:
             cols=cols,
             rows=rows,
             name=name,
+            host=host,
         )
-        session = InteractiveSession(get_backend(backend), spec, session_id=session_id)
+        session = InteractiveSession(
+            self._backend_for(backend, host), spec, session_id=session_id
+        )
         if created_at is not None:
             session.created_at = created_at
         session.start()
@@ -806,7 +888,9 @@ class Controller:
             self._mcp_files[session_id] = mcp_file
         self._base_env.setdefault(session_id, dict(env or {}))
         self._agent_args[session_id] = extra_args
-        self._ensure_control_file(cwd, kind)
+        self._agent_hosts[session_id] = host
+        if not host:
+            self._ensure_control_file(cwd, kind)
         if team:
             try:
                 self.teams.add_member(team, session_id)
@@ -871,16 +955,19 @@ class Controller:
         harness_cls = get_harness(agent["kind"])
         extra_args = parse_agent_args(agent.get("args"))
         self._agent_args[agent_id] = extra_args
+        host = agent.get("host")
+        self._agent_hosts[agent_id] = host
         spec = SessionSpec(
             command=self._launch_command(agent["kind"], extra_args),
-            cwd=agent.get("cwd") or os.getcwd(),
+            cwd=agent.get("cwd") or (None if host else os.getcwd()),
             env=None,
             cols=int(agent.get("cols", 120)),
             rows=int(agent.get("rows", 40)),
             name=agent.get("name"),
+            host=host,
         )
         session = InteractiveSession(
-            get_backend(agent.get("backend")), spec, session_id=agent_id
+            self._backend_for(agent.get("backend"), host), spec, session_id=agent_id
         )
         session.created_at = float(agent.get("created_at") or session.created_at)
         session._status = Status.EXITED
@@ -913,6 +1000,7 @@ class Controller:
             link = self._new_opencode_link(kind, self._agent_args.get(agent_id, []))
             spec = harness.session.spec
             backend_name = harness.session.backend.name
+            host = self._agent_hosts.get(agent_id)
             try:
                 harness.session.backend.close()
             except Exception:
@@ -934,9 +1022,10 @@ class Controller:
                 cols=spec.cols,
                 rows=spec.rows,
                 name=harness.name,
+                host=host,
             )
             session = InteractiveSession(
-                get_backend(backend_name), new_spec, session_id=agent_id
+                self._backend_for(backend_name, host), new_spec, session_id=agent_id
             )
             session.start()
             self.registry.add(session)
@@ -1272,6 +1361,7 @@ class Controller:
                 cwd=entry.get("cwd"),
                 team=team.team_id,
                 args=entry.get("args"),
+                host=entry.get("host"),
             )
             created.append(agent_name)
         return {
@@ -1304,7 +1394,8 @@ class Controller:
                     continue
                 info = h.info()
                 agents.append({"name": info.name or info.agent_id, "kind": info.kind, "backend": info.backend,
-                               "cwd": info.cwd, "args": list(self._agent_args.get(agent_id, []))})
+                               "cwd": info.cwd, "args": list(self._agent_args.get(agent_id, [])),
+                               "host": self._agent_hosts.get(agent_id)})
             out.append({"name": team.name, "workspace": team.workspace,
                         "workspace_mode": getattr(team, "workspace_mode", None), "agents": agents})
         return out

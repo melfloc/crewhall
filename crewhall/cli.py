@@ -184,16 +184,25 @@ def cmd_events(args: argparse.Namespace) -> int:
 def cmd_attach(args: argparse.Namespace) -> int:
     client = _client(args)
     info = client.call("attach_info", target=args.target)["session"]
-    if info.get("backend") != "tmux":
+    backend = info.get("backend")
+    if backend not in ("tmux", "ssh-tmux"):
         print(
-            f"session {info['session_id']} uses backend '{info['backend']}', "
+            f"session {info['session_id']} uses backend '{backend}', "
             "which cannot be attached. Use 'capture'/'read-until' instead.",
             file=sys.stderr,
         )
         return 2
-    from .backends.tmux import TmuxBackend
+    tmux_name = (info.get("meta") or {}).get("tmux_session") or info["session_id"]
+    host = info.get("host")
+    if host:
+        from . import settings
+        from .backends.ssh_tmux import SshTmuxBackend
 
-    cmd = TmuxBackend.attach_command(info["session_id"])
+        cmd = SshTmuxBackend.attach_command(settings.host(host), tmux_name)
+    else:
+        from .backends.tmux import TmuxBackend
+
+        cmd = TmuxBackend.attach_command(tmux_name)
     return subprocess.call(cmd)
 
 
@@ -648,7 +657,7 @@ def cmd_agent_create(args: argparse.Namespace) -> int:
 
     entry = {
         "profile": args.profile, "kind": args.kind, "args": args.args,
-        "cwd": args.cwd, "backend": args.backend,
+        "cwd": args.cwd, "backend": args.backend, "host": getattr(args, "host", None),
     }
     try:
         entry = apply_profile(entry, load_profiles())
@@ -668,6 +677,7 @@ def cmd_agent_create(args: argparse.Namespace) -> int:
         wait_ready=args.wait,
         timeout=args.timeout,
         args=args.args,
+        host=entry.get("host"),
     )
     _print_agent(resp["agent"])
     return 0
@@ -1028,7 +1038,11 @@ def cmd_demo(args: argparse.Namespace) -> int:
     from .backends import get_backend
 
     backend_name = args.backend
-    for name in [backend_name] if backend_name != "all" else available():
+    if backend_name == "all":
+        names = [b for b in available() if b != "ssh-tmux"]
+    else:
+        names = [backend_name]
+    for name in names:
         print(f"=== backend: {name} ===")
         session = None
         try:
@@ -1171,6 +1185,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="defaults from ~/.config/crewhall/profiles.toml")
     a.add_argument("-b", "--backend", default=None, help="backend (default: auto)")
     a.add_argument("-c", "--cwd")
+    a.add_argument("--host", default=None,
+                   help="run the agent in tmux on a configured SSH host (settings.json hosts)")
     a.add_argument("--team", default=None, help="team to join (inherits its workspace)")
     a.add_argument("--cols", type=int, default=120)
     a.add_argument("--rows", type=int, default=40)

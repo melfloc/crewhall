@@ -79,6 +79,7 @@ class StateStore:
                     "cols": spec.cols,
                     "rows": spec.rows,
                     "args": list(controller._agent_args.get(harness.agent_id, [])),
+                    "host": getattr(controller, "_agent_hosts", {}).get(harness.agent_id),
                     "conversation_id": harness.conversation_id,
                     # user-provided env only; identity/secret vars are omitted
                     "env": dict(controller._base_env.get(harness.agent_id) or {}),

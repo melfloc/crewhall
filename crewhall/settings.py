@@ -14,15 +14,20 @@ default arguments / model and extra environment variables.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import shlex
 import shutil
+import stat
 import subprocess
 import threading
 import time
 from typing import Any
 
 from . import brand
+
+log = logging.getLogger("crewhall.settings")
 
 FILENAME = "settings.json"
 SENSITIVE = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL")
@@ -50,7 +55,9 @@ def _kinds() -> list[str]:
 def _backends() -> list[str]:
     from .backends import available
 
-    return ["auto", *available()]
+    # ssh-tmux is only valid together with a configured host, so it is not a
+    # selectable *default* backend.
+    return ["auto", *(b for b in available() if b != "ssh-tmux")]
 
 
 # (key, group, type, default, label, help, extras)
@@ -213,6 +220,108 @@ def _provider_value(field: str, value: Any, kind: str) -> Any:
     raise SettingsError(f"unknown provider setting {key!r}")
 
 
+# -- remote SSH hosts -----------------------------------------------------------
+# A deliberately tiny, fixed schema: crewhall builds the ``ssh`` argv itself and
+# never accepts user-supplied SSH options, so a host entry cannot weaken host-key
+# checking, enable agent forwarding or inject shell metacharacters.
+HOST_KEYS = {"ssh", "port", "identity", "tmux_socket", "known_hosts"}
+_HOST_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_TMUX_SOCKET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_SSH_BAD_CHARS = set(" \t\r\n\0;|&$`\"'\\")
+
+
+def _validate_ssh_destination(value: Any) -> str:
+    if not isinstance(value, str) or not value or len(value) > 255:
+        raise SettingsError("hosts.*.ssh: a destination like user@host is required")
+    if value != value.strip():
+        raise SettingsError("hosts.*.ssh: no leading or trailing spaces")
+    if value.startswith("-"):
+        raise SettingsError("hosts.*.ssh: must not start with '-'")
+    if any(c in _SSH_BAD_CHARS for c in value):
+        raise SettingsError("hosts.*.ssh: invalid characters in destination")
+    return value
+
+
+def _validate_identity(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or "\0" in value or "\n" in value or len(value) > 4096:
+        raise SettingsError("hosts.*.identity: a single path expected")
+    path = os.path.expanduser(value)
+    if not os.path.isabs(path):
+        raise SettingsError("hosts.*.identity: use an absolute path or ~/...")
+    if os.path.islink(path):
+        raise SettingsError("hosts.*.identity: must not be a symlink")
+    try:
+        st = os.stat(path)
+    except OSError:
+        raise SettingsError(f"hosts.*.identity: {path!r} does not exist") from None
+    if not stat.S_ISREG(st.st_mode):
+        raise SettingsError("hosts.*.identity: must be a regular file")
+    if st.st_uid != os.getuid():
+        raise SettingsError("hosts.*.identity: must be owned by the current user")
+    if stat.S_IMODE(st.st_mode) not in (0o600, 0o400):
+        raise SettingsError("hosts.*.identity: permissions must be 0600 or 0400")
+    return path
+
+
+def _validate_known_hosts(value: Any) -> str | None:
+    """An optional per-host known_hosts file (host-key checking stays strict)."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or "\0" in value or "\n" in value or len(value) > 4096:
+        raise SettingsError("hosts.*.known_hosts: a single path expected")
+    path = os.path.expanduser(value)
+    if not os.path.isabs(path):
+        raise SettingsError("hosts.*.known_hosts: use an absolute path or ~/...")
+    if os.path.islink(path):
+        raise SettingsError("hosts.*.known_hosts: must not be a symlink")
+    try:
+        st = os.stat(path)
+    except OSError:
+        raise SettingsError(f"hosts.*.known_hosts: {path!r} does not exist") from None
+    if not stat.S_ISREG(st.st_mode):
+        raise SettingsError("hosts.*.known_hosts: must be a regular file")
+    if st.st_uid != os.getuid():
+        raise SettingsError("hosts.*.known_hosts: must be owned by the current user")
+    if stat.S_IMODE(st.st_mode) & 0o022:
+        raise SettingsError("hosts.*.known_hosts: must not be writable by others")
+    return path
+
+
+def _validate_host(name: Any, body: Any) -> dict[str, Any]:
+    if not isinstance(name, str) or not _HOST_NAME_RE.match(name):
+        raise SettingsError(f"hosts: invalid host name {name!r} (use [A-Za-z0-9_.-])")
+    if not isinstance(body, dict):
+        raise SettingsError(f"hosts.{name}: a table is required")
+    unknown = set(body) - HOST_KEYS
+    if unknown:
+        raise SettingsError(f"hosts.{name}: unknown keys {sorted(unknown)}")
+    destination = _validate_ssh_destination(body.get("ssh"))
+    port = body.get("port", 22)
+    if isinstance(port, bool) or not isinstance(port, int) or not (1 <= port <= 65535):
+        raise SettingsError(f"hosts.{name}.port: a port between 1 and 65535 is required")
+    identity = _validate_identity(body.get("identity"))
+    known_hosts = _validate_known_hosts(body.get("known_hosts"))
+    tmux_socket = body.get("tmux_socket") or "crewhall"
+    if not isinstance(tmux_socket, str) or not _TMUX_SOCKET_RE.match(tmux_socket):
+        raise SettingsError(f"hosts.{name}.tmux_socket: an invalid tmux socket name")
+    return {"ssh": destination, "port": port, "identity": identity,
+            "known_hosts": known_hosts, "tmux_socket": tmux_socket}
+
+
+def hosts() -> dict[str, dict[str, Any]]:
+    """Validated remote hosts (empty unless explicitly configured)."""
+    return {name: dict(cfg) for name, cfg in load().get("hosts", {}).items()}
+
+
+def host(name: str) -> dict[str, Any]:
+    cfg = hosts().get(name)
+    if cfg is None:
+        raise SettingsError(f"unknown host {name!r}")
+    return {**cfg, "name": name}
+
+
 def _normalize(raw: Any) -> dict[str, Any]:
     """Valid values only; anything unknown or out of range falls back to its default."""
     data: dict[str, Any] = {}
@@ -236,6 +345,13 @@ def _normalize(raw: Any) -> dict[str, Any]:
                     data.setdefault("providers", {}).setdefault(kind, {})[field] = _provider_value(field, node[field], kind)
                 except SettingsError:
                     pass
+    hosts_raw = raw.get("hosts")
+    if isinstance(hosts_raw, dict):
+        for name, body in hosts_raw.items():
+            try:
+                data.setdefault("hosts", {})[name] = _validate_host(name, body)
+            except SettingsError as exc:
+                log.warning("ignoring invalid host setting: %s", exc)
     return data
 
 
@@ -463,7 +579,8 @@ def describe() -> dict[str, Any]:
                           "risks": provider_risks(kind),
                           "mcp_supported": get_harness(kind).mcp_supported})
     return {"items": items, "providers": providers, "path": path(),
-            "exists": os.path.exists(path()), "warnings": warnings()}
+            "exists": os.path.exists(path()), "warnings": warnings(),
+            "hosts": hosts()}
 
 
 def patch(changes: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
@@ -486,6 +603,13 @@ def patch(changes: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
     with _LOCK:
         data = json.loads(json.dumps(load()))
         for key, value in changes.items():
+            if str(key) == "hosts":
+                if not isinstance(value, dict):
+                    raise SettingsError("hosts: a table of host entries is required")
+                data["hosts"] = {
+                    name: _validate_host(name, body) for name, body in value.items()
+                }
+                continue
             parts = str(key).split(".")
             if parts[0] == "providers" and len(parts) == 3 and parts[1] in _kinds():
                 _, kind, field = parts

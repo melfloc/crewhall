@@ -297,6 +297,7 @@ class Server:
             rows=_dim(request.get("rows", 24), "rows"),
             shell=bool(request.get("shell", False)),
             name=request.get("name"),
+            host=request.get("host"),
         )
         session = self.controller.create(spec, request.get("backend"))
         return {"session": self.controller.summary(session)}
@@ -379,6 +380,7 @@ class Server:
             timeout=float(request.get("timeout", 30.0)),
             args=request.get("args"),
             workspace_mode=request.get("workspace_mode"),
+            host=request.get("host"),
         )
         return {"agent": self.controller.agent_summary(harness)}
 
@@ -781,7 +783,7 @@ class Server:
     def _op_attach_info(self, request: dict[str, Any]) -> dict[str, Any]:
         session = self.controller.get(request["target"])
         info = session.info().to_dict()
-        info["attachable"] = session.backend.name == "tmux"
+        info["attachable"] = session.backend.name in ("tmux", "ssh-tmux")
         return {"session": info}
 
     def _op_shutdown(self, request: dict[str, Any]) -> dict[str, Any]:

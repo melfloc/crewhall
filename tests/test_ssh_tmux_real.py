@@ -1,0 +1,311 @@
+"""End-to-end ssh-tmux tests against an ephemeral sshd on loopback.
+
+No real host is ever contacted: a throwaway ``sshd`` listens on a high port on
+127.0.0.1 with its own host key, client key and known_hosts, and the agent is a
+plain ``/bin/bash`` (never a real CLI agent), so the run spends no credits.
+"""
+from __future__ import annotations
+
+import getpass
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import tempfile
+import time
+import unittest
+from unittest import mock
+
+from crewhall import settings
+from crewhall.backends import ssh_tmux
+from crewhall.controller import Controller
+from crewhall.session import InteractiveSession
+from crewhall.types import SessionSpec
+
+HAVE = all(shutil.which(b) for b in ("ssh", "sshd", "ssh-keygen", "tmux"))
+SSHD = shutil.which("sshd") or "sshd"
+HOST_ALIAS = "loop"
+REMOTE_SOCKET = f"at_ssh_{os.getpid()}"
+
+
+def _free_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def _wait_port(port: int, timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
+def _children(pid: int) -> list[int]:
+    kids: list[int] = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", encoding="utf-8") as fh:
+                stat = fh.read()
+            ppid = int(stat[stat.rfind(")") + 2:].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        if ppid == pid:
+            kids.append(int(entry))
+    return kids
+
+
+def _kill_tree(pid: int) -> None:
+    for child in _children(pid):
+        _kill_tree(child)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+
+
+class SshdHarness:
+    """A minimal, disposable sshd (current user, key auth, loopback only)."""
+
+    def __init__(self) -> None:
+        self.dir = tempfile.mkdtemp(prefix="ati-sshd-", dir="/tmp")
+        self.port = _free_port()
+        self.user = getpass.getuser()
+        self.hostkey = os.path.join(self.dir, "hostkey")
+        self.clientkey = os.path.join(self.dir, "clientkey")
+        self.known_hosts = os.path.join(self.dir, "known_hosts")
+        self.config = os.path.join(self.dir, "sshd_config")
+        self.log = os.path.join(self.dir, "sshd.log")
+        self.pidfile = os.path.join(self.dir, "sshd.pid")
+        self._proc: subprocess.Popen | None = None
+        self._build()
+
+    def _run(self, *args: str) -> None:
+        subprocess.run(args, check=True, capture_output=True)
+
+    def _build(self) -> None:
+        self._run("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", self.hostkey)
+        self._run("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", self.clientkey)
+        os.chmod(self.clientkey, 0o600)
+        authorized = os.path.join(self.dir, "authorized_keys")
+        shutil.copyfile(self.clientkey + ".pub", authorized)
+        os.chmod(authorized, 0o600)
+        with open(self.known_hosts, "w", encoding="utf-8") as fh:
+            with open(self.hostkey + ".pub", encoding="utf-8") as pub:
+                fh.write(f"[127.0.0.1]:{self.port} {pub.read().strip()}\n")
+        os.chmod(self.known_hosts, 0o600)
+        with open(self.config, "w", encoding="utf-8") as fh:
+            fh.write(
+                f"Port {self.port}\n"
+                "ListenAddress 127.0.0.1\n"
+                f"HostKey {self.hostkey}\n"
+                f"PidFile {self.pidfile}\n"
+                f"AuthorizedKeysFile {authorized}\n"
+                "StrictModes no\n"
+                "PasswordAuthentication no\n"
+                "KbdInteractiveAuthentication no\n"
+                "PubkeyAuthentication yes\n"
+                "UsePAM no\n"
+                "PermitRootLogin no\n"
+                "PrintMotd no\n"
+                "LogLevel ERROR\n"
+            )
+
+    def start(self) -> None:
+        self._proc = subprocess.Popen(
+            [SSHD, "-f", self.config, "-E", self.log],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if not _wait_port(self.port):
+            raise RuntimeError("ephemeral sshd did not start")
+
+    def stop(self) -> None:
+        if self._proc is not None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+            self._proc = None
+        pid: int | None = None
+        if os.path.exists(self.pidfile):
+            try:
+                with open(self.pidfile, encoding="utf-8") as fh:
+                    pid = int(fh.read().strip())
+            except (OSError, ValueError):
+                pid = None
+        if pid is not None:
+            # Killing the listener alone leaves established sshd-session
+            # children (and their ControlMaster) alive: kill the whole tree so
+            # the "host" really goes away.
+            _kill_tree(pid)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", self.port), timeout=0.2):
+                    time.sleep(0.1)
+            except OSError:
+                return
+
+    def cleanup(self) -> None:
+        self.stop()
+        subprocess.run(["tmux", "-L", REMOTE_SOCKET, "kill-server"],
+                       capture_output=True)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def host_config(self) -> dict:
+        return {
+            "ssh": f"{self.user}@127.0.0.1",
+            "port": self.port,
+            "identity": self.clientkey,
+            "known_hosts": self.known_hosts,
+            "tmux_socket": REMOTE_SOCKET,
+        }
+
+
+@unittest.skipUnless(HAVE, "ssh/sshd/ssh-keygen/tmux not installed")
+class SshTmuxRealTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.sshd = SshdHarness()
+        cls.sshd.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.sshd.cleanup()
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="ati-sshcfg-", dir="/tmp")
+        env = mock.patch.dict(os.environ, {
+            "XDG_CONFIG_HOME": os.path.join(self.root, "config"),
+            "XDG_STATE_HOME": os.path.join(self.root, "state"),
+            "XDG_RUNTIME_DIR": os.path.join(self.root, "run"),
+        })
+        env.start(); self.addCleanup(env.stop)
+        os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
+        settings.patch({"hosts": {HOST_ALIAS: self.sshd.host_config()}})
+        self.controller = Controller(adopt=False, persist=False)
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+
+    def _create(self, **over) -> InteractiveSession:
+        spec = SessionSpec(command=["/bin/bash"], cwd="/tmp", cols=80, rows=24,
+                           host=HOST_ALIAS, **over)
+        session = self.controller.create(spec)
+        self.addCleanup(session.close)
+        return session
+
+    def _sh(self, command: str) -> str:
+        proc = ssh_tmux.SshTmuxBackend(self.sshd.host_config())._ssh_run(command)
+        return proc.stdout
+
+    def test_roundtrip_write_capture_resize_terminate(self):
+        session = self._create()
+        self.assertEqual(session.info().host, HOST_ALIAS)
+        self.assertEqual(session.info().backend, "ssh-tmux")
+        session.write("echo MARKER_$((6*7))")
+        session.send_enter()
+        self.assertIn("MARKER_42", session.read_until("MARKER_42", timeout=15))
+
+        session.resize(100, 33)
+        session.write("stty size")
+        session.send_enter()
+        self.assertIn("33 100", session.read_until("33 100", timeout=15))
+
+        session.terminate()
+        deadline = time.monotonic() + 10
+        while session.status.alive and time.monotonic() < deadline:
+            session.poll(); time.sleep(0.1)
+        self.assertFalse(session.status.alive)
+
+    def test_host_down_is_unreachable_not_exited_and_recovers(self):
+        session = self._create()
+        session.write("echo BEFORE_DOWN")
+        session.send_enter()
+        self.assertIn("BEFORE_DOWN", session.read_until("BEFORE_DOWN", timeout=15))
+
+        self.sshd.stop()
+        session.poll()
+        self.assertTrue(session.status.alive, "a down host must not mark the agent exited")
+        self.assertTrue(session.info().meta.get("host_unreachable"))
+        self.assertEqual(session.info().host, HOST_ALIAS)
+
+        self.sshd.start()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            session.poll()
+            if not session.info().meta.get("host_unreachable"):
+                break
+            time.sleep(0.3)
+        self.assertFalse(session.info().meta.get("host_unreachable"))
+        self.assertTrue(session.status.alive)
+        session.write("echo AFTER_UP")
+        session.send_enter()
+        self.assertIn("AFTER_UP", session.read_until("AFTER_UP", timeout=15))
+
+    def test_secret_env_is_applied_but_never_in_argv_or_ps(self):
+        secret = "hunter2_TOPSECRET"
+        session = self._create(env={"TOPSECRET": secret})
+        session.write('echo "APPLIED=$TOPSECRET"')
+        session.send_enter()
+        self.assertIn(f"APPLIED={secret}", session.read_until(f"APPLIED={secret}", timeout=15))
+
+        remote_ps = self._sh("ps -eo args")
+        self.assertNotIn(secret, remote_ps)
+        local_ps = self._local_process_table()
+        self.assertNotIn(secret, local_ps)
+
+    def test_hostile_values_are_literal_not_executed(self):
+        payload = "$(touch /tmp/ati-pwned-inj)"
+        session = self._create(env={"PAYLOAD": payload})
+        session.write('printf "VALUE=%s\\n" "$PAYLOAD"')
+        session.send_enter()
+        self.assertIn(f"VALUE={payload}", session.read_until(f"VALUE={payload}", timeout=15))
+        time.sleep(0.3)
+        self.assertFalse(os.path.exists("/tmp/ati-pwned-inj"))
+
+    def test_remote_sessions_are_readopted(self):
+        session = self._create()
+        sid = session.session_id
+        session.write("echo ADOPT_ME")
+        session.send_enter()
+        session.read_until("ADOPT_ME", timeout=15)
+
+        second = Controller(adopt=True, persist=False)
+        self.addCleanup(second._remote_adopt_stop.set)
+        deadline = time.monotonic() + 15
+        adopted = None
+        while time.monotonic() < deadline:
+            try:
+                adopted = second.registry.resolve(sid)
+                break
+            except Exception:  # noqa: BLE001 - not adopted yet
+                time.sleep(0.2)
+        self.assertIsNotNone(adopted, "remote session was not readopted")
+        self.assertEqual(adopted.info().host, HOST_ALIAS)
+        self.assertEqual(adopted.backend.name, "ssh-tmux")
+
+    def _local_process_table(self) -> str:
+        out = []
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/cmdline", "rb") as fh:
+                    out.append(fh.read().replace(b"\0", b" ").decode("utf-8", "replace"))
+            except OSError:
+                continue
+        return "\n".join(out)
+
+
+if __name__ == "__main__":
+    unittest.main()

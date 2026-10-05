@@ -234,6 +234,7 @@ class InteractiveSession:
 
     def info(self) -> SessionInfo:
         with self._lock:
+            meta = self.backend.meta()
             return SessionInfo(
                 session_id=self.session_id,
                 backend=self.backend.name,
@@ -249,7 +250,8 @@ class InteractiveSession:
                 last_input_at=self._last_input_at,
                 last_output_at=self._last_output_at,
                 exited_at=self._exited_at,
-                meta=self.backend.meta(),
+                host=meta.get("host"),
+                meta=meta,
             )
 
     def close(self) -> None:

@@ -30,12 +30,27 @@ from typing import Any
 from . import brand
 from .types import parse_agent_args
 
-AGENT_KEYS = {"name", "kind", "args", "cwd", "backend", "profile"}
-PROFILE_KEYS = {"kind", "args", "cwd", "backend"}
+AGENT_KEYS = {"name", "kind", "args", "cwd", "backend", "profile", "host"}
+PROFILE_KEYS = {"kind", "args", "cwd", "backend", "host"}
 
 
 class SpecError(ValueError):
     pass
+
+
+def _check_host(value: Any) -> str | None:
+    """Reject an unknown remote host early, client side."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise SpecError("host must be a configured host name")
+    from .settings import hosts
+
+    if value not in hosts():
+        raise SpecError(
+            f"unknown host {value!r}; configure it under \"hosts\" in settings.json"
+        )
+    return value
 
 
 def profiles_path() -> str:
@@ -75,6 +90,10 @@ def parse_profiles_data(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
         try:
             parse_agent_args(body.get("args"))
         except ValueError as exc:
+            raise SpecError(f"profile {name!r}: {exc}") from exc
+        try:
+            _check_host(body.get("host"))
+        except SpecError as exc:
             raise SpecError(f"profile {name!r}: {exc}") from exc
     return profiles
 
@@ -126,10 +145,24 @@ def parse_team_data(
             entry["args"] = parse_agent_args(entry.get("args"))
         except ValueError as exc:
             raise SpecError(f"agent {name!r}: {exc}") from exc
+        try:
+            host = _check_host(entry.get("host"))
+        except SpecError as exc:
+            raise SpecError(f"agent {name!r}: {exc}") from exc
+        entry["host"] = host
+        if host:
+            if entry.get("backend") == "pty":
+                raise SpecError(
+                    f"agent {name!r}: backend 'pty' cannot reach the remote host {host!r}"
+                )
+            if entry.get("backend") in (None, "", "auto"):
+                entry["backend"] = "ssh-tmux"
         cwd = entry.get("cwd")
-        if cwd:
+        if cwd and not host:
             cwd = os.path.expanduser(cwd)
             entry["cwd"] = cwd if os.path.isabs(cwd) else os.path.join(base, cwd)
+        # With a host, cwd is a path on the remote machine: never expand or
+        # resolve it against the local filesystem.
         entry.pop("profile", None)
         out.append(entry)
     workspace = team.get("workspace")

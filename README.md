@@ -77,6 +77,35 @@ crewhall local           # Web UI on 127.0.0.1:8765
 `crewhall --help` lists everything; `crewhall ui` opens the curses
 interface; `crewhall agent list` shows agents.
 
+## Remote agents over SSH
+
+A single local daemon can run agents in `tmux` on another machine reached over
+SSH; remote agents appear in the same registry as local ones. Hosts are closed by
+default and live in `settings.json` (0600):
+
+```json
+{
+  "hosts": {
+    "prod1": {"ssh": "deploy@prod1", "port": 22,
+              "identity": "~/.ssh/id_crewhall",
+              "known_hosts": "~/.ssh/known_hosts",
+              "tmux_socket": "crewhall"}
+  }
+}
+```
+
+```bash
+crewhall agent create --kind opencode --name reviewer --host prod1 \
+    --cwd /srv/projects/app --wait
+crewhall agent capture reviewer --recent
+crewhall attach reviewer          # ssh -t … tmux attach-session
+```
+
+The remote server needs only `tmux` plus the agent CLI already logged in; use a
+dedicated non-root user, a dedicated key and pin its host key in `known_hosts`
+first. A host that is down is reported as `host_unreachable` and the agent is
+never marked as exited; it reconnects when the host returns.
+
 ## Upgrading from agent-terminal
 
 - Command: `crewhall` (`agent-terminal` stays as an alias).
