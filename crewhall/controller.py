@@ -266,9 +266,12 @@ class Controller:
             env["TMPDIR"] = tmpdir
             env.setdefault("CLAUDE_CODE_TMPDIR", tmpdir)
 
-    def _hooks_settings_path(self) -> str | None:
+    def _hooks_settings_path(self, host: str | None = None) -> str | None:
         if not self.hooks_enabled:
             return None
+        if host:
+            # Hooks need the gateway: without a tunnel nothing could receive them.
+            return hooks.remote_claude_settings_json() if settings.host(host).get("tunnel") else None
         try:
             return hooks.ensure_claude_settings()
         except OSError:
@@ -291,11 +294,15 @@ class Controller:
         conversation_id: str | None = None,
         port: int | None = None,
         mcp_args: list[str] | None = None,
+        host: str | None = None,
     ) -> list[str]:
         cls = get_harness(kind)
+        # A remote agent runs the remote machine's own CLI (bare name, remote
+        # PATH): a local override path or local settings file means nothing there.
+        command = cls.command() if host else (settings.provider_command(kind) or cls.command())
         return [
-            *(settings.provider_command(kind) or cls.command()),
-            *cls.launch_args(self._hooks_settings_path(), conversation_id, port),
+            *command,
+            *cls.launch_args(self._hooks_settings_path(host), conversation_id, port),
             *(mcp_args or []),
             *extra_args,
         ]
@@ -860,8 +867,11 @@ class Controller:
             backend = settings.get("agents.default_backend")
         env = {**settings.provider_env(kind), **(env or {})}
         conversation_id = self._new_conversation_id(kind, extra_args)
-        link = self._new_opencode_link(kind, extra_args)
-        mcp_args, mcp_file = self._mcp_for(kind, harness_cls)
+        # The OpenCode server binds the remote loopback and MCP config is a local
+        # file: neither is reachable for a remote agent (state falls back to the
+        # screen, honestly).
+        link = None if host else self._new_opencode_link(kind, extra_args)
+        mcp_args, mcp_file = ([], None) if host else self._mcp_for(kind, harness_cls)
         if name and any(h.name == name for h in self.agents.all()):
             raise ValueError(f'agent name "{name}" already exists')
         cwd = cwd if host else self.resolve_cwd(cwd, team)
@@ -881,7 +891,8 @@ class Controller:
             agent_env["OPENCODE_SERVER_PASSWORD"] = link.password
         spec = SessionSpec(
             command=self._launch_command(
-                kind, extra_args, conversation_id, link.port if link else None, mcp_args
+                kind, extra_args, conversation_id, link.port if link else None, mcp_args,
+                host,
             ),
             cwd=cwd,
             env=agent_env,
@@ -976,7 +987,7 @@ class Controller:
         host = agent.get("host")
         self._agent_hosts[agent_id] = host
         spec = SessionSpec(
-            command=self._launch_command(agent["kind"], extra_args),
+            command=self._launch_command(agent["kind"], extra_args, host=host),
             cwd=agent.get("cwd") or (None if host else os.getcwd()),
             env=None,
             cols=int(agent.get("cols", 120)),
@@ -1015,7 +1026,8 @@ class Controller:
             conversation_id = self._new_conversation_id(
                 kind, self._agent_args.get(agent_id, [])
             )
-            link = self._new_opencode_link(kind, self._agent_args.get(agent_id, []))
+            link = (None if self._agent_hosts.get(agent_id)
+                    else self._new_opencode_link(kind, self._agent_args.get(agent_id, [])))
             spec = harness.session.spec
             backend_name = harness.session.backend.name
             host = self._agent_hosts.get(agent_id)
@@ -1033,7 +1045,7 @@ class Controller:
             new_spec = SessionSpec(
                 command=self._launch_command(
                     kind, self._agent_args.get(agent_id, []), conversation_id,
-                    link.port if link else None,
+                    link.port if link else None, host=host,
                 ),
                 cwd=spec.cwd,
                 env=env,
@@ -1052,7 +1064,8 @@ class Controller:
             self._attach_link(revived, link)
             self._persist()
             self.agents.add(revived)
-            self._ensure_control_file(spec.cwd, kind)
+            if not host:
+                self._ensure_control_file(spec.cwd, kind)
             return revived
 
     def _authorize_team(self, sender: Harness, recipient: Harness) -> None:
@@ -1103,6 +1116,10 @@ class Controller:
 
     # -- the shells an agent runs ------------------------------------------
     def _agent_root(self, harness: Harness) -> int:
+        if self._agent_hosts.get(harness.agent_id):
+            raise HarnessError(
+                harness.agent_id, "process inspection is not available for remote agents (n/d)"
+            )
         pid = harness.session.pid
         if not pid or not harness.session.status.alive:
             raise HarnessError(harness.agent_id, "the agent is not running")

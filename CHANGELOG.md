@@ -5,6 +5,26 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.61.0] — 2026-10-05
+
+_Fase 2b: hooks de agentes remotos y cierre de un riesgo del PID remoto._
+
+Threat model:
+
+- **Corrección de seguridad**: el backend `ssh-tmux` heredaba `pid()` y devolvía el
+  PID *remoto*; el inspector de procesos lo leía en `/proc` **local** y
+  `signal_process` podía señalar un proceso local ajeno. Ahora `pid()` es `None` en
+  remoto, `_agent_root` rechaza explícitamente a los agentes remotos y la
+  inspección de procesos remotos es `n/d` (no se inventa).
+- Los hooks remotos viajan por el gateway: se añaden solo `agent_hook` y
+  `agent_permission_request` (ambos con token y agente atado al host). El
+  `--settings` remoto va **inline** (solo comandos `crewhall agent hook …`, sin
+  secretos ni rutas locales); sin túnel no hay hooks.
+- Un agente remoto usa el CLI del propio host (nombre sin ruta); no se le pasa el
+  servidor local de OpenCode (escucha en el loopback remoto) ni la config MCP (fichero
+  local): su estado cae a la pantalla, honestamente. El reinicio no toca ficheros
+  de control locales con una ruta remota.
+
 ## [0.60.0] — 2026-10-05
 
 _Fase 2a: mensajería de agentes remotos hacia el daemon local por túnel SSH inverso._

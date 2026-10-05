@@ -251,6 +251,11 @@ class SshTmuxBackend(TmuxBackend):
                 return 0
         return None
 
+    def pid(self) -> int | None:
+        # A *remote* pid must never be mistaken for a local one: the process
+        # inspector reads /proc and can signal.  Remote processes are n/d.
+        return None
+
     def meta(self) -> dict:
         return {
             "tmux_session": self.tmux_name,

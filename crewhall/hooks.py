@@ -24,9 +24,15 @@ _CLAUDE_EVENTS = {
 }
 
 
-def hook_command(event: str) -> str:
+def _base(remote: bool) -> str:
+    if remote:  # resolved by the *remote* PATH: no local path means anything there
+        return "crewhall"
     exe = (shutil.which("crewhall") or shutil.which("agent-terminal"))
-    base = shlex.quote(exe) if exe else f"{shlex.quote(sys.executable)} -P -m crewhall"
+    return shlex.quote(exe) if exe else f"{shlex.quote(sys.executable)} -P -m crewhall"
+
+
+def hook_command(event: str, remote: bool = False) -> str:
+    base = _base(remote)
     # Never let a hook problem surface in (or block) the agent's TUI.
     return f"{base} agent hook {event} >/dev/null 2>&1 || true"
 
@@ -36,26 +42,34 @@ def hook_command(event: str) -> str:
 PERMISSION_HOOK_TIMEOUT = 600
 
 
-def permission_hook_command() -> str:
-    exe = (shutil.which("crewhall") or shutil.which("agent-terminal"))
-    base = shlex.quote(exe) if exe else f"{shlex.quote(sys.executable)} -P -m crewhall"
+def permission_hook_command(remote: bool = False) -> str:
+    base = _base(remote)
     # stdout carries the decision; no output means "ask in the TUI as usual".
     return f"{base} agent hook permission_request 2>/dev/null || true"
 
 
-def claude_settings() -> dict:
+def claude_settings(remote: bool = False) -> dict:
     settings = {
         "hooks": {
-            name: [{"hooks": [{"type": "command", "command": hook_command(event)}]}]
+            name: [{"hooks": [{"type": "command", "command": hook_command(event, remote)}]}]
             for name, event in _CLAUDE_EVENTS.items()
         }
     }
     # A permission dialog (or AskUserQuestion) can be answered from the Web UI.
     settings["hooks"]["PermissionRequest"] = [{"hooks": [{
-        "type": "command", "command": permission_hook_command(),
+        "type": "command", "command": permission_hook_command(remote),
         "timeout": PERMISSION_HOOK_TIMEOUT,
     }]}]
     return settings
+
+
+def remote_claude_settings_json() -> str:
+    """Inline ``--settings`` value for a remote agent (no local file to point at).
+
+    It holds only the hook commands (no secrets): the token and the gateway
+    socket come from the agent's environment on the remote host.
+    """
+    return json.dumps(claude_settings(remote=True), sort_keys=True, separators=(",", ":"))
 
 
 def ensure_claude_settings() -> str:

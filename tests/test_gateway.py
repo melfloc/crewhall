@@ -42,7 +42,7 @@ class GatewayPolicyTests(unittest.TestCase):
         for op in ("create", "agent_create", "agent_write", "agent_key", "kill", "terminate",
                    "shutdown", "settings_set", "settings_get", "reset_apply", "team_up",
                    "team_members", "request_list", "agent_list", "message_send",
-                   "bundle_import", "clean_apply", "fs_complete", "agent_hook", "nonsense"):
+                   "bundle_import", "clean_apply", "fs_complete", "agent_hook_all", "nonsense"):
             res = gw.handle_request({"op": op, "sender": "remote-1", "agent": "remote-1",
                                      "target": "remote-1", "token": "t"})
             self.assertFalse(res["ok"], op)
@@ -73,7 +73,8 @@ class GatewayPolicyTests(unittest.TestCase):
 
     def test_allowed_ops_are_exactly_the_token_authenticated_agent_ops(self):
         self.assertEqual(set(ALLOWED_OPS), {"agent_identity", "team_send", "request_create",
-                                            "request_reply", "request_cancel"})
+                                            "request_reply", "request_cancel",
+                                            "agent_hook", "agent_permission_request"})
 
 
 class GatewaySocketTests(unittest.TestCase):
@@ -92,7 +93,10 @@ class GatewaySocketTests(unittest.TestCase):
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(5)
             s.connect(self.path)
-            s.sendall(raw)
+            try:
+                s.sendall(raw)
+            except OSError:  # the gateway may hang up on an oversize request
+                pass
             data = b""
             while b"\n" not in data:
                 chunk = s.recv(65536)
@@ -108,7 +112,7 @@ class GatewaySocketTests(unittest.TestCase):
         ok = self._send(b'{"op":"agent_identity","target":"a","token":"t"}\n')
         self.assertTrue(ok["ok"])
         self.assertFalse(self._send(b"{nope\n")["ok"])
-        self.assertIn("too large", self._send(b"x" * (300 * 1024))["error"])
+        self.assertIn("too large", self._send(b"x" * (1100 * 1024))["error"])
         self.assertEqual(len(self.calls), 1)
 
     def test_stop_removes_the_socket(self):
@@ -132,6 +136,54 @@ class TunnelSettingsAndClientTests(unittest.TestCase):
             os.environ.pop(f"{brand.ENV_PREFIX}_GATEWAY", None)
             os.environ.pop(f"{brand.LEGACY_ENV_PREFIX}_GATEWAY", None)
             self.assertTrue(Client(socket_path="/nonexistent").autostart)
+
+
+
+
+class RemoteLaunchTests(unittest.TestCase):
+    def setUp(self):
+        from crewhall.controller import Controller
+
+        self.root = tempfile.mkdtemp(prefix="ati-rl-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        env = mock.patch.dict(os.environ, {
+            "XDG_CONFIG_HOME": os.path.join(self.root, "c"),
+            "XDG_STATE_HOME": os.path.join(self.root, "s"),
+            "XDG_RUNTIME_DIR": os.path.join(self.root, "r"),
+        })
+        env.start(); self.addCleanup(env.stop)
+        os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700)
+        settings.patch({"hosts": {"tun": {"ssh": "u@h", "tunnel": True},
+                                  "plain": {"ssh": "u@h2"}}})
+        self.c = Controller(adopt=False, persist=False)
+        self.c.hooks_enabled = True
+
+    def test_tunnelled_claude_gets_inline_remote_hooks_without_local_paths(self):
+        cmd = self.c._launch_command("claude", [], host="tun")
+        self.assertEqual(cmd[0], "claude")  # bare name: the remote PATH decides
+        inline = cmd[cmd.index("--settings") + 1]
+        data = json.loads(inline)
+        commands = [h["command"] for ev in data["hooks"].values() for g in ev for h in g["hooks"]]
+        self.assertTrue(commands)
+        for c in commands:
+            self.assertTrue(c.startswith("crewhall agent hook "), c)
+            self.assertNotIn(self.root, c)
+            self.assertNotIn("/home/", c)
+
+    def test_host_without_tunnel_gets_no_hooks_and_local_runs_unchanged(self):
+        self.assertNotIn("--settings", self.c._launch_command("claude", [], host="plain"))
+        local = self.c._launch_command("claude", [])
+        self.assertTrue(os.path.isfile(local[local.index("--settings") + 1]))
+
+    def test_remote_pid_is_never_exposed_or_inspected_locally(self):
+        from crewhall.backends import ssh_tmux
+        from crewhall.harness import HarnessError
+
+        self.assertIsNone(ssh_tmux.SshTmuxBackend({"name": "x", "ssh": "u@h"}).pid())
+        harness = mock.Mock(agent_id="a1")
+        self.c._agent_hosts["a1"] = "tun"
+        with self.assertRaises(HarnessError):
+            self.c._agent_root(harness)
 
 
 if __name__ == "__main__":

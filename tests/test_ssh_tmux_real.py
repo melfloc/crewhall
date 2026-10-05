@@ -425,6 +425,21 @@ class SshTunnelRealTests(unittest.TestCase):
             with self.assertRaises(ssh_tmux.HostUnreachable):
                 controller.remote_links.ensure(settings.host(HOST_ALIAS))
 
+    def test_real_hook_cli_on_the_remote_side_reaches_the_daemon_via_gateway(self):
+        import shlex
+        path = self.link.ensure()
+        project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = {"CREWHALL_AGENT_ID": "agent-1", "CREWHALL_TOKEN": "tok",
+               "CREWHALL_SOCKET": path, "CREWHALL_GATEWAY": "1", "PYTHONPATH": project}
+        prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
+        proc = self.backend._ssh_run(f"{prefix} python3 -P -m crewhall agent hook stop </dev/null",
+                                     timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        hooks = [c for c in self.calls if c["op"] == "agent_hook"]
+        self.assertEqual(len(hooks), 1)
+        self.assertEqual((hooks[0]["agent"], hooks[0]["event"], hooks[0]["token"]),
+                         ("agent-1", "stop", "tok"))
+
     def test_tunnel_argv_ignores_user_ssh_config_and_is_strict(self):
         argv = self.link._tunnel_argv("/remote/gw.sock")
         self.assertEqual(argv[:3], ["ssh", "-F", "/dev/null"])

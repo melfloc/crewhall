@@ -31,8 +31,11 @@ ALLOWED_OPS = {
     "request_create": "sender",
     "request_reply": "agent",
     "request_cancel": "agent",
+    # Claude lifecycle / permission hooks of the remote agent (token-auth).
+    "agent_hook": "agent",
+    "agent_permission_request": "agent",
 }
-MAX_LINE = 256 * 1024
+MAX_LINE = 1024 * 1024
 READ_TIMEOUT = 30.0
 MAX_CONNECTIONS = 16
 
