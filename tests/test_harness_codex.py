@@ -6,8 +6,8 @@ import shutil
 import tempfile
 import unittest
 
-from agent_terminal import codex_rollout
-from agent_terminal.harness.codex import CodexHarness
+from crewhall import codex_rollout
+from crewhall.harness.codex import CodexHarness
 
 ACCOUNT_ID = "acct-SUPER-SECRET-0001"
 
@@ -94,7 +94,7 @@ class CodexHarnessReal(unittest.TestCase):
     """Real end-to-end run (minimal prompt). Never auto-accepts the trust dialog."""
 
     def test_reply_with_ok(self) -> None:
-        from agent_terminal import AgentState, Controller
+        from crewhall import AgentState, Controller
 
         backend = "tmux" if shutil.which("tmux") else "pty"
         controller = Controller(adopt=False)

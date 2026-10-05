@@ -1423,7 +1423,7 @@ def cmd_adapter(args: argparse.Namespace) -> int:
     for path in paths:
         print(f"  {path}")
     print("Now implement the adapter, make the contract kit pass and only then "
-          "register it in agent_terminal/harness/__init__.py.")
+          "register it in crewhall/harness/__init__.py.")
     return 0
 
 

@@ -4,7 +4,7 @@ import os
 import shutil
 import unittest
 
-from agent_terminal import (
+from crewhall import (
     AgentState,
     ClaudeCodeHarness,
     Controller,
@@ -12,9 +12,9 @@ from agent_terminal import (
     HarnessError,
     Status,
 )
-from agent_terminal.harness import available_harnesses, get_harness
+from crewhall.harness import available_harnesses, get_harness
 
-from agent_terminal.harness.base import HarnessNotReady
+from crewhall.harness.base import HarnessNotReady
 
 from .support import FakeSession
 

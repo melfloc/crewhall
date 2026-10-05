@@ -40,7 +40,7 @@ _TEST = '''from __future__ import annotations
 
 import unittest
 
-from agent_terminal.harness.{kind} import {cls}Harness
+from crewhall.harness.{kind} import {cls}Harness
 
 from . import adapter_contract
 
@@ -72,7 +72,7 @@ def create(kind: str, *, root: str | None = None) -> list[str]:
     if not KIND_RE.match(kind or ""):
         raise ValueError("kind must be a short lowercase identifier (a-z, 0-9, - or _)")
     root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    harness = os.path.join(root, "agent_terminal", "harness", f"{kind}.py")
+    harness = os.path.join(root, "crewhall", "harness", f"{kind}.py")
     fixture = os.path.join(root, "tests", "fixtures", "screens", kind)
     test = os.path.join(root, "tests", f"test_{kind}_contract.py")
     for path in (harness, test):

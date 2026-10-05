@@ -4,7 +4,7 @@ __pycache__/
 build/
 dist/
 .venv/
-agent_terminal/_build_info.json
+crewhall/_build_info.json
 releases/
 
 # temp native libs unpacked by Bun/agent CLIs when TMPDIR leaks into a project

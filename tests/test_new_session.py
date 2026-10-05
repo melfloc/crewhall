@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import unittest
 
-from agent_terminal import ClaudeCodeHarness, Controller, OpenCodeHarness
-from agent_terminal.harness import HarnessError
-from agent_terminal.messaging import MessagingError
+from crewhall import ClaudeCodeHarness, Controller, OpenCodeHarness
+from crewhall.harness import HarnessError
+from crewhall.messaging import MessagingError
 
 from .support import FakeSession
 from .test_harness_claude import CLAUDE_READY
@@ -73,7 +73,7 @@ class LeavingTheConversation(unittest.TestCase):
                                            "properties": {"sessionID": NEW, "info": {"id": NEW}}})
         self.assertEqual(self.h.conversation_id, NEW)
 
-    def test_start_screen_reached_outside_agent_terminal_is_detected(self):
+    def test_start_screen_reached_outside_crewhall_is_detected(self):
         self.h.link = object()  # history goes through OpenCode's server
         self.h.conversation_resolver = lambda: None
         self.assertFalse(self.h.on_home_screen())

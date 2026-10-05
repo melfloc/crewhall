@@ -4,8 +4,8 @@ import os
 import tempfile
 import unittest
 
-from agent_terminal import Controller
-from agent_terminal.persistence import StateStore
+from crewhall import Controller
+from crewhall.persistence import StateStore
 
 from .support import FakeHarness
 

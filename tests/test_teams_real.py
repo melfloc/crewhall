@@ -6,7 +6,7 @@ import time
 import unittest
 import uuid
 
-from agent_terminal import Controller
+from crewhall import Controller
 
 RUN = (
     os.environ.get("AT_RUN_CLAUDE") == "1"
@@ -128,7 +128,7 @@ class TeamReal(RealFixture):
         # Isolation is enforced by the control plane; the raw capture may
         # legitimately mention a token if an agent itself ran `tmux
         # capture-pane`, so we assert authorization instead of screen content.
-        from agent_terminal.messaging import MessagingError
+        from crewhall.messaging import MessagingError
 
         # a and b share fiscal; c is also in it, so use a foreign agent.
         outsider = self.spawn("opencode", "outsider")

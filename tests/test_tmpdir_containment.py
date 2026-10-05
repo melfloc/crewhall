@@ -5,7 +5,7 @@ import tempfile
 import time
 import unittest
 
-from agent_terminal import paths
+from crewhall import paths
 
 
 class TmpdirContainment(unittest.TestCase):

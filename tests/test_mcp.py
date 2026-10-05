@@ -5,7 +5,7 @@ import os
 import time
 import unittest
 
-from agent_terminal.mcp import server
+from crewhall.mcp import server
 
 
 class _Identity(unittest.TestCase):
@@ -106,8 +106,8 @@ class Identity(_Identity):
 
 class ControllerWiring(_Identity):
     def _controller(self):
-        from agent_terminal import Controller
-        from agent_terminal import settings
+        from crewhall import Controller
+        from crewhall import settings
 
         self.addCleanup(lambda: settings.reset("providers.claude"))
         self.addCleanup(lambda: settings.reset("providers.codex"))
@@ -117,8 +117,8 @@ class ControllerWiring(_Identity):
         import os
         import stat
 
-        from agent_terminal import settings
-        from agent_terminal.harness import get_harness
+        from crewhall import settings
+        from crewhall.harness import get_harness
 
         c = self._controller()
         settings.patch({"providers.claude.mcp": True})
@@ -129,14 +129,14 @@ class ControllerWiring(_Identity):
         with open(path, encoding="utf-8") as fh:
             body = fh.read()
         self.assertNotIn("tok-secret", body)
-        self.assertIn("agent_terminal.mcp", body)
+        self.assertIn("crewhall.mcp", body)
         c._mcp_files["sess_me"] = path
         c._mcp_cleanup("sess_me")
         self.assertFalse(os.path.exists(path))
 
     def test_disabled_by_default_and_codex_uses_flags(self):
-        from agent_terminal import settings
-        from agent_terminal.harness import get_harness
+        from crewhall import settings
+        from crewhall.harness import get_harness
 
         c = self._controller()
         args, path = c._mcp_for("claude", get_harness("claude"))
@@ -145,10 +145,10 @@ class ControllerWiring(_Identity):
         args, path = c._mcp_for("codex", get_harness("codex"))
         self.assertIsNone(path)
         self.assertIn("-c", args)
-        self.assertTrue(any("mcp_servers.agent_terminal" in a for a in args))
+        self.assertTrue(any("mcp_servers.crewhall" in a for a in args))
 
     def test_opencode_has_no_verified_mcp_wiring(self):
-        from agent_terminal.harness import get_harness
+        from crewhall.harness import get_harness
 
         self.assertFalse(get_harness("opencode").mcp_supported)
 

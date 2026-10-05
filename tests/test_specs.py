@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from agent_terminal import ClaudeCodeHarness, Controller
-from agent_terminal.specs import SpecError, apply_profile, load_profiles, load_team_spec
+from crewhall import ClaudeCodeHarness, Controller
+from crewhall.specs import SpecError, apply_profile, load_profiles, load_team_spec
 
 TEAM = """
 [team]

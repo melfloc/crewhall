@@ -27,7 +27,7 @@ PY
 )
 SCHEMA="$(python3 - <<'PY'
 import re
-print(re.search(r"^SCHEMA_VERSION\s*=\s*(\d+)", open("agent_terminal/persistence.py").read(), re.M).group(1))
+print(re.search(r"^SCHEMA_VERSION\s*=\s*(\d+)", open("crewhall/persistence.py").read(), re.M).group(1))
 PY
 )"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
@@ -36,7 +36,7 @@ rm -f "$OUT"/crewhall-"$VERSION"*.whl "$OUT/crewhall-$VERSION-installer"* "$OUT/
 
 if [ -n "$COMMIT" ]; then
   printf '{"commit": "%s", "built": "%s", "channel": "release"}\n' "$COMMIT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    > agent_terminal/_build_info.json
+    > crewhall/_build_info.json
 fi
 
 echo "==> building wheel $VERSION"
@@ -47,10 +47,10 @@ WHEEL="$(ls "$WORK/out"/crewhall-"$VERSION"-*.whl)"
 "$WORK/venv/bin/python" - "$WHEEL" "${COMMIT:-}" <<'PY'
 import sys, zipfile
 names = zipfile.ZipFile(sys.argv[1]).namelist()
-assert "agent_terminal/web/static/index.html" in names, "Web UI page missing from wheel"
-assert "agent_terminal/web/static/app.css" in names and "agent_terminal/web/static/js/core.js" in names, "Web UI assets missing from wheel"
+assert "crewhall/web/static/index.html" in names, "Web UI page missing from wheel"
+assert "crewhall/web/static/app.css" in names and "crewhall/web/static/js/core.js" in names, "Web UI assets missing from wheel"
 if sys.argv[2]:
-    assert "agent_terminal/_build_info.json" in names, "build info missing from wheel"
+    assert "crewhall/_build_info.json" in names, "build info missing from wheel"
 PY
 
 NAME="crewhall-$VERSION-installer"

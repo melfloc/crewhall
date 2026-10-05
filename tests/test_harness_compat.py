@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from agent_terminal import (
+from crewhall import (
     AgentState,
     ClaudeCodeHarness,
     Harness,
     OpenCodeHarness,
 )
-from agent_terminal.harness import get_harness
+from crewhall.harness import get_harness
 
 from .support import FakeSession
 

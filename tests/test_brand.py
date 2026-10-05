@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import unittest
 
-from agent_terminal import brand, control_files
+from crewhall import brand, control_files
 
 
 class BrandEnv(unittest.TestCase):
@@ -71,7 +71,7 @@ class Migration(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(old, "state", "state.json")))
 
     def test_tmux_socket_env_has_a_crewhall_fallback(self):
-        from agent_terminal.backends import tmux
+        from crewhall.backends import tmux
 
         saved = {k: os.environ.get(k) for k in ("CREWHALL_TMUX_SOCKET", "AGENT_TERMINAL_TMUX_SOCKET")}
         self.addCleanup(Migration._restore, saved)

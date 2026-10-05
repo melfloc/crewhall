@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import unittest
 
-from agent_terminal.requests import RequestBoard, RequestError
+from crewhall.requests import RequestBoard, RequestError
 
 
 class BoardUnit(unittest.TestCase):
@@ -61,7 +61,7 @@ class BoardUnit(unittest.TestCase):
 
 class ControllerRequests(unittest.TestCase):
     def setUp(self) -> None:
-        from agent_terminal import Controller
+        from crewhall import Controller
 
         from .support import FakeHarness
 
@@ -99,7 +99,7 @@ class ControllerRequests(unittest.TestCase):
             self.c.reply_to_request(c.agent_id, tc, rid, "nope")
 
     def test_bad_token_rejected(self):
-        from agent_terminal.messaging import MessagingError
+        from crewhall.messaging import MessagingError
 
         with self.assertRaises(MessagingError):
             self.c.create_request(self.a.agent_id, "wrong", self.b.agent_id, "x", wait=False)
@@ -111,12 +111,12 @@ class ControllerRequests(unittest.TestCase):
         self.assertEqual(out["request"]["state"], "expired")
 
     def test_persistence_keeps_correlation(self):
-        self.c._store = __import__("agent_terminal.persistence", fromlist=["StateStore"]).StateStore()
+        self.c._store = __import__("crewhall.persistence", fromlist=["StateStore"]).StateStore()
         ta, _tb = self._tokens()
         out = self.c.create_request(self.a.agent_id, ta, self.b.agent_id, "survive", wait=False)
         rid = out["request"]["request_id"]
         snap = self.c._store.snapshot(self.c)
-        from agent_terminal import Controller
+        from crewhall import Controller
 
         other = Controller(adopt=False)
         other.requests.load(snap["requests"])

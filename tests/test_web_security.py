@@ -10,9 +10,9 @@ import time
 import unittest
 import urllib.request
 
-from agent_terminal.web import auth, tailscale
-from agent_terminal.web.server import SecurityPolicy, WebServer, resolve_host
-from agent_terminal.web.ws import accept_key
+from crewhall.web import auth, tailscale
+from crewhall.web.server import SecurityPolicy, WebServer, resolve_host
+from crewhall.web.ws import accept_key
 
 
 def _free_port() -> int:
@@ -165,7 +165,7 @@ class SecureWebServerTest(unittest.TestCase):
         except Exception:
             pass
         try:
-            from agent_terminal.client import Client
+            from crewhall.client import Client
 
             Client(autostart=False).call("shutdown")
         except Exception:
@@ -342,7 +342,7 @@ class SecureWebServerTest(unittest.TestCase):
         self.assertEqual(attempt(self.token), 200)
 
     def test_token_not_in_state_store(self):
-        from agent_terminal import paths
+        from crewhall import paths
 
         text = ""
         try:
@@ -358,7 +358,7 @@ if __name__ == "__main__":
 
 class WebFocusAndHistoryOps(unittest.TestCase):
     def test_history_op_is_exposed_and_ws_cadence_is_tiered(self):
-        from agent_terminal.web.server import ALLOWED_OPS, Handler
+        from crewhall.web.server import ALLOWED_OPS, Handler
 
         self.assertIn("agent_history", ALLOWED_OPS)
         self.assertLessEqual(Handler.WS_TICK, Handler.WS_SNAPSHOT_EVERY)
@@ -370,7 +370,7 @@ class QuietClientErrors(unittest.TestCase):
         import io
         from contextlib import redirect_stderr
 
-        from agent_terminal.web.server import _TrackingHTTPServer
+        from crewhall.web.server import _TrackingHTTPServer
 
         server = _TrackingHTTPServer.__new__(_TrackingHTTPServer)
         err = io.StringIO()

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from agent_terminal import AgentState, Harness, HarnessError, OpenCodeHarness, Status
-from agent_terminal.harness import available_harnesses, get_harness
+from crewhall import AgentState, Harness, HarnessError, OpenCodeHarness, Status
+from crewhall.harness import available_harnesses, get_harness
 
 from .support import FakeSession
 

@@ -4,8 +4,8 @@ import os
 import tempfile
 import unittest
 
-from agent_terminal import Controller, TeamError
-from agent_terminal.team import validate_workspace
+from crewhall import Controller, TeamError
+from crewhall.team import validate_workspace
 
 from .support import FakeHarness
 
@@ -109,7 +109,7 @@ class TeamWorkspace(unittest.TestCase):
     def test_claude_agent_gets_claude_md(self):
         from unittest import mock
 
-        from agent_terminal import ClaudeCodeHarness
+        from crewhall import ClaudeCodeHarness
 
         self.controller.create_team("fiscal", [], workspace=self.tmp)
         with mock.patch.object(ClaudeCodeHarness, "command", classmethod(lambda cls: ["sleep", "30"])):
@@ -126,8 +126,8 @@ class WorkspaceReal(unittest.TestCase):
 
         if os.environ.get("AT_RUN_REAL_WORKSPACE") != "1":
             self.skipTest("set AT_RUN_REAL_WORKSPACE=1 to run")
-        from agent_terminal import paths
-        from agent_terminal.client import Client, ensure_daemon
+        from crewhall import paths
+        from crewhall.client import Client, ensure_daemon
 
         cwd = os.path.expanduser("~/.cache/at-coop-demo")
         os.makedirs(cwd, exist_ok=True)

@@ -39,10 +39,10 @@ def pyproject_version(root: str) -> str:
 
 
 def package_version(root: str) -> str:
-    text = open(os.path.join(root, "agent_terminal", "__init__.py"), encoding="utf-8").read()
+    text = open(os.path.join(root, "crewhall", "__init__.py"), encoding="utf-8").read()
     m = re.search(r'^__version__\s*=\s*"([^"]+)"', text, re.M)
     if not m:
-        raise GateError("agent_terminal/__init__.py has no __version__")
+        raise GateError("crewhall/__init__.py has no __version__")
     return m.group(1)
 
 
@@ -64,7 +64,7 @@ def changelog_section(root: str, version: str) -> str:
 
 def gate_versions(root: str) -> str:
     versions = {"pyproject.toml": pyproject_version(root),
-                "agent_terminal/__init__.py": package_version(root),
+                "crewhall/__init__.py": package_version(root),
                 "CHANGELOG.md": changelog_top(root)}
     if len(set(versions.values())) != 1:
         raise GateError("version mismatch: " + ", ".join(f"{k}={v}" for k, v in versions.items()))

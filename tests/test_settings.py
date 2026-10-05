@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from agent_terminal import settings
+from crewhall import settings
 
 
 class _Base(unittest.TestCase):
@@ -139,7 +139,7 @@ class Providers(_Base):
 class AppliedByTheController(_Base):
     def test_disabled_provider_cannot_start_agents_and_command_is_overridden(self):
 
-        from agent_terminal import Controller
+        from crewhall import Controller
 
         c = Controller(adopt=False)
         settings.patch({"providers.claude.command": self.exe, "providers.claude.default_model": "opus"},
@@ -152,7 +152,7 @@ class AppliedByTheController(_Base):
         self.assertIn("disabled", str(cm.exception))
 
     def test_meta_lists_only_enabled_providers_and_the_defaults(self):
-        from agent_terminal.ui.control import meta_info
+        from crewhall.ui.control import meta_info
 
         settings.patch({"providers.claude.enabled": False})
         meta = meta_info()

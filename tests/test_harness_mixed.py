@@ -4,7 +4,7 @@ import os
 import shutil
 import unittest
 
-from agent_terminal import AgentState, Controller
+from crewhall import AgentState, Controller
 
 RUN = (
     os.environ.get("AT_RUN_CLAUDE") == "1"

@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 import unittest
 
-from agent_terminal import InteractiveSession, SessionSpec
+from crewhall import InteractiveSession, SessionSpec
 
 from .support import BrokenBackend, ContractMixin
 
@@ -25,7 +25,7 @@ class TmuxContract(ContractMixin, unittest.TestCase):
 
 class ContractGuard(unittest.TestCase):
     def test_contract_detects_broken_backend(self) -> None:
-        from agent_terminal import SessionTimeout
+        from crewhall import SessionTimeout
 
         spec = SessionSpec(command=["/bin/bash"])
         session = InteractiveSession(BrokenBackend(), spec)

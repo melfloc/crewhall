@@ -8,8 +8,8 @@ import threading
 import time
 import unittest
 
-from agent_terminal import paths
-from agent_terminal.client import Client, ensure_daemon, ping
+from crewhall import paths
+from crewhall.client import Client, ensure_daemon, ping
 
 
 def _read_pid() -> int | None:
@@ -161,7 +161,7 @@ class DaemonLifecycle(unittest.TestCase):
         self.assertTrue(ping())
 
     def test_lock_is_ours_helper(self):
-        from agent_terminal.daemon import lock_is_ours
+        from crewhall.daemon import lock_is_ours
 
         path = os.path.join(self.tmp, "x.lock")
         with open(path, "w") as fh:

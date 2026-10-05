@@ -5,19 +5,19 @@ import shutil
 import tempfile
 import unittest
 
-from agent_terminal import adapter_gen
+from crewhall import adapter_gen
 
 
 class AdapterGenerator(unittest.TestCase):
     def setUp(self) -> None:
         self.root = tempfile.mkdtemp(prefix="at-adaptergen-")
-        os.makedirs(os.path.join(self.root, "agent_terminal", "harness"))
+        os.makedirs(os.path.join(self.root, "crewhall", "harness"))
         os.makedirs(os.path.join(self.root, "tests", "fixtures", "screens"))
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
 
     def test_creates_skeleton_fixtures_and_contract_test(self):
         paths = adapter_gen.create("frobnicator", root=self.root)
-        harness = os.path.join(self.root, "agent_terminal", "harness", "frobnicator.py")
+        harness = os.path.join(self.root, "crewhall", "harness", "frobnicator.py")
         test = os.path.join(self.root, "tests", "test_frobnicator_contract.py")
         self.assertIn(harness, paths)
         self.assertIn(test, paths)

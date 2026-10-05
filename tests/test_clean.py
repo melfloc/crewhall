@@ -5,7 +5,7 @@ import tempfile
 import time
 import unittest
 
-from agent_terminal import clean
+from crewhall import clean
 
 
 class CleanupPlan(unittest.TestCase):
@@ -87,7 +87,7 @@ class CleanCli(unittest.TestCase):
         import subprocess
         import sys
 
-        return subprocess.run([sys.executable, "-m", "agent_terminal", *args],
+        return subprocess.run([sys.executable, "-m", "crewhall", *args],
                               capture_output=True, text=True, env=self.env, timeout=30)
 
     def test_dry_run_lists_without_deleting(self):

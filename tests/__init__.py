@@ -25,7 +25,7 @@ def _resolve_test_socket() -> str:
     """Return the private socket for this run, never the production one.
 
     This is deliberately *not* guarded by import order: ``unittest discover``
-    imports the ``agent_terminal`` package (which used to freeze the socket at
+    imports the ``crewhall`` package (which used to freeze the socket at
     import time) before it imports this package, so we also override an
     inherited production value.
     """
@@ -113,7 +113,7 @@ def _kill_orphan_test_processes() -> None:
                 cmdline = fh.read().decode("utf-8", "replace")
         except OSError:
             continue
-        if not any(tag in cmdline for tag in ("python", "agent_terminal", "opencode", "claude", "tmux")):
+        if not any(tag in cmdline for tag in ("python", "crewhall", "opencode", "claude", "tmux")):
             continue
         if _process_holds_test_artifact(pid):
             try:

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 # can never touch the user's live agents.
 #
 # The value is resolved on *every* use, never at import time: `unittest
-# discover` imports this module as part of the `agent_terminal` package before
+# discover` imports this module as part of the `crewhall` package before
 # `tests/__init__` can set CREWHALL_TMUX_SOCKET, so a module-level
 # constant would freeze the production socket for the whole test run and leak
 # test sessions into the user's tmux server (Fase 0, 0.48.0).

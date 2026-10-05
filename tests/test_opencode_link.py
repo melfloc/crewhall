@@ -7,9 +7,9 @@ import unittest
 from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from agent_terminal import Controller, OpenCodeHarness
-from agent_terminal.harness import AgentState
-from agent_terminal.opencode_link import OpenCodeLink, free_port, map_messages
+from crewhall import Controller, OpenCodeHarness
+from crewhall.harness import AgentState
+from crewhall.opencode_link import OpenCodeLink, free_port, map_messages
 
 from .support import FakeSession
 

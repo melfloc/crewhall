@@ -26,7 +26,7 @@ _CLAUDE_EVENTS = {
 
 def hook_command(event: str) -> str:
     exe = (shutil.which("crewhall") or shutil.which("agent-terminal"))
-    base = shlex.quote(exe) if exe else f"{shlex.quote(sys.executable)} -P -m agent_terminal"
+    base = shlex.quote(exe) if exe else f"{shlex.quote(sys.executable)} -P -m crewhall"
     # Never let a hook problem surface in (or block) the agent's TUI.
     return f"{base} agent hook {event} >/dev/null 2>&1 || true"
 
@@ -38,7 +38,7 @@ PERMISSION_HOOK_TIMEOUT = 600
 
 def permission_hook_command() -> str:
     exe = (shutil.which("crewhall") or shutil.which("agent-terminal"))
-    base = shlex.quote(exe) if exe else f"{shlex.quote(sys.executable)} -P -m agent_terminal"
+    base = shlex.quote(exe) if exe else f"{shlex.quote(sys.executable)} -P -m crewhall"
     # stdout carries the decision; no output means "ask in the TUI as usual".
     return f"{base} agent hook permission_request 2>/dev/null || true"
 

@@ -5,8 +5,8 @@ import shutil
 import time
 import unittest
 
-from agent_terminal import InteractiveSession, SessionSpec, get_backend
-from agent_terminal import paths
+from crewhall import InteractiveSession, SessionSpec, get_backend
+from crewhall import paths
 
 RUN = os.environ.get("AT_RUN_OPENCODE") == "1"
 HAVE = shutil.which("opencode") is not None

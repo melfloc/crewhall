@@ -54,19 +54,19 @@ Además, para un *agente* concreto queremos operar semánticamente
 
 Capas y responsabilidades:
 
-- **`InteractiveSession`** (`agent_terminal/session.py`): la abstracción de sesión.
+- **`InteractiveSession`** (`crewhall/session.py`): la abstracción de sesión.
   Dueña de identidad (`session_id`), estado de proceso
   (`starting/running/exited/terminated/error`), buffer de salida, eventos y API
   (`write`, `send_key`, `capture`, `read_until`, `resize`, `interrupt`, `wait`…).
-- **`Backend`** (`agent_terminal/backend.py`): transporte intercambiable
+- **`Backend`** (`crewhall/backend.py`): transporte intercambiable
   (`PtyBackend`, `TmuxBackend`). Detalles de arranque, escritura de bytes, teclas,
   captura, señales, resize, ciclo de vida.
-- **`Harness`** (`agent_terminal/harness/`): capa semántica de agente. Conoce el
+- **`Harness`** (`crewhall/harness/`): capa semántica de agente. Conoce el
   comando del agente y cómo detectar sus estados observables. Solo usa la API
   pública de `InteractiveSession`; **no** habla con tmux/PTY ni abre procesos.
-- **`Controller`** (`agent_terminal/controller.py`): registra sesiones y agentes,
+- **`Controller`** (`crewhall/controller.py`): registra sesiones y agentes,
   resuelve por nombre/id y los expone al daemon.
-- **Daemon** (`agent_terminal/daemon.py`): controlador residente accesible por
+- **Daemon** (`crewhall/daemon.py`): controlador residente accesible por
   socket Unix (la CLI lo arranca solo). Imprescindible para que las sesiones PTY
   sobrevivan entre invocaciones.
 
@@ -82,7 +82,7 @@ API (deliberadamente pequeña): `start`, `write(text)` (sin ENTER), `send_key`,
 `close`.
 
 ```python
-from agent_terminal import InteractiveSession, SessionSpec, get_backend
+from crewhall import InteractiveSession, SessionSpec, get_backend
 
 session = InteractiveSession(get_backend("pty"), SessionSpec(command=["/bin/bash"]))
 session.start()
@@ -98,7 +98,7 @@ Cambiar `"pty"` por `"tmux"` es todo lo que cambia.
 
 - `PtyBackend` — `pty.openpty()` + `subprocess.Popen` con el slave como
   stdin/stdout/stderr, `start_new_session=True` y `TIOCSCTTY`. Sin tmux.
-- `TmuxBackend` — `tmux -L agent_terminal -f /dev/null` (servidor/socket aislados),
+- `TmuxBackend` — `tmux -L crewhall -f /dev/null` (servidor/socket aislados),
   `capture-pane`, `send-keys -l`, `remain-on-exit` + `pane_dead_status`.
 
 `get_backend("auto")` elige tmux si está disponible; si no, PTY.
@@ -212,7 +212,7 @@ y CLI; el `Message` se refiere solo a agentes (nunca a tmux/pid/sesión).
 ### API
 
 ```python
-from agent_terminal import Controller
+from crewhall import Controller
 
 controller = Controller()
 controller.send_message("agent-a", "agent-b", "hola")   # -> Delivery
@@ -527,9 +527,9 @@ marca (checklist) · `Enter` confirma · `Esc` cancela. En el selector múltiple
 
 ```bash
 cd ~/Projects/crewhall
-python3 -m agent_terminal ui            # cliente del daemon (recomendado)
-python3 -m agent_terminal ui --local    # embebe un Controller (sin daemon)
-python3 -m agent_terminal ui --cwd DIR
+python3 -m crewhall ui            # cliente del daemon (recomendado)
+python3 -m crewhall ui --local    # embebe un Controller (sin daemon)
+python3 -m crewhall ui --cwd DIR
 # (o `crewhall ui` si haces `pip install -e .`)
 ```
 
@@ -859,7 +859,7 @@ Browser ─▶ Web UI (HTTP/WS) ─▶ ControlPort/Client ─▶ daemon (control
 ```
 
 - **Cero dependencias nuevas**: servidor con `http.server` de la stdlib y WebSocket
-  mínimo (RFC6455) en `agent_terminal/web/`.
+  mínimo (RFC6455) en `crewhall/web/`.
 - Lanzar:
 
 ```bash
@@ -1190,6 +1190,6 @@ Demostrado y verificado (fase anterior):
   general) y las ops de daemon `agent_write`/`agent_key`. `InteractiveSession`,
   `Backend`, `Messaging`, `Team`, `Controller`, IPC intactos.
 - **172 tests: 162 OK + 10 skips**; con agentes reales **172/172 OK**.
-- Servidor tmux aislado (`-L agent_terminal -f /dev/null`); no se toca `~/.config`
+- Servidor tmux aislado (`-L crewhall -f /dev/null`); no se toca `~/.config`
   ni sesiones del usuario.
 - Estado anterior preservado con git tag **`pre-native-agent-interaction`**.

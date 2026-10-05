@@ -220,11 +220,11 @@ def _build_env(prefix: str, wheel: str, version: str) -> str:
     _run([py, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-deps", wheel],
          "installing the wheel")
     # By module, never through bin/crewhall: that script's shebang names this staging path.
-    ver = _run([py, "-P", "-m", "agent_terminal", "--version"], "smoke test (--version)").stdout
+    ver = _run([py, "-P", "-m", "crewhall", "--version"], "smoke test (--version)").stdout
     if version not in ver:
         raise UpdateError(f"smoke test: new build reports {ver.strip()!r}, expected {version}")
-    _run([py, "-P", "-c", "import agent_terminal.daemon, agent_terminal.web.server, agent_terminal.doctor, "
-                    "agent_terminal.updater"], "smoke test (imports)")
+    _run([py, "-P", "-c", "import crewhall.daemon, crewhall.web.server, crewhall.doctor, "
+                    "crewhall.updater"], "smoke test (imports)")
     return new
 
 
@@ -315,7 +315,7 @@ def restart_daemon(prefix: str, expect_version: str, *, force: bool, log: Log) -
     got = daemon_version()
     if got != expect_version:
         raise UpdateError(f"daemon reports version {got!r}, expected {expect_version}")
-    health = subprocess.run([os.path.join(prefix, "venv", "bin", "python"), "-P", "-m", "agent_terminal", "doctor", "--json"],
+    health = subprocess.run([os.path.join(prefix, "venv", "bin", "python"), "-P", "-m", "crewhall", "doctor", "--json"],
                             capture_output=True, text=True, timeout=120)
     if health.returncode != 0:
         raise UpdateError("post-restart health check (doctor) reported problems")
@@ -424,7 +424,7 @@ def fix_shebangs(venv: str, staged_name: str) -> None:
 
 def _post_swap_check(prefix: str, version: str) -> None:
     py = os.path.join(prefix, "venv", "bin", "python")
-    out = _run([py, "-P", "-m", "agent_terminal", "--version"], "post-swap check (--version)", timeout=60)
+    out = _run([py, "-P", "-m", "crewhall", "--version"], "post-swap check (--version)", timeout=60)
     if version not in out.stdout:
         raise UpdateError(f"post-swap check: reports {out.stdout.strip()!r}, expected {version}")
     script = os.path.join(prefix, "venv", "bin", "crewhall")

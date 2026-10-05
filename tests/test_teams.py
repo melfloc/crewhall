@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from agent_terminal import Controller, Team, TeamError, TeamNotFound
-from agent_terminal.team import new_team_id
+from crewhall import Controller, Team, TeamError, TeamNotFound
+from crewhall.team import new_team_id
 
 from .support import FakeHarness
 

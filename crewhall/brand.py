@@ -19,8 +19,7 @@ from typing import Any
 
 NAME = "crewhall"
 LEGACY_NAME = "agent-terminal"
-# The import package keeps its historical name to avoid a cross-cutting rename.
-PACKAGE = "agent_terminal"
+PACKAGE = "crewhall"
 
 ENV_PREFIX = "CREWHALL"
 LEGACY_ENV_PREFIX = "AGENT_TERMINAL"

@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import unittest
 
-from agent_terminal import (
+from crewhall import (
     ClaudeCodeHarness,
     Controller,
     Delivery,
@@ -11,7 +11,7 @@ from agent_terminal import (
     MessagingError,
     OpenCodeHarness,
 )
-from agent_terminal.messaging import new_message_id
+from crewhall.messaging import new_message_id
 
 from .support import FakeHarness, FakeSession
 
