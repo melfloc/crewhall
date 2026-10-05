@@ -148,7 +148,7 @@ def _spawn(socket_path: str) -> None:
         env.setdefault("CLAUDE_CODE_TMPDIR", tmpdir)
     log = open(paths.log_path(), "ab", buffering=0)
     proc = subprocess.Popen(
-        [sys.executable, "-P", "-m", "agent_terminal.daemon", "--foreground",
+        [sys.executable, "-P", "-m", "crewhall.daemon", "--foreground",
          "--socket", socket_path],
         stdin=subprocess.DEVNULL,
         stdout=log,

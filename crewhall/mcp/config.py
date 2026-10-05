@@ -11,7 +11,7 @@ from .. import paths
 
 
 def mcp_command() -> list[str]:
-    return [sys.executable, "-P", "-m", "agent_terminal.mcp"]
+    return [sys.executable, "-P", "-m", "crewhall.mcp"]
 
 
 def _private_dir() -> str:
@@ -40,8 +40,8 @@ def codex_args() -> list[str]:
     """Codex ``-c`` overrides registering the same stdio server."""
     command, *args = mcp_command()
     return [
-        "-c", f"mcp_servers.agent_terminal.command={json.dumps(command)}",
-        "-c", "mcp_servers.agent_terminal.args=" + json.dumps(args),
+        "-c", f"mcp_servers.crewhall.command={json.dumps(command)}",
+        "-c", "mcp_servers.crewhall.args=" + json.dumps(args),
     ]
 
 

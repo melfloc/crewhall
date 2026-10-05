@@ -11,8 +11,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from agent_terminal import __version__, signing, updater
-from agent_terminal.updater import UpdateError
+from crewhall import __version__, signing, updater
+from crewhall.updater import UpdateError
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _spec = importlib.util.spec_from_file_location("release_check", os.path.join(ROOT, "scripts", "release_check.py"))
@@ -36,9 +36,9 @@ class ReleaseGates(unittest.TestCase):
     def repo(self, version="1.0.0", branch="main", changelog=None):
         d = tempfile.mkdtemp(prefix="at-gate-")
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
-        os.makedirs(os.path.join(d, "agent_terminal"))
+        os.makedirs(os.path.join(d, "crewhall"))
         open(os.path.join(d, "pyproject.toml"), "w").write(f'[project]\nname="x"\nversion="{version}"\n')
-        open(os.path.join(d, "agent_terminal", "__init__.py"), "w").write(f'__version__ = "{version}"\n')
+        open(os.path.join(d, "crewhall", "__init__.py"), "w").write(f'__version__ = "{version}"\n')
         open(os.path.join(d, "CHANGELOG.md"), "w").write(
             changelog if changelog is not None else f"# Changelog\n\n## [{version}] — x\n\n- something\n")
         sh(d, "git", "init", "-q", "-b", branch)
@@ -59,7 +59,7 @@ class ReleaseGates(unittest.TestCase):
 
     def test_version_drift_and_missing_notes_are_refused(self):
         d = self.repo()
-        open(os.path.join(d, "agent_terminal", "__init__.py"), "w").write('__version__ = "1.0.1"\n')
+        open(os.path.join(d, "crewhall", "__init__.py"), "w").write('__version__ = "1.0.1"\n')
         sh(d, *GIT, "commit", "-qam", "drift")
         with self.assertRaisesRegex(rc.GateError, "mismatch"):
             rc.run_gates(d)
@@ -119,7 +119,7 @@ def make_release(root, version="9.9.9", files=None, schema=1):
     name = f"crewhall-{version}-installer.tar.gz"
     stage = os.path.join(root, f"stage-{version}")
     os.makedirs(os.path.join(stage, "inner"))
-    open(os.path.join(stage, "inner", f"agent_terminal-{version}-py3-none-any.whl"), "wb").write(b"wheel")
+    open(os.path.join(stage, "inner", f"crewhall-{version}-py3-none-any.whl"), "wb").write(b"wheel")
     with tarfile.open(os.path.join(d, name), "w:gz") as tar:
         tar.add(os.path.join(stage, "inner"), arcname="inner")
     sha = hashlib.sha256(open(os.path.join(d, name), "rb").read()).hexdigest()
@@ -357,7 +357,7 @@ class DaemonHandover(unittest.TestCase):
         lock = os.path.join(tmp, "daemon.lock")
         holder = open(lock, "w")
         fcntl.flock(holder, fcntl.LOCK_EX)
-        with mock.patch("agent_terminal.paths.lock_path", return_value=lock):
+        with mock.patch("crewhall.paths.lock_path", return_value=lock):
             with self.assertRaisesRegex(UpdateError, "still shutting down"):
                 updater.wait_daemon_gone(timeout=0.5)
             threading.Timer(0.6, holder.close).start()
@@ -370,8 +370,8 @@ class StateCompatibility(unittest.TestCase):
     """Every released state format must stay loadable (RELEASING.md)."""
 
     def test_all_fixtures_restore_cleanly(self):
-        from agent_terminal import Controller
-        from agent_terminal.persistence import StateStore
+        from crewhall import Controller
+        from crewhall.persistence import StateStore
 
         fixtures = sorted(f for f in os.listdir(os.path.join(ROOT, "tests", "fixtures")) if f.startswith("state-"))
         self.assertTrue(fixtures)
@@ -390,7 +390,7 @@ class StateCompatibility(unittest.TestCase):
 
 class BuildInfo(unittest.TestCase):
     def test_dev_vs_release_description(self):
-        from agent_terminal import buildinfo
+        from crewhall import buildinfo
 
         with mock.patch.object(buildinfo, "_FILE", "/nonexistent"):
             self.assertEqual(buildinfo.build_info()["kind"], "dev")

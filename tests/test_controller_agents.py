@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from agent_terminal import Controller, OpenCodeHarness
-from agent_terminal.controller import AgentNotFound
+from crewhall import Controller, OpenCodeHarness
+from crewhall.controller import AgentNotFound
 
 from .support import FakeSession
 

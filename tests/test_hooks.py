@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from agent_terminal import AgentState, ClaudeCodeHarness, Controller, hooks
-from agent_terminal.messaging import MessagingError
+from crewhall import AgentState, ClaudeCodeHarness, Controller, hooks
+from crewhall.messaging import MessagingError
 
 from .support import FakeSession
 from .test_harness_claude import CLAUDE_READY
@@ -141,7 +141,7 @@ class HooksRespectTheProject(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("AT_RUN_CLAUDE") == "1", "set AT_RUN_CLAUDE=1 (needs a real, logged-in claude)")
 class RealClaudeKeepsProjectHooks(unittest.TestCase):
-    def test_project_and_agent_terminal_hooks_both_fire(self):
+    def test_project_and_crewhall_hooks_both_fire(self):
         import shutil
         import time
 

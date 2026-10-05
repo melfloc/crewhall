@@ -14,7 +14,7 @@ import os
 import re
 import unittest
 
-from agent_terminal.harness import HARNESSES
+from crewhall.harness import HARNESSES
 
 from .support import FakeSession
 

@@ -7,7 +7,7 @@ import stat
 import tempfile
 import unittest
 
-from agent_terminal import audit, settings
+from crewhall import audit, settings
 
 
 class AuditUnit(unittest.TestCase):

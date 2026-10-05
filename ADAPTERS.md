@@ -21,7 +21,7 @@ inicial, mensajería peer-to-peer, actividad en vivo, Mission Control, bundles, 
 
 ## 2. Contrato mínimo (obligatorio)
 
-Archivo `agent_terminal/harness/<kind>.py`, clase que hereda de `Harness` (`harness/base.py`):
+Archivo `crewhall/harness/<kind>.py`, clase que hereda de `Harness` (`harness/base.py`):
 
 | Miembro | Obligación |
 |---|---|
@@ -60,7 +60,7 @@ Reglas de oro: la detección es **por evidencia, no por tiempo** (nada de `sleep
 | `mcp_supported` + `mcp_config_file()` + `mcp_launch_args(path)` | Inyectar el servidor MCP del propio agente sin tocar su config (Fase 4). | Proveedor sin MCP nativo. |
 
 Soporte MCP verificado (0.52.0): **Claude** `--mcp-config <archivo 0600>`; **Codex**
-`-c mcp_servers.agent_terminal.…`; **OpenCode** sin flag verificado → queda sin MCP. La superficie MCP
+`-c mcp_servers.crewhall.…`; **OpenCode** sin flag verificado → queda sin MCP. La superficie MCP
 está desactivada por defecto (`providers.<kind>.mcp`).
 
 ## 4. Procedimiento para un adaptador nuevo (checklist)
@@ -79,7 +79,7 @@ está desactivada por defecto (`providers.<kind>.mcp`).
 ## 5. Receta de captura (aislada y segura)
 
 ```bash
-S=at_probe_$$                       # socket tmux propio: JAMÁS el de producción (agent_terminal)
+S=at_probe_$$                       # socket tmux propio: JAMÁS el de producción (crewhall)
 mkdir -p /tmp/ati-probe && cd /tmp/ati-probe
 tmux -L $S -f /dev/null new-session -d -s c -x 120 -y 40 -c "$PWD" "<binario>"
 sleep 6; tmux -L $S capture-pane -p -t c                 # ver cada pantalla

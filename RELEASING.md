@@ -39,7 +39,7 @@ Reglas de compatibilidad (las comprueban los tests y `release.sh`):
 - **Config del usuario** (`profiles.toml`, `teams/*.toml`, `bundle`): solo se *añaden* claves; las
   desconocidas se rechazan con mensaje, las antiguas siguen valiendo.
 - **Operaciones del daemon / CLI**: solo se añaden. Quitar algo = MAJOR con aviso previo en el CHANGELOG.
-- La versión vive en tres sitios que deben coincidir: `pyproject.toml`, `agent_terminal/__init__.py`
+- La versión vive en tres sitios que deben coincidir: `pyproject.toml`, `crewhall/__init__.py`
   y la sección superior de `CHANGELOG.md` (lo exige la compuerta).
 
 ## Flujo normal

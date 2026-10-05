@@ -114,14 +114,14 @@ fi
 VENV_PY="$PREFIX/venv/bin/python"
 "$VENV_PY" -m pip install --quiet --disable-pip-version-check --upgrade pip >/dev/null 2>&1 || true
 "$VENV_PY" -m pip install --quiet --disable-pip-version-check --upgrade --force-reinstall --no-deps "$TARGET"
-VERSION="$("$VENV_PY" -P -m agent_terminal --version)"
+VERSION="$("$VENV_PY" -P -m crewhall --version)"
 say "Installed $VERSION"
 # Marker that makes this a *managed* install: `crewhall update` only ever touches these.
 "$VENV_PY" - "$PREFIX/install.json" <<'PY'
 import json, sys, time
-from agent_terminal import __version__
-from agent_terminal.buildinfo import build_info
-from agent_terminal.persistence import SCHEMA_VERSION
+from crewhall import __version__
+from crewhall.buildinfo import build_info
+from crewhall.persistence import SCHEMA_VERSION
 info = build_info()
 json.dump({"version": __version__, "commit": info.get("commit"), "channel": info["kind"],
            "state_schema": SCHEMA_VERSION, "installed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")},
@@ -138,9 +138,9 @@ if [ -e "$LINK" ] || [ -L "$LINK" ]; then
 fi
 # A path-based launcher (not a symlink to venv/bin/crewhall): `update` swaps the venv directory,
 # and console scripts embed the path they were created in.
-printf '#!/bin/sh\n%s\nexec "%s/venv/bin/python" -P -m agent_terminal "$@"\n' "$LAUNCHER_MARK" "$PREFIX" > "$LINK"
+printf '#!/bin/sh\n%s\nexec "%s/venv/bin/python" -P -m crewhall "$@"\n' "$LAUNCHER_MARK" "$PREFIX" > "$LINK"
 chmod 755 "$LINK"
-say "Command: $LINK -> $PREFIX/venv/bin/python -P -m agent_terminal"
+say "Command: $LINK -> $PREFIX/venv/bin/python -P -m crewhall"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *)
   warn "$BIN_DIR is not on your PATH. Add to your shell profile:  export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac

@@ -5,6 +5,18 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.58.0] — 2026-10-05
+
+_The Python package is renamed to match the product._
+
+- **Breaking:** the import package `agent_terminal` is now `crewhall`
+  (`python -m crewhall`, `crewhall.cli:main`, `crewhall.harness`, …). Update any
+  `import agent_terminal` in your own code or adapters.
+- Release-signing namespace stays `agent-terminal`, so signatures keep verifying.
+- Fixes found by the first public CI run: `remain-on-exit` is set atomically with
+  `new-session` (a command that exits at once no longer loses its exit status), and the
+  settings tests no longer depend on a world-writable interpreter.
+
 ## [0.57.0] — 2026-10-05
 
 _Full rename to crewhall; repository prepared for GitHub._

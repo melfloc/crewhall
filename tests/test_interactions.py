@@ -8,9 +8,9 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from agent_terminal import Controller, OpenCodeHarness
-from agent_terminal import interactions as ix
-from agent_terminal.opencode_link import OpenCodeLink
+from crewhall import Controller, OpenCodeHarness
+from crewhall import interactions as ix
+from crewhall.opencode_link import OpenCodeLink
 
 from .support import FakeSession
 
@@ -192,8 +192,8 @@ import io  # noqa: E402
 import time  # noqa: E402
 from unittest import mock  # noqa: E402
 
-from agent_terminal import ClaudeCodeHarness, cli, hooks  # noqa: E402
-from agent_terminal.messaging import MessagingError  # noqa: E402
+from crewhall import ClaudeCodeHarness, cli, hooks  # noqa: E402
+from crewhall.messaging import MessagingError  # noqa: E402
 
 ASK = {"tool_name": "AskUserQuestion", "tool_use_id": "toolu_01ABC",
        "tool_input": {"questions": [
@@ -321,7 +321,7 @@ class ClaudeHookWiring(unittest.TestCase):
 
 class WaitOnlyWhileSomeoneWatches(unittest.TestCase):
     def call(self, seen_ago, env=None):
-        from agent_terminal import daemon
+        from crewhall import daemon
 
         fake = mock.Mock()
         fake._viewer_seen = time.monotonic() - seen_ago
@@ -332,7 +332,7 @@ class WaitOnlyWhileSomeoneWatches(unittest.TestCase):
         return fake.controller.claude_permission_request.call_args.kwargs["wait"]
 
     def test_no_web_viewer_means_no_wait(self):
-        from agent_terminal import daemon
+        from crewhall import daemon
 
         self.assertEqual(self.call(seen_ago=60), 0.0)
         self.assertEqual(self.call(seen_ago=1), daemon.PERMISSION_WAIT)

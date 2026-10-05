@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-from agent_terminal import worktrees
+from crewhall import worktrees
 
 
 def _git(*args: str, cwd: str | None = None) -> subprocess.CompletedProcess:
@@ -72,7 +72,7 @@ class Worktrees(unittest.TestCase):
         self.assertTrue(path.startswith(worktrees.root()))
 
     def test_clean_lists_worktrees_and_never_flags_dirty_as_removable(self):
-        from agent_terminal import clean
+        from crewhall import clean
 
         a = worktrees.create(self.repo, "crew", "alpha")
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 import shutil
 
-from agent_terminal import (
+from crewhall import (
     AgentState,
     Harness,
     InteractiveSession,
@@ -11,7 +11,7 @@ from agent_terminal import (
     Status,
     get_backend,
 )
-from agent_terminal.types import SessionInfo
+from crewhall.types import SessionInfo
 
 BACKENDS = ["pty"] + (["tmux"] if shutil.which("tmux") else [])
 

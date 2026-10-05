@@ -11,7 +11,7 @@ import tomllib
 import unittest
 from unittest import mock
 
-from agent_terminal import bundle, doctor
+from crewhall import bundle, doctor
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 
@@ -55,7 +55,7 @@ class Doctor(unittest.TestCase):
     def test_report_text_and_cli_json(self):
         text = doctor.format_report(doctor.run_checks())
         self.assertIn("environment check", text)
-        out = subprocess.run(["python3", "-m", "agent_terminal", "doctor", "--json"],
+        out = subprocess.run(["python3", "-m", "crewhall", "doctor", "--json"],
                              capture_output=True, text=True, cwd=ROOT, timeout=60,
                              env={**os.environ, "PYTHONPATH": ROOT})
         self.assertIn(out.returncode, (0, 1))
@@ -176,11 +176,11 @@ class BundleRoundtrip(unittest.TestCase):
 class Packaging(unittest.TestCase):
     def test_pyproject_ships_the_web_ui_and_python_floor_matches_code(self):
         cfg = tomllib.load(open(os.path.join(ROOT, "pyproject.toml"), "rb"))
-        data = cfg["tool"]["setuptools"]["package-data"]["agent_terminal.web"]
+        data = cfg["tool"]["setuptools"]["package-data"]["crewhall.web"]
         self.assertIn("static/*", data)
         self.assertIn("static/js/*", data)
         self.assertEqual(cfg["project"]["requires-python"], ">=3.11")  # tomllib
-        static = os.path.join(ROOT, "agent_terminal", "web", "static")
+        static = os.path.join(ROOT, "crewhall", "web", "static")
         for rel in ("index.html", "app.css", "js/core.js", "js/main.js"):
             self.assertTrue(os.path.exists(os.path.join(static, rel)), rel)
 
@@ -212,23 +212,23 @@ class Packaging(unittest.TestCase):
         # Regression: `update` swaps the venv dir and console scripts embed their creation path.
         text = open(os.path.join(ROOT, "scripts", "install.sh")).read()
         self.assertIn("managed by crewhall install.sh", text)
-        self.assertIn('-P -m agent_terminal "$@"', text)           # -P: never import from the cwd
+        self.assertIn('-P -m crewhall "$@"', text)           # -P: never import from the cwd
         self.assertNotIn("ln -sfn", text)
 
-    def test_the_launcher_style_never_imports_agent_terminal_from_the_cwd(self):
-        # Regression (found in the rehearsal): `python -m agent_terminal` runs whatever package of that name
+    def test_the_launcher_style_never_imports_crewhall_from_the_cwd(self):
+        # Regression (found in the rehearsal): `python -m crewhall` runs whatever package of that name
         # sits in the current directory (e.g. a dev checkout) instead of the installed release.
         import sys
 
         shadow = tempfile.mkdtemp(prefix="at-shadow-")
         self.addCleanup(shutil.rmtree, shadow, ignore_errors=True)
-        os.makedirs(os.path.join(shadow, "agent_terminal"))
-        open(os.path.join(shadow, "agent_terminal", "__init__.py"), "w").write("__version__='SHADOW'\n")
-        open(os.path.join(shadow, "agent_terminal", "__main__.py"), "w").write("print('SHADOW')\n")
+        os.makedirs(os.path.join(shadow, "crewhall"))
+        open(os.path.join(shadow, "crewhall", "__init__.py"), "w").write("__version__='SHADOW'\n")
+        open(os.path.join(shadow, "crewhall", "__main__.py"), "w").write("print('SHADOW')\n")
         env = {**os.environ, "PYTHONPATH": ROOT}
-        unsafe = subprocess.run([sys.executable, "-m", "agent_terminal", "--version"], cwd=shadow,
+        unsafe = subprocess.run([sys.executable, "-m", "crewhall", "--version"], cwd=shadow,
                                 capture_output=True, text=True, env=env)
-        safe = subprocess.run([sys.executable, "-P", "-m", "agent_terminal", "--version"], cwd=shadow,
+        safe = subprocess.run([sys.executable, "-P", "-m", "crewhall", "--version"], cwd=shadow,
                               capture_output=True, text=True, env=env)
         self.assertIn("SHADOW", unsafe.stdout)             # documents the hazard
         self.assertIn("crewhall 0.", safe.stdout)    # and that -P avoids it
@@ -241,7 +241,7 @@ class Packaging(unittest.TestCase):
         self.assertIn("git tag -a", text)
 
     def test_example_files_load_with_the_real_parsers(self):
-        from agent_terminal.specs import load_profiles, load_team_spec
+        from crewhall.specs import load_profiles, load_team_spec
 
         profiles = load_profiles(os.path.join(ROOT, "examples", "profiles.toml"))
         spec = load_team_spec(os.path.join(ROOT, "examples", "team.toml"), profiles)

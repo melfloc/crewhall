@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from agent_terminal.harness import ClaudeCodeHarness, CodexHarness, OpenCodeHarness
+from crewhall.harness import ClaudeCodeHarness, CodexHarness, OpenCodeHarness
 
 from . import adapter_contract
 

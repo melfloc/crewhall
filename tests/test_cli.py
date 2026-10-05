@@ -27,7 +27,7 @@ class CliIntegration(unittest.TestCase):
     @classmethod
     def run_cli(cls, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         proc = subprocess.run(
-            [sys.executable, "-m", "agent_terminal", *args],
+            [sys.executable, "-m", "crewhall", *args],
             capture_output=True,
             text=True,
             cwd=ROOT,

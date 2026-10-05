@@ -7,9 +7,9 @@ import time
 import unittest
 from unittest import mock
 
-from agent_terminal import ClaudeCodeHarness, Controller
-from agent_terminal.persistence import StateStore
-from agent_terminal.types import parse_agent_args
+from crewhall import ClaudeCodeHarness, Controller
+from crewhall.persistence import StateStore
+from crewhall.types import parse_agent_args
 
 
 class ParseAgentArgs(unittest.TestCase):
@@ -102,7 +102,7 @@ if __name__ == "__main__":
 
 class TerminalDimensionValidation(unittest.TestCase):
     def test_dim_bounds(self):
-        from agent_terminal.daemon import _dim
+        from crewhall.daemon import _dim
 
         self.assertEqual(_dim("120", "cols"), 120)
         for bad in (0, 1, 1001, 10**9, -5, "x", None, [1]):
@@ -112,7 +112,7 @@ class TerminalDimensionValidation(unittest.TestCase):
 
 class ManagedSectionGuidance(unittest.TestCase):
     def test_section_covers_sender_identity_and_queued_semantics(self):
-        from agent_terminal.control_files import managed_section
+        from crewhall.control_files import managed_section
 
         text = managed_section()
         self.assertIn("[from: <sender>]", text)  # attributed by crewhall
@@ -121,7 +121,7 @@ class ManagedSectionGuidance(unittest.TestCase):
         self.assertIn("crewhall message send --to", text)
 
     def test_stale_section_is_refreshed_in_place_preserving_user_text(self):
-        from agent_terminal.control_files import BEGIN, END, ensure_managed_section
+        from crewhall.control_files import BEGIN, END, ensure_managed_section
 
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "CLAUDE.md")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from agent_terminal import ClaudeCodeHarness, OpenCodeHarness
+from crewhall import ClaudeCodeHarness, OpenCodeHarness
 
 from .support import FakeSession
 from .test_harness import READY_SCREEN as OC_READY, WORKING_SCREEN as OC_WORKING

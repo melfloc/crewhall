@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from agent_terminal.usage import parse_usage
+from crewhall.usage import parse_usage
 
 
 class _FakeHarness:
@@ -14,7 +14,7 @@ class _FakeHarness:
         return self._text
 
     def usage_from_screen(self, text: str) -> dict:
-        from agent_terminal.usage import opencode_usage
+        from crewhall.usage import opencode_usage
 
         return opencode_usage(text) if self.kind == "opencode" else {"available": False}
 

@@ -15,7 +15,7 @@ except Exception:  # noqa: BLE001
     sync_playwright = None
 
 CHROMIUM = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
-INDEX = os.path.join(os.path.dirname(__file__), "..", "agent_terminal", "web", "static", "index.html")
+INDEX = os.path.join(os.path.dirname(__file__), "..", "crewhall", "web", "static", "index.html")
 AGENT = {"agent_id": "sess_a", "name": "a", "kind": "claude", "state": "waiting_input",
          "backend": "tmux", "cwd": "/x", "pid": 1, "evidence": "", "history": True}
 

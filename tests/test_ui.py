@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from agent_terminal import Controller, Status
-from agent_terminal.ui import (
+from crewhall import Controller, Status
+from crewhall.ui import (
     AppModel,
     LocalControl,
     render,
@@ -234,7 +234,7 @@ class InteractiveNavigation(UiBase):
         self.assertEqual(model.focus, "interactive")
 
     def test_exited_agent_can_be_viewed(self):
-        from agent_terminal import Status
+        from crewhall import Status
 
         self._agent("b").session.status = Status.EXITED
         self._agent("b").session.exit_code = 0

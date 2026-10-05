@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ruff
-      - run: ruff check agent_terminal tests scripts
+      - run: ruff check crewhall tests scripts
 
   tests:
     runs-on: ubuntu-latest

@@ -6,8 +6,8 @@ import time
 import unittest
 import uuid
 
-from agent_terminal import Controller
-from agent_terminal.ui import AppModel, LocalControl, render_text, session_viewport
+from crewhall import Controller
+from crewhall.ui import AppModel, LocalControl, render_text, session_viewport
 
 RUN = (
     os.environ.get("AT_RUN_CLAUDE") == "1"

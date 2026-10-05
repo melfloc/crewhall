@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from agent_terminal.backends import tmux
+from crewhall.backends import tmux
 
 
 class TmuxSocketIsolation(unittest.TestCase):
@@ -14,13 +14,13 @@ class TmuxSocketIsolation(unittest.TestCase):
         # Real daemons started by the suite adopt every session on their tmux
         # server and close them on shutdown; sharing the user's server killed
         # their live agents.
-        self.assertNotEqual(tmux.socket_name(), "agent_terminal")
+        self.assertNotEqual(tmux.socket_name(), "crewhall")
         self.assertEqual(tmux.socket_name(), os.environ["CREWHALL_TMUX_SOCKET"])
         # The legacy attribute must resolve lazily too, not stay frozen.
         self.assertEqual(tmux.SOCKET, os.environ["CREWHALL_TMUX_SOCKET"])
 
     def test_socket_is_resolved_on_every_use_not_at_import(self):
-        # Regression (0.48.0): `unittest discover` imports agent_terminal before
+        # Regression (0.48.0): `unittest discover` imports crewhall before
         # tests/__init__ sets the env var, so a module-level constant used to
         # freeze the production socket for the whole run.
         with mock.patch.dict(os.environ,
@@ -42,7 +42,7 @@ class TmuxSocketIsolation(unittest.TestCase):
             argv = list(argv) if isinstance(argv, (list, tuple)) else argv
             if isinstance(argv, list) and argv[:1] == ["tmux"] and "-L" in argv:
                 socket = argv[argv.index("-L") + 1]
-                if socket == "agent_terminal":
+                if socket == "crewhall":
                     raise AssertionError(
                         f"test tried to touch the production tmux socket: {argv}"
                     )
@@ -50,7 +50,7 @@ class TmuxSocketIsolation(unittest.TestCase):
 
         with mock.patch.object(tmux.subprocess, "run", side_effect=guard):
             backend = tmux.TmuxBackend()
-            self.assertNotEqual(backend.socket, "agent_terminal")
+            self.assertNotEqual(backend.socket, "crewhall")
             backend._run("list-sessions")  # must not raise from the guard
 
 

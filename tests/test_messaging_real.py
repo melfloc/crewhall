@@ -5,7 +5,7 @@ import shutil
 import time
 import unittest
 
-from agent_terminal import Controller
+from crewhall import Controller
 
 RUN = (
     os.environ.get("AT_RUN_CLAUDE") == "1"

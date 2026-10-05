@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crewhall"
-version = "0.57.0"
+version = "0.58.0"
 description = "Backend-agnostic control of interactive CLI/TUI sessions (tmux or PTY)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,16 +34,16 @@ Changelog = "https://github.com/melfloc/crewhall/blob/main/CHANGELOG.md"
 
 [project.scripts]
 # `agent-terminal` is kept as a compatibility alias for the old name.
-crewhall = "agent_terminal.cli:main"
-agent-terminal = "agent_terminal.cli:main"
+crewhall = "crewhall.cli:main"
+agent-terminal = "crewhall.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["agent_terminal*"]
+include = ["crewhall*"]
 
 # The Web UI is a static page (index.html + css/js) that must ship inside the wheel.
 [tool.setuptools.package-data]
-"agent_terminal.web" = ["static/*", "static/js/*"]
-"agent_terminal" = ["_build_info.json"]
+"crewhall.web" = ["static/*", "static/js/*"]
+"crewhall" = ["_build_info.json"]
 
 [tool.ruff]
 line-length = 100

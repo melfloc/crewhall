@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from agent_terminal import archive
+from crewhall import archive
 
 
 class ArchiveStore(unittest.TestCase):

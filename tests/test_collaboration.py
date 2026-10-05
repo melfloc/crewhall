@@ -5,13 +5,13 @@ import tempfile
 import threading
 import unittest
 
-from agent_terminal import Controller, Status
-from agent_terminal.control_files import (
+from crewhall import Controller, Status
+from crewhall.control_files import (
     BEGIN,
     END,
     ensure_managed_section,
 )
-from agent_terminal.messaging import Messaging, MessagingError
+from crewhall.messaging import Messaging, MessagingError
 
 from .support import FakeHarness
 
@@ -242,8 +242,8 @@ class BusyRecipientDelivery(CollaborationBase):
     """A reply to an agent that is momentarily WORKING must not be lost."""
 
     def test_send_waits_for_busy_recipient(self):
-        from agent_terminal.harness import AgentState
-        from agent_terminal.messaging import Messaging
+        from crewhall.harness import AgentState
+        from crewhall.messaging import Messaging
         from tests.support import FakeHarness
 
         class Flaky(FakeHarness):
@@ -268,8 +268,8 @@ class BusyRecipientDelivery(CollaborationBase):
         self.assertIn("reply", b.session.writes)
 
     def test_send_fails_when_recipient_never_usable(self):
-        from agent_terminal.harness import AgentState
-        from agent_terminal.messaging import Messaging
+        from crewhall.harness import AgentState
+        from crewhall.messaging import Messaging
         from tests.support import FakeHarness
 
         class AlwaysWorking(FakeHarness):
@@ -293,8 +293,8 @@ class BusyRecipientDelivery(CollaborationBase):
         # delivered, and must be retried (bounded) instead of failing for good.
         import time as _t
 
-        from agent_terminal.harness.base import HarnessNotReady
-        from agent_terminal.messaging import Messaging
+        from crewhall.harness.base import HarnessNotReady
+        from crewhall.messaging import Messaging
         from tests.support import FakeHarness
 
         class Flaky(FakeHarness):
@@ -324,8 +324,8 @@ class BusyRecipientDelivery(CollaborationBase):
     def test_busy_recipient_is_deferred_then_delivered(self):
         import time as _t
 
-        from agent_terminal.harness import AgentState
-        from agent_terminal.messaging import Messaging
+        from crewhall.harness import AgentState
+        from crewhall.messaging import Messaging
         from tests.support import FakeHarness
 
         class LateReady(FakeHarness):
@@ -387,8 +387,8 @@ class DeliveryStatusAndDedup(CollaborationBase):
     def test_status_progression_and_ack(self):
         import time as _t
 
-        from agent_terminal.harness import AgentState
-        from agent_terminal.messaging import Messaging
+        from crewhall.harness import AgentState
+        from crewhall.messaging import Messaging
         from tests.support import FakeHarness
 
         class Reacting(FakeHarness):
@@ -416,7 +416,7 @@ class DeliveryStatusAndDedup(CollaborationBase):
         self.assertEqual(delivery.to_dict()["status"], "acknowledged")
 
     def test_unacknowledged_stays_injected(self):
-        from agent_terminal.messaging import Messaging
+        from crewhall.messaging import Messaging
         from tests.support import FakeHarness
 
         a, b = FakeHarness("a"), FakeHarness("b")
@@ -429,8 +429,8 @@ class DeliveryStatusAndDedup(CollaborationBase):
     def test_identical_pending_message_is_not_duplicated(self):
         import time as _t
 
-        from agent_terminal.harness import AgentState
-        from agent_terminal.messaging import Messaging
+        from crewhall.harness import AgentState
+        from crewhall.messaging import Messaging
         from tests.support import FakeHarness
 
         class Busy(FakeHarness):
@@ -462,7 +462,7 @@ class AgentSendDoesNotBlockTheSender(CollaborationBase):
     def test_busy_recipient_returns_quickly_as_queued_when_an_agent_sends(self):
         import time as _t
 
-        from agent_terminal.harness import AgentState
+        from crewhall.harness import AgentState
         from tests.support import FakeHarness
 
         class Busy(FakeHarness):

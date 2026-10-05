@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import unittest
 
-from agent_terminal import fscomplete
+from crewhall import fscomplete
 
 
 class Complete(unittest.TestCase):

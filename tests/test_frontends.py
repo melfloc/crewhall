@@ -10,10 +10,10 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
-from agent_terminal import paths
-from agent_terminal.frontends import FrontendError, FrontendManager
-from agent_terminal.web import auth
-from agent_terminal.web.server import ALLOWED_OPS
+from crewhall import paths
+from crewhall.frontends import FrontendError, FrontendManager
+from crewhall.web import auth
+from crewhall.web.server import ALLOWED_OPS
 
 TS_IP = "127.0.0.2"  # a loopback alias stands in for the Tailscale address
 
@@ -46,7 +46,7 @@ class FrontendBase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         try:
-            from agent_terminal.client import Client
+            from crewhall.client import Client
 
             Client(autostart=False).call("shutdown")
         except Exception:  # noqa: BLE001
@@ -61,7 +61,7 @@ class FrontendBase(unittest.TestCase):
         self.mgr = FrontendManager(paths.socket_path(), state_file=self.state_file)
         self.mgr.port = self.port
         self.addCleanup(self.mgr.stop_all)
-        ts = mock.patch.multiple("agent_terminal.frontends.tailscale", available=lambda: True,
+        ts = mock.patch.multiple("crewhall.frontends.tailscale", available=lambda: True,
                                  local_ipv4=lambda: TS_IP, dns_name=lambda: None)
         ts.start()
         self.addCleanup(ts.stop)
@@ -145,7 +145,7 @@ class Failures(FrontendBase):
 
     def test_tailscale_unavailable_fails_cleanly_and_changes_nothing(self):
         self.mgr.set_mode("local")
-        with mock.patch("agent_terminal.frontends.tailscale.available", lambda: False):
+        with mock.patch("crewhall.frontends.tailscale.available", lambda: False):
             with self.assertRaises(FrontendError) as ctx:
                 self.mgr.set_mode("tailscale")
         self.assertIn("Tailscale", str(ctx.exception))
@@ -187,8 +187,8 @@ class Persistence(FrontendBase):
         broken.restore()
         self.assertEqual(broken.status()["mode"], "off")
         json.dump({"mode": "tailscale", "port": self.port}, open(self.state_file, "w"))
-        with mock.patch("agent_terminal.frontends.tailscale.available", lambda: False), \
-                mock.patch("agent_terminal.frontends.RESTORE_ATTEMPTS", 1):
+        with mock.patch("crewhall.frontends.tailscale.available", lambda: False), \
+                mock.patch("crewhall.frontends.RESTORE_ATTEMPTS", 1):
             bad = FrontendManager(paths.socket_path(), state_file=self.state_file)
             bad.restore()                                       # tailnet down at boot: daemon must still come up
         self.assertEqual(bad.status()["mode"], "off")
@@ -206,8 +206,8 @@ class SavedModeIsIntentNotStatus(FrontendBase):
         available = {"up": False}
         fresh = FrontendManager(paths.socket_path(), state_file=self.state_file)
         self.addCleanup(fresh.stop_all)
-        with mock.patch("agent_terminal.frontends.RESTORE_RETRY_EVERY", 0.2), \
-                mock.patch("agent_terminal.frontends.tailscale.available", lambda: available["up"]):
+        with mock.patch("crewhall.frontends.RESTORE_RETRY_EVERY", 0.2), \
+                mock.patch("crewhall.frontends.tailscale.available", lambda: available["up"]):
             fresh.begin_restore()
             import threading
             threading.Thread(target=fresh.restore, daemon=True).start()
@@ -227,8 +227,8 @@ class SavedModeIsIntentNotStatus(FrontendBase):
     def test_shutting_down_cancels_the_retry_loop(self):
         json.dump({"mode": "tailscale", "port": self.port}, open(self.state_file, "w"))
         fresh = FrontendManager(paths.socket_path(), state_file=self.state_file)
-        with mock.patch("agent_terminal.frontends.RESTORE_RETRY_EVERY", 30), \
-                mock.patch("agent_terminal.frontends.tailscale.available", lambda: False):
+        with mock.patch("crewhall.frontends.RESTORE_RETRY_EVERY", 30), \
+                mock.patch("crewhall.frontends.tailscale.available", lambda: False):
             import threading
             t = threading.Thread(target=fresh.restore, daemon=True)
             t.start()

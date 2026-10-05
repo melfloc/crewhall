@@ -19,13 +19,13 @@ The rules below are the project's contract; they are enforced by review and CI.
 
 - Python ≥ 3.11, no runtime dependencies (`dependencies = []`).
 - Tests: `python -m unittest discover` **from the repository root**.
-- Lint: `ruff check agent_terminal tests scripts` (must pass).
+- Lint: `ruff check crewhall tests scripts` (must pass).
 - Agents/adapters: read `ADAPTERS.md`; a new adapter is not done until the
   **contract kit** (`tests/adapter_contract.py`) passes and a real run is
   documented in `ADAPTERS.md` §8. Scaffold with
   `crewhall adapter new <kind>`.
 - Versioning: `RELEASING.md` (SemVer; a feature is MINOR). Update
-  `pyproject.toml`, `agent_terminal/__init__.py` and `CHANGELOG.md` together.
+  `pyproject.toml`, `crewhall/__init__.py` and `CHANGELOG.md` together.
 
 ## Commits
 

@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest import mock
 
-from agent_terminal import Controller, OpenCodeHarness, paths, reset
+from crewhall import Controller, OpenCodeHarness, paths, reset
 
 from .support import FakeSession
 
@@ -69,7 +69,7 @@ class Reset(unittest.TestCase):
         self.assertEqual(self.fe.calls, [])
 
     def test_services_bounces_the_web_ui_and_signs_browsers_out(self):
-        from agent_terminal.web import auth
+        from crewhall.web import auth
 
         auth.issue_session(ip="1.2.3.4")
         out = reset.apply(self.c, self.fe, "services")
@@ -89,7 +89,7 @@ class Reset(unittest.TestCase):
         self.assertFalse(os.path.exists(self.new))  # a full reset clears the whole temp dir
 
     def test_full_can_forget_teams_and_agents_and_restore_default_settings(self):
-        from agent_terminal import settings
+        from crewhall import settings
 
         os.makedirs(paths.state_dir(), exist_ok=True)
         open(paths.state_path(), "w").write('{"schema": 1, "teams": [], "agents": []}')

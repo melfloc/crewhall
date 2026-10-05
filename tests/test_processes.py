@@ -9,10 +9,10 @@ import time
 import unittest
 from unittest import mock
 
-from agent_terminal import ClaudeCodeHarness, Controller, OpenCodeHarness
-from agent_terminal import processes as procs
-from agent_terminal.harness import AgentState
-from agent_terminal.types import Status
+from crewhall import ClaudeCodeHarness, Controller, OpenCodeHarness
+from crewhall import processes as procs
+from crewhall.harness import AgentState
+from crewhall.types import Status
 
 from .support import FakeSession
 
@@ -93,7 +93,7 @@ class FakeAgentProcess(unittest.TestCase):
         harness = ClaudeCodeHarness(session, name="c")
         c.register_agent(harness)
         harness.conversation_id = "11111111-2222-3333-4444-555555555555"
-        with mock.patch("agent_terminal.paths.usable_tmpdir", lambda: self.tmp):
+        with mock.patch("crewhall.paths.usable_tmpdir", lambda: self.tmp):
             listing = c.list_processes("c")
             self.assertEqual(listing["agent_pid"], self.agent.pid)
             self.assertEqual(listing["shells"][0]["output"]["task"], "btask01")
@@ -114,7 +114,7 @@ class FakeAgentProcess(unittest.TestCase):
         session = FakeSession(screen="", name="c")
         session.status = Status.EXITED
         c.register_agent(ClaudeCodeHarness(session, name="c"))
-        from agent_terminal.harness import HarnessError
+        from crewhall.harness import HarnessError
 
         with self.assertRaises(HarnessError):
             c.list_processes("c")

@@ -628,7 +628,7 @@ agentes se reactivan on-demand. No hay auto-restart de agentes.
 
 ## Web UI como cliente (Fase 11)
 
-La Web UI es **otra interfaz** del mismo motor. El servidor (`agent_terminal/web/`,
+La Web UI es **otra interfaz** del mismo motor. El servidor (`crewhall/web/`,
 stdlib) expone una lista blanca de operaciones que traduce a `Client`/control plane;
 nunca habla con tmux/PTY/Harness. El estado se empuja por WebSocket mediante una
 **adaptación server-side** que sondea el daemon a baja frecuencia y difunde sólo

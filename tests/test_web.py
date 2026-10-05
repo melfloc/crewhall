@@ -12,8 +12,8 @@ import time
 import unittest
 import urllib.request
 
-from agent_terminal.web import ws
-from agent_terminal.web.server import WebServer
+from crewhall.web import ws
+from crewhall.web.server import WebServer
 
 
 def _free_port() -> int:
@@ -57,7 +57,7 @@ class WebSocketEvents(unittest.TestCase):
         os.environ["XDG_RUNTIME_DIR"] = cls.tmp
         os.environ["XDG_CONFIG_HOME"] = cls.tmp
         os.environ["XDG_STATE_HOME"] = cls.tmp
-        from agent_terminal.web import auth
+        from crewhall.web import auth
 
         cls.token = auth.generate_token()
         cls.port = _free_port()
@@ -73,7 +73,7 @@ class WebSocketEvents(unittest.TestCase):
         except Exception:
             pass
         try:
-            from agent_terminal.client import Client
+            from crewhall.client import Client
 
             Client(autostart=False).call("shutdown")
         except Exception:
@@ -90,7 +90,7 @@ class WebSocketEvents(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def _ws(self):
-        from agent_terminal.web import auth
+        from crewhall.web import auth
 
         s = socket.create_connection(("127.0.0.1", self.port), timeout=5)
         key = base64.b64encode(os.urandom(16)).decode()
@@ -147,7 +147,7 @@ class WebSocketEvents(unittest.TestCase):
         # API the web uses, and expect an output frame over the WebSocket.
         import shutil as _shutil
 
-        from agent_terminal.client import Client
+        from crewhall.client import Client
 
         backend = "tmux" if _shutil.which("tmux") else "pty"
         client = Client()
@@ -212,7 +212,7 @@ class WebServerTest(unittest.TestCase):
         except Exception:
             pass
         try:
-            from agent_terminal.client import Client
+            from crewhall.client import Client
 
             Client(autostart=False).call("shutdown")
         except Exception:
@@ -341,7 +341,7 @@ class WebServerTest(unittest.TestCase):
         self.assertTrue(any(b["name"] == r["name"] for b in listing["bundles"]))
 
     def test_bundle_import_previews_and_applies_team_definitions(self):
-        from agent_terminal import bundle, paths
+        from crewhall import bundle, paths
 
         dest_dir = os.path.join(paths.state_dir(), "bundles")
         os.makedirs(dest_dir, mode=0o700, exist_ok=True)
@@ -425,7 +425,7 @@ class WebServerTest(unittest.TestCase):
         self.assertFalse(chk["providers"][0]["ok"])
 
     def test_token_rotation_returns_a_new_token_once_and_old_one_stops_working(self):
-        from agent_terminal.web import auth
+        from crewhall.web import auth
 
         old = auth.generate_token(rotate=True)
         self.addCleanup(lambda: auth.revoke_token())

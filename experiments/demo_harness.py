@@ -8,7 +8,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_terminal import AgentState, Controller
+from crewhall import AgentState, Controller
 
 
 def main() -> None:

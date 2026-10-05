@@ -7,9 +7,9 @@ import time
 import unittest
 import uuid
 
-from agent_terminal import Controller
-from agent_terminal.control_files import BEGIN, END
-from agent_terminal.messaging import MessagingError
+from crewhall import Controller
+from crewhall.control_files import BEGIN, END
+from crewhall.messaging import MessagingError
 
 RUN = (
     os.environ.get("AT_RUN_CLAUDE") == "1"

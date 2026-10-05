@@ -10,7 +10,7 @@ import threading
 import unittest
 from unittest import mock
 
-from agent_terminal.control_files import BEGIN, END, ensure_managed_section, managed_section
+from crewhall.control_files import BEGIN, END, ensure_managed_section, managed_section
 
 B, E = BEGIN.encode(), END.encode()
 

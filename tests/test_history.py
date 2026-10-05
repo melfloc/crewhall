@@ -7,8 +7,8 @@ import unittest
 import uuid
 from unittest import mock
 
-from agent_terminal import ClaudeCodeHarness, Controller
-from agent_terminal.transcripts import find_session_file, parse_entries, read_history
+from crewhall import ClaudeCodeHarness, Controller
+from crewhall.transcripts import find_session_file, parse_entries, read_history
 
 from .support import FakeSession
 
@@ -126,7 +126,7 @@ class StoppedAgentKeepsConversation(unittest.TestCase):
         self.addCleanup(p.stop)
 
     def test_summary_offers_history_by_kind_even_before_any_message(self):
-        from agent_terminal import OpenCodeHarness
+        from crewhall import OpenCodeHarness
 
         c = Controller(adopt=False)
         claude = ClaudeCodeHarness(FakeSession(screen="", name="c"), name="c")
@@ -137,7 +137,7 @@ class StoppedAgentKeepsConversation(unittest.TestCase):
             self.assertTrue(c.agent_summary(h)["history"], h.kind)
 
     def test_conversation_id_is_persisted_and_restored_for_a_stopped_agent(self):
-        from agent_terminal.persistence import StateStore
+        from crewhall.persistence import StateStore
 
         sid = str(uuid.uuid4())
         proj = os.path.join(self.tmp, "projects", "-p")
@@ -162,7 +162,7 @@ class StoppedAgentKeepsConversation(unittest.TestCase):
 
 class InternalWrappersAreHidden(unittest.TestCase):
     def test_pasted_content_and_slash_command_wrappers_read_like_what_the_user_saw(self):
-        from agent_terminal.transcripts import clean_user_text, parse_entries
+        from crewhall.transcripts import clean_user_text, parse_entries
 
         self.assertEqual(clean_user_text('<pasted_content id="b678"> [from: a] REPORTE largo </pasted_content>').strip(),
                          "[from: a] REPORTE largo")

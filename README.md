@@ -75,7 +75,8 @@ interface; `crewhall agent list` shows agents.
 - Data: on first run `~/.config/agent-terminal` and `~/.local/state/agent-terminal`
   are **copied** (never moved or deleted) to `.../crewhall`, so you can roll back.
 - Services: `crewhall service install` retires the old `agent-terminal*.service` units.
-- The Python import package is still `agent_terminal`.
+- The Python import package is now `crewhall` (it was `agent_terminal`): update any
+  `import agent_terminal` in your own code.
 
 ## Security
 
@@ -98,7 +99,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Providers and MCP
 
-Each provider is an adapter (`agent_terminal/harness/<kind>.py`) that translates its
+Each provider is an adapter (`crewhall/harness/<kind>.py`) that translates its
 TUI into states and the few actions the core needs. It declares its capabilities
 (hooks, local server, task files, MCP) and must pass the **contract kit**
 (`tests/adapter_contract.py`). Scaffold a new one with
@@ -115,9 +116,9 @@ tested. Python 3.11–3.14.
 ## Development
 
 - Tests: `python -m unittest discover` **from the repository root**.
-- Lint: `ruff check agent_terminal tests scripts`.
+- Lint: `ruff check crewhall tests scripts`.
 - One atomic commit per change; version in `pyproject.toml`,
-  `agent_terminal/__init__.py` and `CHANGELOG.md`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+  `crewhall/__init__.py` and `CHANGELOG.md`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
