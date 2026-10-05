@@ -69,6 +69,7 @@ def _dim(value: Any, name: str) -> int:
 class Server:
     def __init__(self, controller: Controller, socket_path: str) -> None:
         self.controller = controller
+        controller.set_gateway_dispatch(self.dispatch)
         self.socket_path = socket_path
         self._stop = threading.Event()
         self._sock: socket.socket | None = None

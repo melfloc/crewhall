@@ -192,6 +192,12 @@ hay ninguno (cerrado):
 identidad, con permisos 0600/0400. Se rechazan claves desconocidas, destinos con
 espacios o metacaracteres y cualquier opción SSH arbitraria.
 
+**Mensajería de agentes remotos (opcional, cerrada por defecto).** Con
+`"tunnel": true` en el host, el daemon abre un túnel SSH inverso hacia un *gateway*
+restringido (solo identidad, mensajes y requests de agentes con token; nada del
+plano de control). Requiere `crewhall` instalado en el host remoto. El agente recibe
+`CREWHALL_SOCKET` apuntando a ese socket y `CREWHALL_GATEWAY=1`.
+
 ```bash
 crewhall agent create --kind opencode --name reviewer --host prod1 --wait
 crewhall agent capture reviewer --recent

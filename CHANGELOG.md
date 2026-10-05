@@ -5,6 +5,40 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.60.0] — 2026-10-05
+
+_Fase 2a: mensajería de agentes remotos hacia el daemon local por túnel SSH inverso._
+
+Threat model (túnel de mensajería):
+
+- **Activo**: el socket del daemon es un plano de control completo (crear, matar,
+  escribir, ajustes). Exponerlo por el túnel dejaría que cualquier proceso del host
+  remoto gobernara la máquina local. **Nunca se reenvía**: cada host con túnel
+  tiene su propio *gateway* restringido.
+- El gateway solo admite las operaciones de agente autenticadas por token
+  (`agent_identity`, `team_send`, `request_create/reply/cancel`) más un `ping`
+  mínimo; todo lo demás se rechaza antes de llegar al daemon. Exige token no vacío y
+  que el agente que actúa **viva en ese host** (un host comprometido no puede hablar
+  como un agente local ni de otro host); el controlador sigue verificando el token.
+  Se descartan los campos `_*` del cliente (`_actor` lo pone el gateway) y se acotan
+  tamaño, tiempo de lectura y concurrencia.
+- El socket del gateway es 0600 en el directorio privado 0700; el remoto vive en un
+  directorio 0700, propio y sin symlinks (se verifica antes de reenviar).
+- El proceso del túnel ignora `~/.ssh/config` (`-F /dev/null`), conserva las opciones
+  estrictas (`StrictHostKeyChecking=yes`, `ForwardAgent=no`, `ExitOnForwardFailure`)
+  y se reconecta con retroceso acotado. Con el túnel caído el agente no se lanza con
+  un socket inservible (`HostUnreachable`).
+- Cerrado por defecto: `hosts.<name>.tunnel` (bool, `false`).
+
+- Nuevo `crewhall/gateway.py` y `crewhall/remote_link.py`; el controlador inyecta
+  `CREWHALL_SOCKET` (ruta remota) y `CREWHALL_GATEWAY=1` en los agentes remotos; con
+  `CREWHALL_GATEWAY` el cliente nunca autoarranca un daemon en el host remoto.
+- Requisito: `crewhall` instalado en el host remoto (el agente usa su CLI).
+- Corrección (0.59.0): el entorno del agente llegaba solo al primer agente de cada
+  host remoto; con un servidor tmux ya activo el panel no lo heredaba. Ahora el
+  comando del panel carga y borra el fichero de entorno, como el backend local.
+- Pendiente: hooks/transcripts/worktrees remotos y UI de estado del host.
+
 ## [0.59.0] — 2026-10-05
 
 _Agentes en tmux sobre otro equipo, alcanzado por SSH._

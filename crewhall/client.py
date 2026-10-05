@@ -34,7 +34,9 @@ class Client:
             or brand.env("SOCKET")
             or paths.socket_path()
         )
-        self.autostart = autostart
+        # A tunnelled remote agent talks to a gateway, never to a daemon it
+        # could (wrongly) spawn on its own machine.
+        self.autostart = autostart and not brand.env("GATEWAY")
 
     def call(self, op: str, **params: Any) -> dict[str, Any]:
         if self.autostart:

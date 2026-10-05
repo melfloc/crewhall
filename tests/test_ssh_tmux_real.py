@@ -20,6 +20,7 @@ from unittest import mock
 from crewhall import settings
 from crewhall.backends import ssh_tmux
 from crewhall.controller import Controller
+from crewhall.remote_link import HostLink
 from crewhall.session import InteractiveSession
 from crewhall.types import SessionSpec
 
@@ -317,6 +318,122 @@ class SshTmuxRealTests(unittest.TestCase):
             except OSError:
                 continue
         return "\n".join(out)
+
+
+@unittest.skipUnless(HAVE, "ssh/sshd/ssh-keygen/tmux not installed")
+class SshTunnelRealTests(unittest.TestCase):
+    """Reverse tunnel + restricted gateway against an ephemeral sshd."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sshd = SshdHarness()
+        cls.sshd.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.sshd.cleanup()
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="ati-sshgw-", dir="/tmp")
+        env = mock.patch.dict(os.environ, {
+            "XDG_CONFIG_HOME": os.path.join(self.root, "config"),
+            "XDG_STATE_HOME": os.path.join(self.root, "state"),
+            "XDG_RUNTIME_DIR": os.path.join(self.root, "run"),
+        })
+        env.start(); self.addCleanup(env.stop)
+        os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        settings.patch({"hosts": {HOST_ALIAS: {**self.sshd.host_config(), "tunnel": True}}})
+        self.calls: list[dict] = []
+
+        def dispatch(req):
+            self.calls.append(req)
+            return {"ok": True, "op": req["op"]}
+
+        self.link = HostLink(settings.host(HOST_ALIAS), dispatch,
+                             lambda ref: HOST_ALIAS if ref == "agent-1" else None)
+        self.addCleanup(self.link.stop)
+        self.backend = ssh_tmux.SshTmuxBackend(settings.host(HOST_ALIAS))
+
+    def _remote_call(self, request: dict) -> dict:
+        script = (
+            "import json,socket,sys\n"
+            "s=socket.socket(socket.AF_UNIX);s.settimeout(10);s.connect(sys.argv[1])\n"
+            "s.sendall(sys.stdin.buffer.read());d=b''\n"
+            "while b'\\n' not in d:\n"
+            "    c=s.recv(65536)\n"
+            "    if not c: break\n"
+            "    d+=c\n"
+            "print(d.decode().strip())\n"
+        )
+        import json, shlex
+        cmd = f"python3 -c {shlex.quote(script)} {shlex.quote(self.link.remote_socket)}"
+        proc = self.backend._ssh_run(cmd, input=json.dumps(request) + "\n", timeout=20)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)
+
+    def test_remote_agent_reaches_gateway_and_nothing_else(self):
+        path = self.link.ensure()
+        self.assertEqual(self.link.state, "connected")
+        # The remote socket sits in a private directory.
+        mode = self.backend._ssh_run(f"stat -c %a {os.path.dirname(path)}").stdout.strip()
+        self.assertEqual(mode, "700")
+
+        ok = self._remote_call({"op": "agent_identity", "target": "agent-1", "token": "tok"})
+        self.assertTrue(ok["ok"])
+        self.assertEqual(self.calls[-1]["_actor"], f"ssh:{HOST_ALIAS}")
+
+        sent = len(self.calls)
+        for bad in ({"op": "shutdown"},
+                    {"op": "agent_create", "kind": "claude"},
+                    {"op": "settings_set", "key": "x", "value": 1},
+                    {"op": "agent_identity", "target": "local-agent", "token": "tok"}):
+            self.assertFalse(self._remote_call(bad)["ok"], bad)
+        self.assertEqual(len(self.calls), sent, "a refused op must never reach the daemon")
+
+    def test_tunnel_recovers_after_the_ssh_process_dies(self):
+        self.link.ensure()
+        first = self.link._proc
+        first.kill()
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if self.link._proc is not first and self.link.state == "connected":
+                break
+            time.sleep(0.2)
+        self.assertEqual(self.link.state, "connected")
+        self.assertTrue(self._remote_call({"op": "ping"})["ok"])
+        self.assertTrue(self._remote_call(
+            {"op": "agent_identity", "target": "agent-1", "token": "tok"})["ok"])
+
+    def test_controller_points_tunnelled_agents_at_the_gateway(self):
+        controller = Controller(adopt=False, persist=False)
+        self.addCleanup(controller.remote_links.stop_all)
+        controller.set_gateway_dispatch(lambda req: {"ok": True})
+        local = controller._build_agent_env("a1", "a1", [], None)
+        self.assertNotIn("CREWHALL_GATEWAY", local)
+        env = controller._build_agent_env("a1", "a1", [], None, HOST_ALIAS)
+        link = controller.remote_links._links[HOST_ALIAS]
+        self.assertEqual(env["CREWHALL_SOCKET"], link.remote_socket)
+        self.assertNotEqual(env["CREWHALL_SOCKET"], local["CREWHALL_SOCKET"])
+        self.assertEqual(env["CREWHALL_GATEWAY"], "1")
+        # Never advertise a socket that cannot work: a down host aborts the launch.
+        self.sshd.stop()
+        self.addCleanup(self.sshd.start)
+        link.stop()
+        controller.remote_links._links.clear()
+        with mock.patch("crewhall.remote_link.READY_TIMEOUT", 2.0):
+            with self.assertRaises(ssh_tmux.HostUnreachable):
+                controller.remote_links.ensure(settings.host(HOST_ALIAS))
+
+    def test_tunnel_argv_ignores_user_ssh_config_and_is_strict(self):
+        argv = self.link._tunnel_argv("/remote/gw.sock")
+        self.assertEqual(argv[:3], ["ssh", "-F", "/dev/null"])
+        joined = " ".join(argv)
+        for opt in ("StrictHostKeyChecking=yes", "ForwardAgent=no", "ExitOnForwardFailure=yes",
+                    "BatchMode=yes", "ControlPath=none"):
+            self.assertIn(opt, joined)
+        self.assertEqual(argv[argv.index("-R") + 1], f"/remote/gw.sock:{self.link.gateway_path}")
+        self.assertEqual(argv[-2:], ["--", settings.host(HOST_ALIAS)["ssh"]])
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crewhall"
-version = "0.59.0"
+version = "0.60.0"
 description = "Control real interactive CLI agents (Claude Code, OpenCode, Codex) from one place and let them talk to each other."
 readme = "README.md"
 requires-python = ">=3.11"

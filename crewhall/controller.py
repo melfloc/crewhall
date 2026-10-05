@@ -24,6 +24,7 @@ from .opencode_link import OpenCodeLink, free_port
 from .messaging import Delivery, Messaging, MessagingError
 from .requests import OPEN_STATES, RequestBoard, RequestError
 from .persistence import StateStore
+from .remote_link import RemoteLinks
 from .session import InteractiveSession
 from .team import Team, TeamRegistry
 from .types import SessionSpec, Status, new_session_id, parse_agent_args
@@ -137,6 +138,9 @@ class Controller:
         self._agent_args: dict[str, list[str]] = {}
         # Configured SSH host per agent (None = local), kept for restart/restore.
         self._agent_hosts: dict[str, str | None] = {}
+        # Reverse SSH tunnels + restricted gateways for hosts with tunnel=true.
+        self.remote_links = RemoteLinks()
+        self.remote_links.host_of = self._host_of_agent
         # Agent lifecycle hooks (Claude ``--settings``): an exact turn-complete
         # signal pushed to the daemon instead of guessed from the screen.
         self.hooks_enabled = settings.get("agents.hooks")
@@ -198,12 +202,20 @@ class Controller:
     def _shared_team(self, a: str, b: str) -> bool:
         return bool(set(self._team_ids_of(a)) & set(self._team_ids_of(b)))
 
+    def set_gateway_dispatch(self, dispatch: Any) -> None:
+        """Daemon hook: the op dispatcher the host gateways forward to."""
+        self.remote_links.dispatch = dispatch
+
+    def _host_of_agent(self, ref: str) -> str | None:
+        return self._agent_hosts.get(self.agents.resolve(ref).agent_id)
+
     def _build_agent_env(
         self,
         agent_id: str,
         name: str,
         teams: list[str],
         extra: dict[str, str] | None,
+        host: str | None = None,
     ) -> dict[str, str]:
         env = dict(extra or {})
         self._ensure_usable_tmpdir(env)
@@ -214,6 +226,12 @@ class Controller:
             "TOKEN": self._agent_token(agent_id),
             "SOCKET": paths.socket_path(),
         }
+        if host and settings.host(host).get("tunnel"):
+            # The remote agent reaches the restricted gateway, never the daemon.
+            # A down tunnel raises HostUnreachable: the agent is not launched
+            # with a socket path that cannot work.
+            values["SOCKET"] = self.remote_links.ensure(settings.host(host)).remote_socket
+            values["GATEWAY"] = "1"
         for key, value in values.items():
             env[f"{brand.ENV_PREFIX}_{key}"] = value
             env[f"{brand.LEGACY_ENV_PREFIX}_{key}"] = value  # old clients/scripts
@@ -858,7 +876,7 @@ class Controller:
                 mode = None
         if mode == "worktree" and not host:
             cwd = self._make_worktree(session_id, agent_name, team, cwd)
-        agent_env = self._build_agent_env(session_id, agent_name, [], env)
+        agent_env = self._build_agent_env(session_id, agent_name, [], env, host)
         if link:
             agent_env["OPENCODE_SERVER_PASSWORD"] = link.password
         spec = SessionSpec(
@@ -1009,7 +1027,7 @@ class Controller:
             # Rebuild from the user's original env (not the identity-augmented
             # one) to avoid duplicated/derived keys across restarts.
             base_env = dict(self._base_env.get(agent_id) or {})
-            env = self._build_agent_env(agent_id, harness.name or agent_id, teams, base_env)
+            env = self._build_agent_env(agent_id, harness.name or agent_id, teams, base_env, host)
             if link:
                 env["OPENCODE_SERVER_PASSWORD"] = link.password
             new_spec = SessionSpec(
@@ -1544,6 +1562,7 @@ class Controller:
         return removed
 
     def shutdown(self) -> None:
+        self.remote_links.stop_all()
         for agent_id in list(self._mcp_files):
             self._mcp_cleanup(agent_id)
         for harness in self.agents.all():

@@ -224,7 +224,7 @@ def _provider_value(field: str, value: Any, kind: str) -> Any:
 # A deliberately tiny, fixed schema: crewhall builds the ``ssh`` argv itself and
 # never accepts user-supplied SSH options, so a host entry cannot weaken host-key
 # checking, enable agent forwarding or inject shell metacharacters.
-HOST_KEYS = {"ssh", "port", "identity", "tmux_socket", "known_hosts"}
+HOST_KEYS = {"ssh", "port", "identity", "tmux_socket", "known_hosts", "tunnel"}
 _HOST_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _TMUX_SOCKET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _SSH_BAD_CHARS = set(" \t\r\n\0;|&$`\"'\\")
@@ -306,8 +306,13 @@ def _validate_host(name: Any, body: Any) -> dict[str, Any]:
     tmux_socket = body.get("tmux_socket") or "crewhall"
     if not isinstance(tmux_socket, str) or not _TMUX_SOCKET_RE.match(tmux_socket):
         raise SettingsError(f"hosts.{name}.tmux_socket: an invalid tmux socket name")
+    # Opt-in (closed by default): lets remote agents reach this daemon's
+    # restricted agent gateway over a reverse SSH tunnel.
+    tunnel = body.get("tunnel", False)
+    if not isinstance(tunnel, bool):
+        raise SettingsError(f"hosts.{name}.tunnel: true or false expected")
     return {"ssh": destination, "port": port, "identity": identity,
-            "known_hosts": known_hosts, "tmux_socket": tmux_socket}
+            "known_hosts": known_hosts, "tmux_socket": tmux_socket, "tunnel": tunnel}
 
 
 def hosts() -> dict[str, dict[str, Any]]:
