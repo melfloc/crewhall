@@ -5,6 +5,28 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.62.0] — 2026-10-05
+
+_Fase 2c: historial y actividad de agentes remotos (transcripts de Claude por SSH)._
+
+Threat model:
+
+- Lo único que se lee del host remoto es el transcript de la sesión del propio
+  agente. El id debe ser un UUID (se rechaza antes de tocar la red) y viaja como
+  argumento posicional, nunca interpolado; se rechazan symlinks y solo vuelve la
+  cola (≤ 8 MiB) del fichero.
+- Los datos remotos son opcionales y honestos: un host caído o un transcript
+  ausente da `available: false`/`{}` (n/d), nunca un valor inventado; la cola muy
+  grande se marca `truncated`.
+- La ruta sondeada (modelo/herramienta en curso) **no espera a la red**: devuelve
+  la última cola conocida y refresca en segundo plano, de modo que un host caído
+  no bloquea el listado de agentes. Caché de 3 s y descarte tras 2 min.
+
+- Nuevo `crewhall/remote_files.py`; `read_history(..., host=)` y
+  `claude_snapshot(..., host=)`; el arnés de Claude usa el host del agente.
+- Se usa el directorio de config de Claude del propio host remoto
+  (`CLAUDE_CONFIG_DIR` o `~/.claude`).
+
 ## [0.61.0] — 2026-10-05
 
 _Fase 2b: hooks de agentes remotos y cierre de un riesgo del PID remoto._

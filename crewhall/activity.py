@@ -46,13 +46,38 @@ def _brief(args: Any) -> str | None:
     return None
 
 
-def claude_snapshot(session_id: str | None) -> dict[str, Any]:
-    """Model and still-unanswered tool call from the end of a Claude transcript."""
-    path = transcripts.find_session_file(session_id or "")
-    if not path:
-        return {}
+def _window(lines: list[str], window: int) -> list[str]:
+    """The trailing lines that fit ``window`` bytes (for an already-fetched tail)."""
+    out: list[str] = []
+    size = 0
+    for line in reversed(lines):
+        size += len(line) + 1
+        if size > window and out:
+            break
+        out.append(line)
+    return out[::-1]
+
+
+def claude_snapshot(session_id: str | None, host: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Model and still-unanswered tool call from the end of a Claude transcript.
+
+    For a remote agent the last fetched tail is used (never a network wait here);
+    nothing known yet means no data, not a guess.
+    """
+    if host is not None:
+        from . import remote_files
+
+        fetched = remote_files.snapshot_lines(host, session_id or "")
+        if not fetched:
+            return {}
+        tail = lambda window: _window(fetched, window)  # noqa: E731
+    else:
+        path = transcripts.find_session_file(session_id or "")
+        if not path:
+            return {}
+        tail = lambda window: _tail_lines(path, window)  # noqa: E731
     model, pending = None, {}
-    for line in _tail_lines(path):
+    for line in tail(_TAIL):
         try:
             entry = json.loads(line)
         except ValueError:
@@ -74,7 +99,7 @@ def claude_snapshot(session_id: str | None) -> dict[str, Any]:
                 pending.pop(block.get("tool_use_id"), None)
     running = list(pending.values())[-1] if pending else None
     if not model:  # a huge tool result can push every assistant entry out of the tail
-        for line in reversed(_tail_lines(path, _MODEL_SCAN)):
+        for line in reversed(tail(_MODEL_SCAN)):
             if '"model"' not in line:
                 continue
             try:

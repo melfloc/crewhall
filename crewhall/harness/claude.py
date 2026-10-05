@@ -84,12 +84,24 @@ class ClaudeCodeHarness(Harness):
             args += ["--session-id", conversation_id]
         return args
 
+    def _host_cfg(self) -> dict | None:
+        """The configured SSH host of a remote agent (None for a local one)."""
+        name = getattr(self.session.spec, "host", None)
+        if not name:
+            return None
+        from .. import settings
+
+        try:
+            return settings.host(name)
+        except settings.SettingsError:
+            return None
+
     def history(self, limit: int = 200, before: int | None = None) -> dict:
         from ..transcripts import read_history
 
         if not self.conversation_id:
             return super().history(limit, before)
-        return read_history(self.conversation_id, limit, before)
+        return read_history(self.conversation_id, limit, before, host=self._host_cfg())
 
     @classmethod
     def mcp_config_file(cls) -> str | None:
@@ -104,7 +116,7 @@ class ClaudeCodeHarness(Harness):
     def activity_snapshot(self) -> dict:
         from .. import activity
 
-        return activity.claude_snapshot(self.conversation_id)
+        return activity.claude_snapshot(self.conversation_id, host=self._host_cfg())
 
     @classmethod
     def model_from_screen(cls, text: str | None) -> str | None:

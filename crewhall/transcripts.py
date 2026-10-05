@@ -149,15 +149,34 @@ def _entries_for(path: str) -> list[dict[str, Any]] | None:
     return entries
 
 
-def read_history(session_id: str, limit: int = 200, before: int | None = None) -> dict[str, Any]:
-    """Return a page of messages ending at index ``before`` (default: latest)."""
-    path = find_session_file(session_id)
-    if path is None:
-        return {"available": False, "messages": [], "total": 0, "start": 0}
-    entries = _entries_for(path)
-    if entries is None:
-        return {"available": False, "messages": [], "total": 0, "start": 0}
+def read_history(session_id: str, limit: int = 200, before: int | None = None,
+                 host: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return a page of messages ending at index ``before`` (default: latest).
+
+    With ``host`` (a configured SSH host) the transcript is read from that
+    machine; very large files are cut to their tail (``truncated``).
+    """
+    unavailable = {"available": False, "messages": [], "total": 0, "start": 0}
+    truncated = False
+    if host is not None:
+        from . import remote_files
+
+        got = remote_files.lines_cached(host, session_id)
+        if got is None:
+            return {**unavailable, "remote": True}
+        entries, truncated = parse_entries(got[0]), got[1]
+    else:
+        path = find_session_file(session_id)
+        if path is None:
+            return unavailable
+        entries = _entries_for(path)
+        if entries is None:
+            return unavailable
     total = len(entries)
     end = total if before is None else max(0, min(int(before), total))
     start = max(0, end - max(1, min(int(limit), 1000)))
-    return {"available": True, "messages": entries[start:end], "total": total, "start": start}
+    out = {"available": True, "messages": entries[start:end], "total": total, "start": start}
+    if host is not None:
+        out["remote"] = True
+        out["truncated"] = truncated
+    return out

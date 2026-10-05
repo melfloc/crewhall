@@ -87,6 +87,9 @@ class SshdHarness:
         self.config = os.path.join(self.dir, "sshd_config")
         self.log = os.path.join(self.dir, "sshd.log")
         self.pidfile = os.path.join(self.dir, "sshd.pid")
+        # Remote Claude config dir for transcript tests (never the real ~/.claude).
+        self.claude_dir = os.path.join(self.dir, "claude")
+        os.makedirs(os.path.join(self.claude_dir, "projects", "proj"))
         self._proc: subprocess.Popen | None = None
         self._build()
 
@@ -119,6 +122,7 @@ class SshdHarness:
                 "PermitRootLogin no\n"
                 "PrintMotd no\n"
                 "LogLevel ERROR\n"
+                f"SetEnv CLAUDE_CONFIG_DIR={self.claude_dir}\n"
             )
 
     def start(self) -> None:
@@ -449,6 +453,94 @@ class SshTunnelRealTests(unittest.TestCase):
             self.assertIn(opt, joined)
         self.assertEqual(argv[argv.index("-R") + 1], f"/remote/gw.sock:{self.link.gateway_path}")
         self.assertEqual(argv[-2:], ["--", settings.host(HOST_ALIAS)["ssh"]])
+
+
+@unittest.skipUnless(HAVE, "ssh/sshd/ssh-keygen/tmux not installed")
+class SshTranscriptRealTests(unittest.TestCase):
+    """Remote Claude transcripts (history + activity) over SSH."""
+
+    UUID = "11111111-2222-3333-4444-555555555555"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sshd = SshdHarness()
+        cls.sshd.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.sshd.cleanup()
+
+    def setUp(self):
+        from crewhall import remote_files
+
+        remote_files._cache.clear()
+        self.host = {**self.sshd.host_config(), "name": HOST_ALIAS}
+        self.root = tempfile.mkdtemp(prefix="ati-sshtr-", dir="/tmp")
+        env = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": os.path.join(self.root, "run")})
+        env.start(); self.addCleanup(env.stop)
+        os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.file = os.path.join(self.sshd.claude_dir, "projects", "proj", f"{self.UUID}.jsonl")
+        lines = [
+            {"type": "user", "message": {"role": "user", "content": "hello remote"}},
+            {"type": "assistant", "message": {"role": "assistant", "model": "claude-test-1",
+             "content": [{"type": "text", "text": "hi there"},
+                         {"type": "tool_use", "id": "t1", "name": "Bash",
+                          "input": {"command": "sleep 9"}}]}},
+        ]
+        import json
+        with open(self.file, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(json.dumps(x) for x in lines) + "\n")
+        self.addCleanup(lambda: os.path.exists(self.file) and os.unlink(self.file))
+
+    def test_history_is_read_from_the_remote_host(self):
+        from crewhall import transcripts
+
+        out = transcripts.read_history(self.UUID, host=self.host)
+        self.assertTrue(out["available"])
+        self.assertTrue(out["remote"])
+        self.assertFalse(out["truncated"])
+        text = str(out["messages"])
+        self.assertIn("hello remote", text)
+        self.assertIn("hi there", text)
+
+    def test_missing_invalid_and_symlinked_transcripts_are_unavailable(self):
+        from crewhall import transcripts
+
+        other = "99999999-2222-3333-4444-555555555555"
+        self.assertFalse(transcripts.read_history(other, host=self.host)["available"])
+        with mock.patch.object(ssh_tmux.SshTmuxBackend, "_ssh_run") as run:
+            for bad in ("../../etc/passwd", "x; touch /tmp/ati-pwn", ""):
+                self.assertFalse(transcripts.read_history(bad, host=self.host)["available"])
+            run.assert_not_called()
+        link = os.path.join(self.sshd.claude_dir, "projects", "proj", f"{other}.jsonl")
+        os.symlink(self.file, link)
+        self.addCleanup(os.unlink, link)
+        self.assertFalse(transcripts.read_history(other, host=self.host)["available"])
+
+    def test_activity_snapshot_never_blocks_and_fills_from_the_remote_tail(self):
+        from crewhall import activity, remote_files
+
+        t0 = time.monotonic()
+        first = activity.claude_snapshot(self.UUID, host=self.host)
+        self.assertLess(time.monotonic() - t0, 1.0, "the polled path must not wait on SSH")
+        self.assertEqual(first, {})  # nothing observed yet: n/d, not a guess
+        deadline = time.monotonic() + 15
+        snap: dict = {}
+        while time.monotonic() < deadline and not snap:
+            time.sleep(0.2)
+            snap = activity.claude_snapshot(self.UUID, host=self.host)
+        self.assertEqual(snap.get("model"), "claude-test-1")
+        self.assertEqual(snap["tool"]["name"], "Bash")
+
+    def test_down_host_gives_no_data_without_hanging(self):
+        from crewhall import transcripts
+
+        self.sshd.stop()
+        self.addCleanup(self.sshd.start)
+        t0 = time.monotonic()
+        self.assertFalse(transcripts.read_history(self.UUID, host=self.host)["available"])
+        self.assertLess(time.monotonic() - t0, 20)
 
 
 if __name__ == "__main__":
