@@ -141,6 +141,7 @@ class WebSocketEvents(unittest.TestCase):
         finally:
             s.close()
 
+    @unittest.skipUnless(shutil.which("opencode"), "needs the opencode CLI")
     def test_output_event_after_input(self):
         # Create an agent via the control plane, send input through the same
         # API the web uses, and expect an output frame over the WebSocket.
