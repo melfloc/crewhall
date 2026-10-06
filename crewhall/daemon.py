@@ -393,6 +393,28 @@ class Server:
     def _op_host_list(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"hosts": self.controller.host_status()}
 
+    @staticmethod
+    def _need_confirm(request: dict[str, Any], what: str) -> None:
+        # A host decides where code runs and which key is used: typed confirmation.
+        if request.get("confirm") != "CONFIRM":
+            raise ValueError(f"{what} needs typed confirmation")
+
+    def _op_host_set(self, request: dict[str, Any]) -> dict[str, Any]:
+        self._need_confirm(request, "changing a host")
+        body = {k: request[k] for k in ("ssh", "port", "identity", "known_hosts",
+                                        "tmux_socket", "tunnel") if k in request}
+        return {"host": self.controller.host_set(str(request.get("name") or ""), body)}
+
+    def _op_host_remove(self, request: dict[str, Any]) -> dict[str, Any]:
+        self._need_confirm(request, "removing a host")
+        return self.controller.host_remove(str(request.get("name") or ""))
+
+    def _op_host_test(self, request: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self.controller.host_test(str(request.get("name") or ""))
+        except settings.SettingsError as exc:
+            raise ValueError(str(exc)) from exc
+
     def _op_agent_info(self, request: dict[str, Any]) -> dict[str, Any]:
         harness = self.controller.get_agent(request["target"])
         return {"agent": self.controller.agent_summary(harness)}
@@ -700,6 +722,8 @@ class Server:
         return settings.describe()
 
     def _op_settings_set(self, request: dict[str, Any]) -> dict[str, Any]:
+        if "hosts" in (request.get("changes") or {}):
+            self._need_confirm(request, "changing hosts")
         try:
             return settings.patch(
                 request.get("changes") or {},

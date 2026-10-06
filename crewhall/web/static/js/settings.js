@@ -1,6 +1,6 @@
 "use strict";
 /* ---------- Settings: providers, agents, access & network, maintenance, interface, emergency ---------- */
-const SET_TABS = [["providers", "Providers"], ["agents", "Agents"], ["access", "Access & network"],
+const SET_TABS = [["providers", "Providers"], ["agents", "Agents"], ["hosts", "Remote hosts"], ["access", "Access & network"],
                   ["maintenance", "Maintenance"], ["interface", "Interface"], ["audit", "Audit"], ["emergency", "Emergency"]];
 const SK = { tab:"providers", data:null };
 
@@ -130,6 +130,84 @@ async function tabProviders(box){
   let checks = {};
   try { (await op("provider_check", {})).providers.forEach(c => checks[c.kind] = c); } catch(e){}
   box.replaceChildren(box.firstChild, ...SK.data.providers.map(p => providerCard(p, checks[p.kind])));
+}
+
+/* ----- remote hosts (agents on another machine over SSH) ----- */
+const HOST_STATE_LABEL = {ok:"reachable", unreachable:"unreachable", reconnecting:"reconnecting", unknown:"not checked yet"};
+function hostForm(h, onDone){
+  const editing = !!h, id = k => `hf-${k}`;
+  const f = (k, label, value, ph, hint, mono = true) => el("div", {className:"field"},
+    el("label", {htmlFor:id(k)}, label),
+    el("input", {className:"input" + (mono ? " mono" : ""), id:id(k), value:value ?? "", placeholder:ph, spellcheck:false, autocomplete:"off", disabled:editing && k === "name"}),
+    hint ? el("div", {className:"hint"}, hint) : null);
+  const tunnel = el("input", {type:"checkbox", id:id("tunnel"), checked:!!(h && h.tunnel)});
+  const err = el("div", {className:"err", role:"alert"});
+  const val = k => document.getElementById(id(k)).value.trim();
+  const save = el("button", {className:"btn primary", type:"button", onclick:async()=>{
+    err.textContent = "";
+    const params = {name:val("name"), ssh:val("ssh"), port:Number(val("port") || 22), tunnel:tunnel.checked};
+    for(const k of ["identity", "known_hosts", "tmux_socket"]) if(val(k)) params[k] = val(k);
+    if(!params.name || !params.ssh){ err.textContent = "A name and a user@address are required"; return; }
+    if(!await confirmTyped({title:editing ? `Change host ${params.name}?` : `Add host ${params.name}?`,
+      message:`Agents started on this host run commands on ${params.ssh} with the SSH key you set here. The change is audited.`,
+      word:"CONFIRM", ok:"Save host"})) return;
+    try { await op("host_set", {...params, confirm:"CONFIRM"}); S.meta = null; toast(`Host ${params.name} saved`, "ok"); onDone(); }
+    catch(e){ err.textContent = e.message; } }}, editing ? "Save changes" : "Add host");
+  return el("form", {className:"prov-card", onsubmit:e=>e.preventDefault(), id:"host-form"},
+    el("div", {className:"nm"}, editing ? `Edit ${h.name}` : "Add a remote host"),
+    el("div", {className:"onb-row"},
+      f("name", "Name", h && h.name, "e.g. build-server", "Short name you pick when creating an agent."),
+      f("ssh", "User and address", h && h.ssh, "deploy@192.168.1.20", "user@address (IP or DNS name). A dedicated non-root user is recommended.")),
+    el("div", {className:"onb-row"},
+      f("port", "SSH port", h ? h.port : 22, "22", "", true),
+      f("identity", "Private key file", h && h.identity, "~/.ssh/id_ed25519", "Optional. Must be yours with permissions 0600. Empty = your default SSH keys.")),
+    el("details", {className:"adv"}, el("summary", {}, "Advanced"), el("div", {className:"stack"},
+      f("known_hosts", "known_hosts file", h && h.known_hosts, "~/.ssh/known_hosts", "Optional: pin the host key in a specific file. Host keys are always verified."),
+      f("tmux_socket", "tmux socket name", h && h.tmux_socket, "crewhall", "Name of the tmux server crewhall uses on that machine."))),
+    el("div", {className:"field check-row"}, el("label", {className:"check", htmlFor:id("tunnel")}, tunnel, el("span", {}, "Let remote agents message this daemon")),
+      el("div", {className:"hint"}, "Opens a reverse SSH tunnel to a restricted gateway (messages, requests and hooks only; no control of this machine). Needs crewhall installed on the remote machine. Off by default.")),
+    err, el("div", {className:"dlg-actions", style:"justify-content:flex-start"}, save,
+      editing ? el("button", {className:"btn", type:"button", onclick:()=>onDone()}, "Cancel") : null));
+}
+function hostCard(h, again){
+  const result = el("div", {className:"prov-status", id:`host-test-${h.name}`});
+  const test = el("button", {className:"btn sm", type:"button", onclick:async()=>{
+    result.className = "prov-status"; result.textContent = "Connecting…";
+    try {
+      const r = await op("host_test", {name:h.name});
+      if(r.ok){
+        const tick = (ok, what) => `${what} ${ok ? "✓" : "✗"}`;
+        result.className = "prov-status " + (r.tmux ? "ok" : "bad");
+        result.replaceChildren(r.tmux ? ic("check", "sm") : ic("alert", "sm"),
+          ` Connected · ${[tick(r.tmux, "tmux"), tick(r.git, "git"), tick(r.claude, "claude"), tick(r.opencode, "opencode"), tick(r.crewhall, "crewhall")].join("  ")}`
+          + (r.tmux ? "" : " — tmux is required"));
+      } else { result.className = "prov-status bad"; result.replaceChildren(ic("alert", "sm"), " " + r.error); result.title = r.detail || ""; }
+    } catch(e){ result.className = "prov-status bad"; result.textContent = e.message; } }}, "Test connection");
+  const edit = el("button", {className:"btn sm", type:"button", onclick:()=>{ SK.editHost = h.name; again(); }}, "Edit");
+  const del = el("button", {className:"btn sm danger", type:"button", onclick:async()=>{
+    if(!await confirmTyped({title:`Remove host ${h.name}?`, message:"Only the saved connection is removed; nothing on the remote machine is touched. It must have no agents.", word:"CONFIRM", ok:"Remove"})) return;
+    try { await op("host_remove", {name:h.name, confirm:"CONFIRM"}); S.meta = null; toast("Host removed", "ok"); again(); } catch(e){ flash(e.message); } }}, "Remove");
+  return el("div", {className:"prov-card", dataset:{host:h.name}},
+    el("div", {className:"prov-head"}, el("span", {className:"avatar", style:`--h:${hue(h.name)}`}, h.name.charAt(0).toUpperCase()),
+      el("div", {style:"flex:1;min-width:0"}, el("div", {className:"nm"}, h.name),
+        el("div", {className:"muted mono"}, `${h.ssh}:${h.port}`)),
+      el("span", {className:`chip host-${h.state}`}, HOST_STATE_LABEL[h.state] || h.state)),
+    el("div", {className:"hint"}, [h.identity ? `key ${h.identity}` : "default SSH keys", h.known_hosts ? `known_hosts ${h.known_hosts}` : null,
+      `tmux socket ${h.tmux_socket}`, h.tunnel ? `messaging tunnel ${h.tunnel_state || "starts with the first agent"}` : "messaging tunnel off",
+      `${h.agents} agent${h.agents === 1 ? "" : "s"}`].filter(Boolean).join(" · ")),
+    result, el("div", {className:"dlg-actions", style:"justify-content:flex-start"}, test, edit, del));
+}
+async function tabHosts(box){
+  let hosts = [];
+  try { hosts = (await op("host_list")).hosts; } catch(e){ box.replaceChildren(el("div", {className:"note"}, ic("alert"), e.message)); return; }
+  const again = () => { SK.editHost = null; renderSettings(); };
+  const editing = hosts.find(h => h.name === SK.editHost);
+  box.replaceChildren(el("p", {className:"sub", style:"margin:0"},
+    "Run agents on another machine over SSH. Connections use key authentication only and always verify the host key. "
+    + "Then choose the machine under “Run on” when you create an agent, and give it a directory on that machine."),
+    ...hosts.map(h => editing && editing.name === h.name ? hostForm(h, again) : hostCard(h, again)),
+    editing ? null : hostForm(null, again),
+    hosts.length ? null : el("div", {className:"hint"}, "Before the first connection, trust the host key once from a terminal: ssh user@address"));
 }
 
 /* ----- access & network ----- */
@@ -282,6 +360,7 @@ async function renderSettings(){
   body.replaceChildren(el("h3", {style:"margin:0"}, SET_TABS.find(t => t[0] === SK.tab)[1]), view);
   if(SK.tab === "providers") await tabProviders(view);
   else if(SK.tab === "agents") view.replaceChildren(settingsGroup("agents", "agent"));
+  else if(SK.tab === "hosts") await tabHosts(view);
   else if(SK.tab === "access") await tabAccess(view);
   else if(SK.tab === "maintenance") view.replaceChildren(settingsGroup("maintenance", "maintenance"),
     el("div", {className:"dlg-actions", style:"justify-content:flex-start"},

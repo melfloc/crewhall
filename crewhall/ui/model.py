@@ -510,16 +510,18 @@ class AppModel:
         cwd: str | None = None,
         team: str | None = None,
         args: str | None = None,
+        host: str | None = None,
     ) -> None:
         self._pending_select = ("agent", name)
         self._pending_focus = "interactive"
 
         def op() -> None:
             self.control.create_agent(
-                kind, name, backend, cwd or self.cwd, team=team, args=args or None
+                kind, name, backend, cwd if host else (cwd or self.cwd),
+                team=team, args=args or None, host=host,
             )
 
-        label = f"create {name}" + (" in team" if team else "")
+        label = f"create {name}" + (" in team" if team else "") + (f" on {host}" if host else "")
         self._call(label, op)
 
     def create_team(self, name: str, members: list[str] | None = None) -> None:
@@ -583,6 +585,12 @@ class AppModel:
         backends = self.meta.get("backends", []) or ["pty"]
         bdef = backends.index("tmux") if "tmux" in backends else 0
         title = "NEW AGENT IN TEAM" if team_id else "NEW AGENT"
+        hosts = [h["name"] for h in self.meta.get("hosts", [])]
+        host_field = (
+            [ModalField("host", "Run on (a host = directory on that machine)", "select",
+                        options=["(this machine)", *hosts], index=0)]
+            if hosts else []
+        )
         self._new_modal(
             "create_agent",
             title,
@@ -591,6 +599,7 @@ class AppModel:
                 ModalField("name", "Name", "text", ""),
                 ModalField("kind", "Agent type", "select", options=kinds, index=0),
                 ModalField("backend", "Backend", "select", options=backends, index=bdef),
+                *host_field,
                 ModalField("cwd", "Working directory", "text", self.cwd),
                 ModalField("args", "Command arguments (optional)", "text", ""),
             ],
@@ -998,7 +1007,9 @@ class AppModel:
             name = fields["name"].value.strip()
             harness = self._option(fields["kind"]) or "opencode"
             backend = self._option(fields["backend"])
-            cwd = fields["cwd"].value.strip() or self.cwd
+            host = self._option(fields["host"]) if "host" in fields else None
+            host = None if host == "(this machine)" else host
+            cwd = fields["cwd"].value.strip() or (None if host else self.cwd)
             extra = fields["args"].value.strip()
             if not name:
                 modal.error = "name is required"
@@ -1011,12 +1022,12 @@ class AppModel:
             if name in self.agent_names():
                 modal.error = f'agent "{name}" already exists'
                 return
-            if not os.path.isdir(os.path.expanduser(cwd)):
+            if not host and not os.path.isdir(os.path.expanduser(cwd)):
                 modal.error = "working directory does not exist"
                 return
             team = modal.target
             self.close_modal()
-            self.create_agent(name, harness, backend, cwd, team=team, args=extra or None)
+            self.create_agent(name, harness, backend, cwd, team=team, args=extra or None, host=host)
         elif kind == "create_team":
             name = modal.fields[0].value.strip()
             if not name:

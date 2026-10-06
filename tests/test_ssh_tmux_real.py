@@ -291,6 +291,27 @@ class SshTmuxRealTests(unittest.TestCase):
         time.sleep(0.3)
         self.assertFalse(os.path.exists("/tmp/ati-pwned-inj"))
 
+    def test_host_test_reports_tools_and_actionable_failures(self):
+        settings.patch({"hosts": {HOST_ALIAS: self.sshd.host_config()}})
+        res = self.controller.host_test(HOST_ALIAS)
+        self.assertTrue(res["ok"], res)
+        self.assertTrue(res["tmux"])
+        self.assertEqual(self.controller.host_status()[0]["state"], "ok")
+
+        # A name the pinned known_hosts does not cover: the key is not trusted.
+        other = {**self.sshd.host_config(), "ssh": f"{self.sshd.user}@localhost"}
+        settings.patch({"hosts": {HOST_ALIAS: other}})
+        res = self.controller.host_test(HOST_ALIAS)
+        self.assertFalse(res["ok"], res)
+        self.assertIn("Host key not trusted", res["error"])
+        self.assertEqual(self.controller.host_status()[0]["state"], "unreachable")
+
+        settings.patch({"hosts": {HOST_ALIAS: self.sshd.host_config()}})
+        self.sshd.stop()
+        self.addCleanup(self.sshd.start)
+        res = self.controller.host_test(HOST_ALIAS)
+        self.assertFalse(res["ok"], res)
+
     def test_remote_sessions_are_readopted(self):
         session = self._create()
         sid = session.session_id

@@ -198,6 +198,12 @@ restringido (solo identidad, mensajes y requests de agentes con token; nada del
 plano de control). Requiere `crewhall` instalado en el host remoto. El agente recibe
 `CREWHALL_SOCKET` apuntando a ese socket y `CREWHALL_GATEWAY=1`.
 
+**Desde la interfaz**: Web UI → Ajustes → *Remote hosts* (añadir, editar, *Test
+connection*), o `crewhall host add prod1 deploy@prod1 --identity ~/.ssh/id_crewhall` y
+`crewhall host test prod1`. Al crear un agente elige *Run on* y un directorio de esa
+máquina. Antes de la primera conexión acepta la clave del host una vez desde una
+terminal (`ssh deploy@prod1`): crewhall nunca la acepta automáticamente.
+
 **Qué funciona en un agente remoto.** Crear, escribir, capturar, redimensionar,
 terminar y readoptar; mensajería, hooks y permisos (con `tunnel`); historial y
 actividad de Claude (transcript leído por SSH); worktrees (`workspace_mode:

@@ -28,7 +28,7 @@ function connect() {
       // crewhall was updated: this page's code is stale, load the new one.
       if (m.version && S.version && m.version !== S.version) { location.reload(); return; }
       if (m.version) { S.version = m.version; $("version").textContent = "v" + m.version; }
-      S.state = { agents:m.agents, teams:m.teams, messages:m.messages||[] };
+      S.state = { agents:m.agents, teams:m.teams, messages:m.messages||[], hosts:m.hosts||[] };
       trackStates(S.state.agents);
       // Auto-select the first agent on first load so the transcript is visible.
       if (!S.selected && S.state.agents.length && !S.autoSelected) { S.autoSelected = true; select(S.state.agents[0].agent_id); }

@@ -21,6 +21,7 @@ def meta_info() -> dict[str, Any]:
         ],
         "disabled": [k for k in available_harnesses() if k not in enabled],
         "backends": available_backends(),
+        "hosts": [{"name": n, "ssh": c["ssh"]} for n, c in settings.hosts().items()],
         "defaults": {"kind": settings.get("agents.default_kind"),
                      "backend": settings.get("agents.default_backend")},
     }
@@ -46,6 +47,7 @@ class ControlPort(Protocol):
         cwd: str | None,
         team: str | None = None,
         args: str | None = None,
+        host: str | None = None,
     ) -> dict[str, Any]: ...
     def remove_agent(self, target: str) -> dict[str, Any]: ...
     def capture(self, target: str, recent: bool, max_lines: int) -> str: ...
@@ -86,10 +88,10 @@ class DaemonControl:
     def list_teams(self) -> list[dict[str, Any]]:
         return self.client.call("team_list")["teams"]
 
-    def create_agent(self, kind, name, backend=None, cwd=None, team=None, args=None):
+    def create_agent(self, kind, name, backend=None, cwd=None, team=None, args=None, host=None):
         return self.client.call(
             "agent_create", kind=kind, name=name, backend=backend, cwd=cwd,
-            team=team, args=args,
+            team=team, args=args, host=host,
         )["agent"]
 
     def remove_agent(self, target: str) -> dict[str, Any]:
@@ -163,10 +165,10 @@ class LocalControl:
     def list_teams(self) -> list[dict[str, Any]]:
         return self.controller.list_teams()
 
-    def create_agent(self, kind, name, backend=None, cwd=None, team=None, args=None):
+    def create_agent(self, kind, name, backend=None, cwd=None, team=None, args=None, host=None):
         return self.controller.agent_summary(
             self.controller.create_agent(
-                kind, name=name, backend=backend, cwd=cwd, team=team, args=args
+                kind, name=name, backend=backend, cwd=cwd, team=team, args=args, host=host
             )
         )
 

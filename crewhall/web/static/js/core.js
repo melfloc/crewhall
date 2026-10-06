@@ -126,6 +126,7 @@ function attachPathComplete(input){
   const accept = (i) => { const e = entries[i]; if(!e) return;
     input.value = e.path; input.focus(); input.dispatchEvent(new Event("input", {bubbles:true})); };
   const refresh = async () => {
+    if(input.dataset.remote === "1"){ entries = []; close(); return; }  // a remote path cannot be completed locally
     const q = input.value, mine = ++ticket;
     try {
       const r = await op("fs_complete", {prefix:q});

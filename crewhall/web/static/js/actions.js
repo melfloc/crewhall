@@ -12,18 +12,50 @@ async function openNewAgent(teamId){
   $("na-team").replaceChildren(el("option", {value:"", textContent:"(none)"}),
     ...(S.state?.teams||[]).map(t=>el("option", {value:t.team_id, textContent:t.name})));
   if(teamId) $("na-team").value = teamId;   // preselect -> inherits workspace
+  let hosts;
+  try { hosts = (await op("host_list")).hosts || []; } catch(e){ hosts = S.state?.hosts || []; }
+  S.hosts = hosts;   // fresh state for the dialog (the push may be a few seconds old)
+  $("na-host").replaceChildren(el("option", {value:"", textContent:"This machine"}),
+    ...hosts.map(h => el("option", {value:h.name,
+      textContent:`${h.name} — ${h.ssh}${h.port !== 22 ? ":" + h.port : ""} (${h.state})`})));
+  $("na-host").value = "";
+  updateHostUi();
   updateCwdHint();
   if($("na-workspace-mode")) $("na-workspace-mode").value = "shared";
   $("na-err").textContent=""; $("na-name").value=""; $("na-cwd").value=""; $("na-args").value="";
   $("na-name").classList.remove("invalid"); $("na-ok").classList.remove("loading");
   $("newAgent").showModal(); $("na-name").focus();
 }
+function updateHostUi(){
+  const name = $("na-host").value, hosts = S.hosts || [];
+  const h = hosts.find(x => x.name === name);
+  const remote = !!name;
+  $("na-cwd").dataset.remote = remote ? "1" : "";
+  $("na-backend").disabled = remote;
+  $("na-cwd-label").textContent = remote ? `Directory on ${name}` : "Working directory";
+  $("na-cwd").placeholder = remote ? "/home/user/project (on the remote machine)" : "/absolute/path";
+  const hint = $("na-host-hint");
+  hint.replaceChildren();
+  if(remote){
+    if([...$("na-backend").options].some(o => o.value === "ssh-tmux")) $("na-backend").value = "ssh-tmux";
+    hint.append(`Runs over SSH on ${h ? h.ssh : name} inside tmux. The agent CLI (claude/opencode) and tmux must be installed there. `,
+      h && h.state === "unreachable" ? "The host is not answering right now. " : "");
+    document.querySelector("#newAgent details.adv").open = true;
+  } else {
+    hint.append((S.hosts||[]).length ? "" : "To run an agent on another machine, add it in ",
+      (S.hosts||[]).length ? "" : el("a", {href:"#", onclick:(e)=>{ e.preventDefault(); $("newAgent").close(); openSettings("hosts"); }}, "Settings → Remote hosts"),
+      (S.hosts||[]).length ? "" : ".");
+  }
+  updateCwdHint();
+}
+$("na-host").onchange = updateHostUi;
 let _naPath = false;
 function updateCwdHint(){
   if(!_naPath){ _naPath = true; attachPathComplete($("na-cwd")); }
   const t = teamById($("na-team").value);
   const hint = $("na-cwd-hint");
-  if(hint) hint.textContent = t && t.workspace
+  if(hint && $("na-host").value) hint.textContent = "Absolute path on the remote machine. Empty = the SSH user's home directory.";
+  else if(hint) hint.textContent = t && t.workspace
     ? `Leave empty to inherit the team workspace: ${t.workspace}`
     : "Leave empty to use the server's working directory";
 }
@@ -34,7 +66,8 @@ async function createAgent(){
   const name = $("na-name").value.trim();
   $("na-name").classList.toggle("invalid", !name);
   if(!name){ $("na-err").textContent="A name is required"; $("na-name").focus(); return; }
-  const params = { kind:$("na-kind").value, name, backend:$("na-backend").value,
+  const host = $("na-host").value || null;
+  const params = { kind:$("na-kind").value, name, backend:host ? null : $("na-backend").value, host,
                    cwd:$("na-cwd").value.trim()||null, team:$("na-team").value||null,
                    args:$("na-args").value.trim()||null,
                    workspace_mode:$("na-workspace-mode")?.value||null };

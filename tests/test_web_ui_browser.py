@@ -88,6 +88,7 @@ class _Browser(unittest.TestCase):
     agents = [AGENT]
     teams: list = []
     messages: list = []
+    hosts: list = []
     viewport = {"width": 1300, "height": 800}
 
     def setUp(self):
@@ -154,7 +155,7 @@ class _Browser(unittest.TestCase):
 
     def _push(self):
         self.ws.send(json.dumps({"type": "state", "agents": self.agents, "teams": self.teams,
-                                 "messages": self.messages}))
+                                 "messages": self.messages, "hosts": self.hosts}))
 
     def _api(self, route):
         if route.request.method == "GET":
@@ -175,6 +176,13 @@ class _Browser(unittest.TestCase):
             return {"ok": True, "available": self.available, "total": self.total, "start": start,
                     "conversation_id": "c1",
                     "messages": [msg(i) for i in range(start, end)] if self.available else []}
+        if op == "host_list":
+            return {"ok": True, "hosts": self.hosts}
+        if op in ("host_set", "host_remove"):
+            return {"ok": True, "host": self.hosts[0] if self.hosts else {}}
+        if op == "host_test":
+            return {"ok": True, "tmux": True, "git": True, "claude": False, "opencode": False,
+                    "crewhall": False}
         if op == "meta_info":
             return {"ok": True, "harnesses": [{"kind": "claude"}, {"kind": "opencode"}],
                     "backends": ["tmux", "pty"]}
@@ -1400,6 +1408,66 @@ class Mobile(_Browser):
         self.page.keyboard.press("/")
         self.assertTrue(self.page.locator("#shell").evaluate("s => s.classList.contains('drawer')"))
         self.assertEqual(self.page.evaluate("document.activeElement.id"), "q")
+
+
+REMOTE_AGENT = {**READY, "agent_id": "sess_rem", "name": "remote-one", "host": "prod",
+                "host_state": "unreachable", "backend": "ssh-tmux"}
+PROD = {"name": "prod", "ssh": "deploy@10.0.0.5", "port": 22, "identity": None, "known_hosts": None,
+        "tmux_socket": "crewhall", "tunnel": False, "tunnel_state": None, "state": "ok",
+        "agents": 0, "checked_at": None}
+
+
+class RemoteHosts(_Browser):
+    agents = [REMOTE_AGENT]
+    hosts = [PROD]
+
+    def test_new_agent_can_target_a_host_with_a_remote_directory(self):
+        self.page.click("#newAgentLink")
+        self.page.wait_for_selector("#newAgent[open]")
+        self.assertEqual(self.page.locator("#na-host option").count(), 2)
+        self.page.select_option("#na-host", "prod")
+        self.assertIn("Directory on prod", self.page.inner_text("#na-cwd-label"))
+        self.assertTrue(self.page.locator("#na-backend").is_disabled())
+        self.assertIn("deploy@10.0.0.5", self.page.inner_text("#na-host-hint"))
+        self.page.fill("#na-name", "r2")
+        self.page.fill("#na-cwd", "/srv/app")
+        self.page.locator("#na-ok").click()
+        payload = next(p for p in self.payloads if p.get("op") == "agent_create")
+        self.assertEqual((payload["host"], payload["cwd"], payload["backend"]), ("prod", "/srv/app", None))
+
+    def test_local_agent_creation_sends_no_host(self):
+        self.page.click("#newAgentLink")
+        self.page.wait_for_selector("#newAgent[open]")
+        self.page.fill("#na-name", "l1")
+        self.page.locator("#na-ok").click()
+        payload = next(p for p in self.payloads if p.get("op") == "agent_create")
+        self.assertIsNone(payload["host"])
+        self.assertEqual(payload["backend"], "tmux")
+
+    def test_unreachable_host_shows_a_banner_and_locks_the_composer(self):
+        self.assertIn("unreachable", self.page.inner_text("#agent-host"))
+        self.assertIn("unreachable", self.page.inner_text("#agent-host-banner"))
+        self.assertTrue(self.page.locator("#input").is_disabled())
+
+    def test_settings_lists_hosts_tests_and_saves_with_typed_confirmation(self):
+        self.page.evaluate("openSettings('hosts')")
+        self.page.wait_for_selector("[data-host=prod]")
+        self.page.click("[data-host=prod] button:has-text('Test connection')")
+        self.page.wait_for_selector("#host-test-prod:has-text('Connected')")
+        self.page.fill("#hf-name", "build")
+        self.page.fill("#hf-ssh", "ci@10.0.0.9")
+        self.page.click("#host-form button.btn.primary")
+        self.page.wait_for_selector("#typed-confirm")
+        self.page.fill("#typed-confirm", "CONFIRM")
+        self.page.keyboard.press("Enter")
+        self.page.wait_for_function("() => true")
+        deadline = time.monotonic() + 5
+        while "host_set" not in self.calls and time.monotonic() < deadline:
+            time.sleep(0.1)
+        payload = next(p for p in self.payloads if p.get("op") == "host_set")
+        self.assertEqual((payload["name"], payload["ssh"], payload["confirm"]),
+                         ("build", "ci@10.0.0.9", "CONFIRM"))
+        self.assertEqual(self.errors, [])
 
 
 if __name__ == "__main__":

@@ -113,7 +113,7 @@ ALLOWED_OPS = {
     "frontend_status", "frontend_set", "reset_plan", "reset_apply",
     "agent_archive_list", "agent_archive_get",
     "request_list", "request_cancel",
-    "worktree_list", "worktree_discard", "host_list",
+    "worktree_list", "worktree_discard", "host_list", "host_set", "host_remove", "host_test",
 }
 
 

@@ -140,10 +140,12 @@
       <div class="field"><label for="na-kind">Harness</label><select class="select" id="na-kind"></select></div>
       <div class="field"><label for="na-backend">Backend</label><select class="select" id="na-backend"></select></div>
     </div>
+    <div class="field"><label for="na-host">Run on</label><select class="select" id="na-host"></select>
+      <div class="hint" id="na-host-hint"></div></div>
     <div class="field"><label for="na-team">Team <span class="muted">(optional)</span></label><select class="select" id="na-team"></select></div>
     <details class="adv"><summary>Advanced</summary><div class="stack">
       <div class="field"><label for="na-args">Command arguments</label><input class="input mono" id="na-args" placeholder="--agent name" autocomplete="off" spellcheck="false"></div>
-      <div class="field"><label for="na-cwd">Working directory</label><input class="input mono" id="na-cwd" placeholder="/absolute/path"><div class="hint" id="na-cwd-hint"></div></div>
+      <div class="field"><label for="na-cwd" id="na-cwd-label">Working directory</label><input class="input mono" id="na-cwd" placeholder="/absolute/path"><div class="hint" id="na-cwd-hint"></div></div>
       <div class="field"><label for="na-workspace-mode">Workspace isolation</label>
         <select class="select" id="na-workspace-mode">
           <option value="shared">Shared workspace (default)</option>

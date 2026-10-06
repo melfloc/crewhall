@@ -5,6 +5,25 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.65.0] — 2026-10-05
+
+_Configurar y elegir hosts SSH desde el Web UI, la TUI y la CLI._
+
+- **Web UI → Ajustes → «Remote hosts»**: añadir/editar/quitar hosts (nombre,
+  `usuario@dirección`, puerto, clave privada, `known_hosts`, socket de tmux, túnel de
+  mensajería) y **«Test connection»**, que indica si conecta y qué hay instalado
+  (tmux, git, claude, opencode, crewhall) o por qué falla con una pista accionable
+  (clave del host no confiable, autenticación, tiempo agotado…).
+- **Nuevo agente → «Run on»**: elige «This machine» o un host; con host, el campo de
+  directorio pasa a «Directory on <host>» (ruta remota, sin autocompletar local) y el
+  backend queda fijo en ssh-tmux. La TUI añade el mismo selector.
+- CLI: `crewhall host add|remove|test|list`.
+- Seguridad: añadir/editar/quitar un host (y `settings_set` de `hosts`) exige
+  confirmación escrita `CONFIRM` y queda auditado como cualquier cambio privilegiado;
+  un host con agentes no se edita ni se quita; la validación es la misma estricta de
+  `settings.json`. La verificación de la clave del host sigue siendo obligatoria (no hay
+  «confiar automáticamente»: se acepta una vez desde una terminal, como con ssh).
+
 ## [0.64.0] — 2026-10-05
 
 _Fase 2e: estado de host en la CLI, el Web UI y la TUI. Cierra la Fase 2 (SSH)._

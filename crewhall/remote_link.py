@@ -203,6 +203,12 @@ class RemoteLinks:
         link.ensure()
         return link
 
+    def stop(self, name: str) -> None:
+        with self._lock:
+            link = self._links.pop(name, None)
+        if link is not None:
+            link.stop()
+
     def states(self) -> dict[str, str]:
         with self._lock:
             return {name: link.state for name, link in self._links.items()}

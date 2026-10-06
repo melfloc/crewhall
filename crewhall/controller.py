@@ -126,6 +126,27 @@ _OPENCODE_INTERACTION_EVENTS = (
 )
 
 
+def _ssh_hint(cfg: dict[str, Any], detail: str) -> str:
+    low = detail.lower()
+    dest, port = cfg["ssh"], cfg.get("port", 22)
+    if "host key verification failed" in low or "no matching host key" in low:
+        if cfg.get("known_hosts"):
+            host = dest.split("@")[-1]
+            return (f"Host key not trusted. Add it to {cfg['known_hosts']} "
+                    f"(e.g. ssh-keyscan -p {port} {host} >> that file) after checking its fingerprint.")
+        return (f"Host key not trusted yet. Run once in a terminal: ssh -p {port} {dest} "
+                "(verify the fingerprint, accept it), then test again.")
+    if "permission denied" in low:
+        return "Authentication failed: the key is not authorized for that user (password login is disabled)."
+    if "timed out" in low or "timeout" in low:
+        return "The host did not answer in time (check the address, port and network)."
+    if "refused" in low:
+        return "Connection refused: nothing is listening on that address and port."
+    if "could not resolve" in low or "name or service not known" in low:
+        return "The host name could not be resolved."
+    return "Could not connect over SSH."
+
+
 class Controller:
     def __init__(self, adopt: bool = True, persist: bool = False) -> None:
         self.registry = Registry()
@@ -1353,11 +1374,67 @@ class Controller:
                 state = "unknown"
             out.append({
                 "name": name, "ssh": cfg["ssh"], "port": cfg["port"],
+                "identity": cfg.get("identity"), "known_hosts": cfg.get("known_hosts"),
+                "tmux_socket": cfg.get("tmux_socket"),
                 "tunnel": bool(cfg.get("tunnel")), "tunnel_state": tunnel,
                 "state": state, "agents": len(mine),
                 "checked_at": health[1] if health else None,
             })
         return out
+
+    # -- host management (UI / CLI) ------------------------------------------
+    def _live_agents_on(self, name: str) -> list[str]:
+        return [h.name or h.agent_id for h in self.agents.all()
+                if self._agent_hosts.get(h.agent_id) == name]
+
+    def host_set(self, name: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Add or edit a host (validated like the settings file)."""
+        existing = settings.hosts()
+        if name in existing:
+            busy = self._live_agents_on(name)
+            if busy:
+                raise ValueError(
+                    f"host {name!r} has agents ({', '.join(busy)}): delete them before editing it"
+                )
+        table = {**existing, name: {k: v for k, v in body.items() if k != "name"}}
+        try:
+            settings.patch({"hosts": table})
+        except settings.SettingsError as exc:
+            raise ValueError(str(exc)) from exc
+        self.remote_links.stop(name)  # the next agent re-opens it with the new config
+        return next(h for h in self.host_status() if h["name"] == name)
+
+    def host_remove(self, name: str) -> dict[str, Any]:
+        existing = settings.hosts()
+        if name not in existing:
+            raise ValueError(f"unknown host {name!r}")
+        busy = self._live_agents_on(name)
+        if busy:
+            raise ValueError(f"host {name!r} has agents ({', '.join(busy)}): delete them first")
+        existing.pop(name)
+        settings.patch({"hosts": existing})
+        self.remote_links.stop(name)
+        self._host_health.pop(name, None)
+        return {"removed": name}
+
+    def host_test(self, name: str) -> dict[str, Any]:
+        """One short SSH round trip: can we connect, and what is installed there?"""
+        cfg = settings.host(name)
+        script = ('echo crewhall-ok; command -v tmux >/dev/null 2>&1 && echo tmux=1; '
+                  'command -v crewhall >/dev/null 2>&1 && echo crewhall=1; '
+                  'command -v git >/dev/null 2>&1 && echo git=1; '
+                  'command -v claude >/dev/null 2>&1 && echo claude=1; '
+                  'command -v opencode >/dev/null 2>&1 && echo opencode=1; exit 0')
+        proc = ssh_tmux_backend.SshTmuxBackend(cfg)._ssh_run(script, timeout=20.0)
+        self._host_health[name] = (proc.returncode == 0, time.time())
+        if proc.returncode != 0 or "crewhall-ok" not in proc.stdout:
+            err = (proc.stderr or "").strip().splitlines()
+            detail = err[-1][:200] if err else f"ssh exit {proc.returncode}"
+            return {"ok": False, "error": _ssh_hint(cfg, detail), "detail": detail}
+        found = {line.split("=")[0] for line in proc.stdout.splitlines() if line.endswith("=1")}
+        return {"ok": True, "tmux": "tmux" in found, "crewhall": "crewhall" in found,
+                "git": "git" in found, "claude": "claude" in found,
+                "opencode": "opencode" in found}
 
     def list_agents(self) -> list[dict[str, Any]]:
         return [self.agent_summary(harness) for harness in self.agents.all()]

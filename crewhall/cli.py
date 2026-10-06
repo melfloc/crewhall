@@ -361,6 +361,49 @@ def cmd_host_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_host_add(args: argparse.Namespace) -> int:
+    params: dict[str, Any] = {"name": args.name, "ssh": args.destination, "port": args.port,
+                              "tunnel": args.tunnel, "confirm": "CONFIRM"}
+    for key in ("identity", "known_hosts", "tmux_socket"):
+        if getattr(args, key):
+            params[key] = getattr(args, key)
+    try:
+        host = _client(args).call("host_set", **params)["host"]
+    except RpcError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"host {host['name']} saved ({host['ssh']}:{host['port']}); try: crewhall host test {host['name']}")
+    return 0
+
+
+def cmd_host_remove(args: argparse.Namespace) -> int:
+    try:
+        _client(args).call("host_remove", name=args.name, confirm="CONFIRM")
+    except RpcError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"host {args.name} removed")
+    return 0
+
+
+def cmd_host_test(args: argparse.Namespace) -> int:
+    try:
+        out = _client(args).call("host_test", name=args.name)
+    except RpcError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if not out["ok"]:
+        print(f"unreachable: {out['error']}\n  ({out['detail']})", file=sys.stderr)
+        return 1
+    mark = lambda ok: "yes" if ok else "no"  # noqa: E731
+    print(f"connected to {args.name}: tmux={mark(out['tmux'])} crewhall={mark(out['crewhall'])} "
+          f"git={mark(out['git'])} claude={mark(out['claude'])} opencode={mark(out['opencode'])}")
+    if not out["tmux"]:
+        print("  tmux is required on the host", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_agent_list(args: argparse.Namespace) -> int:
     team = getattr(args, "team", None)
     if team:
@@ -1174,6 +1217,21 @@ def build_parser() -> argparse.ArgumentParser:
     h = hsub.add_parser("list", help="configured hosts and what is observed about them")
     h.add_argument("--json", action="store_true")
     h.set_defaults(func=cmd_host_list)
+    h = hsub.add_parser("add", help="add or edit a host (SSH key auth only)")
+    h.add_argument("name", help="short name used by --host (letters, digits, _ . -)")
+    h.add_argument("destination", help="user@address of the remote machine")
+    h.add_argument("--port", type=int, default=22)
+    h.add_argument("--identity", help="private key file (0600)")
+    h.add_argument("--known-hosts", dest="known_hosts", help="pinned known_hosts file")
+    h.add_argument("--tmux-socket", dest="tmux_socket", help="tmux socket name on the host")
+    h.add_argument("--tunnel", action="store_true", help="let remote agents message this daemon")
+    h.set_defaults(func=cmd_host_add)
+    h = hsub.add_parser("remove", help="remove a host (it must have no agents)")
+    h.add_argument("name")
+    h.set_defaults(func=cmd_host_remove)
+    h = hsub.add_parser("test", help="check the SSH connection and what is installed there")
+    h.add_argument("name")
+    h.set_defaults(func=cmd_host_test)
 
     p = sub.add_parser("agent", help="control CLI agents through a semantic harness")
     asub = p.add_subparsers(dest="agent_command", required=True)

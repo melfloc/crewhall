@@ -20,9 +20,10 @@ class FakeControl(LocalControl):
         super().__init__(controller)
         self.created: list[tuple] = []
 
-    def create_agent(self, kind, name, backend=None, cwd=None, team=None, args=None):
+    def create_agent(self, kind, name, backend=None, cwd=None, team=None, args=None, host=None):
         self.created.append((kind, name, backend, cwd))
         self.last_args = args
+        self.last_host = host
         harness = FakeHarness(name)
         self.controller.register_agent(harness)
         if team:
@@ -31,6 +32,41 @@ class FakeControl(LocalControl):
             except Exception:
                 pass
         return self.controller.agent_summary(harness)
+
+
+class CreateAgentOnHost(unittest.TestCase):
+    def _model(self, hosts):
+        control = FakeControl(Controller(adopt=False))
+        model = AppModel(control, cwd="/tmp", async_ops=False)
+        model.meta = {"harnesses": [{"kind": "opencode"}], "backends": ["tmux"], "hosts": hosts}
+        return control, model
+
+    def test_no_host_field_without_configured_hosts(self):
+        _, model = self._model([])
+        model.open_create_agent()
+        self.assertNotIn("host", [f.name for f in model.modal.fields])
+
+    def test_remote_agent_uses_a_remote_directory_that_is_not_checked_locally(self):
+        control, model = self._model([{"name": "prod", "ssh": "u@prod"}])
+        model.open_create_agent()
+        fields = {f.name: f for f in model.modal.fields}
+        fields["name"].value = "remote-one"
+        fields["host"].index = 1  # prod
+        fields["cwd"].value = "/srv/not/on/this/machine"
+        model._submit_modal()
+        self.assertIsNone(model.modal)
+        self.assertEqual(control.last_host, "prod")
+        self.assertEqual(control.created[-1][3], "/srv/not/on/this/machine")
+
+    def test_local_choice_keeps_the_local_directory_check(self):
+        control, model = self._model([{"name": "prod", "ssh": "u@prod"}])
+        model.open_create_agent()
+        fields = {f.name: f for f in model.modal.fields}
+        fields["name"].value = "local-one"
+        fields["cwd"].value = "/definitely/not/here"
+        model._submit_modal()
+        self.assertEqual(model.modal.error, "working directory does not exist")
+        self.assertEqual(control.created, [])
 
 
 class CreateAgentArgs(unittest.TestCase):
