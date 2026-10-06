@@ -11,6 +11,7 @@ from crewhall.ui import (
     session_viewport,
     translate_sequence,
 )
+from crewhall.ui.model import COMMANDS
 
 from .support import FakeHarness
 
@@ -680,6 +681,17 @@ class Responsive(UiBase):
         self.assertTrue(all(
             isinstance(seg, tuple) and len(seg) == 2 for line in lines for seg in line
         ))
+
+
+class TerminalsCommand(UiBase):
+    def test_terminals_command_reports_state(self):
+        model = AppModel(FakeControl(Controller(adopt=False)), cwd="/tmp", async_ops=False)
+        model.run_command("terminals")
+        self.assertIn("terminal", model.status.lower())
+
+    def test_terminals_command_is_in_the_palette(self):
+        labels = [label for label, _ in COMMANDS]
+        self.assertIn("Terminals", labels)
 
 
 class ErrorHandling(UiBase):

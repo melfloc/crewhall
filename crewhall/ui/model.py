@@ -126,6 +126,7 @@ COMMANDS: list[tuple[str, str]] = [
     ("Delete Team", "delete_team"),
     ("Agent Info", "agent_info"),
     ("Agent Activity", "activity"),
+    ("Terminals", "terminals"),
     ("Refresh", "refresh"),
     ("Help", "help"),
     ("Quit", "quit"),
@@ -978,6 +979,8 @@ class AppModel:
             self.open_agent_info()
         elif action == "activity":
             self.open_activity()
+        elif action == "terminals":
+            self.show_terminals()
         elif action == "refresh":
             self.refresh()
             self.status = "refreshed"
@@ -986,6 +989,24 @@ class AppModel:
             self.open_help()
         elif action == "quit":
             self.should_quit = True
+
+    def show_terminals(self) -> None:
+        """Minimal TUI support: the TUI cannot suspend, so show the exact
+        ``attach`` command (see NOTES.md)."""
+        try:
+            terms = self.control.list_terminals()
+        except Exception as exc:  # noqa: BLE001 - surface any daemon error in the status bar
+            self.status = f"terminals unavailable: {exc}"
+            self.status_kind = "error"
+            return
+        if not terms:
+            self.status = "no terminals (create with: crewhall terminal new)"
+            self.status_kind = "info"
+            return
+        first = terms[0]["session_id"]
+        self.status = (f"{len(terms)} terminal(s); attach: "
+                       f"crewhall terminal attach {first}")
+        self.status_kind = "info"
 
     def _confirm_yes(self) -> None:
         modal = self.modal

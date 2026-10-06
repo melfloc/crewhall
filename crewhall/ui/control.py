@@ -38,6 +38,7 @@ class ControlPort(Protocol):
     """
 
     def meta(self) -> dict[str, Any]: ...
+    def list_terminals(self) -> list[dict[str, Any]]: ...
     def list_agents(self) -> list[dict[str, Any]]: ...
     def list_teams(self) -> list[dict[str, Any]]: ...
     def create_agent(
@@ -82,6 +83,9 @@ class DaemonControl:
 
     def meta(self) -> dict[str, Any]:
         return self.client.call("meta_info")
+
+    def list_terminals(self) -> list[dict[str, Any]]:
+        return self.client.call("terminal_list")["terminals"]
 
     def list_agents(self) -> list[dict[str, Any]]:
         return self.client.call("agent_list")["agents"]
@@ -159,6 +163,9 @@ class LocalControl:
 
     def meta(self) -> dict[str, Any]:
         return meta_info()
+
+    def list_terminals(self) -> list[dict[str, Any]]:
+        return self.controller.list_terminals()
 
     def list_agents(self) -> list[dict[str, Any]]:
         return self.controller.list_agents()
