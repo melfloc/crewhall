@@ -115,7 +115,7 @@ def _static_schema() -> list[dict[str, Any]]:
           "Pre-update and pre-reset backups kept in the state directory.", min=1, max=100),
         s("terminals.enabled", "terminals", "bool", False, "Web terminals",
           "Exposes raw interactive shells in the Web UI and CLI. Off by default; "
-          "enabling it is privileged and needs typed confirmation.", restart=True),
+          "enabling it is privileged and needs typed confirmation."),
         s("terminals.max_total", "terminals", "int", 8, "Max terminals (total)",
           "Hard cap on terminals that may exist at once.", min=1, max=32),
         s("terminals.max_per_host", "terminals", "int", 4, "Max terminals per host",
