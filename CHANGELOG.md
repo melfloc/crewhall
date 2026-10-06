@@ -5,6 +5,14 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.70.2] — 2026-10-06
+
+- **Corrección**: la release no empaquetaba `web/static/vendor/xterm/`, así que en una
+  instalación desplegada (p. ej. Oficina) la terminal fallaba con «xterm failed to
+  load». Añadido a `package-data` (con una comprobación en el build de release).
+- Reordenar agentes **dentro de cada team** y en «Ungrouped» arrastrando (orden por
+  grupo persistido); antes solo se podía mover entre equipos.
+
 ## [0.70.1] — 2026-10-06
 
 - El panel se actualiza en vivo al **crear o desbloquear terminales**: el WebSocket de
