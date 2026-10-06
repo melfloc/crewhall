@@ -5,6 +5,11 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.70.3] — 2026-10-06
+
+- Icono de **Ajustes** cambiado por uno de "sliders": el anterior (círculo con rayos)
+  era casi idéntico al del tema (sol/luna) y se confundían.
+
 ## [0.70.2] — 2026-10-06
 
 - **Corrección**: la release no empaquetaba `web/static/vendor/xterm/`, así que en una
