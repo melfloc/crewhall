@@ -18,6 +18,20 @@
     op("terminal_key", {id: current.session_id, key}).catch(e => toast(String(e), "error"));
   }
 
+  async function openTerminalPage(id, mode){
+    let url = "/terminal.html?id=" + encodeURIComponent(id);
+    try{
+      const r = await fetch("/api/terminal-ticket", {
+        method: "POST", credentials: "same-origin",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({id, mode: mode || (current && current.readonly ? "read" : "write")}),
+      });
+      const j = await r.json().catch(() => ({}));
+      if(r.ok && j.ticket) url += "&ticket=" + encodeURIComponent(j.ticket);
+    }catch(e){ /* older server: open without a ticket */ }
+    window.open(url, "_blank", "noopener");
+  }
+
   function sendLine(){
     if(!current || !inputEl) return;
     const text = inputEl.value;
@@ -131,7 +145,9 @@
       el("div", {className:"term-main"},
         viewEl,
         el("div", {className:"term-line"}, inputEl,
-          el("button", {className:"btn primary sm", type:"button", onclick: sendLine}, "Send")),
+          el("button", {className:"btn primary sm", type:"button", onclick: sendLine}, "Send"),
+          el("button", {className:"btn sm", type:"button", title:"Full terminal (xterm) in a new tab",
+            onclick: () => { if(current) openTerminalPage(current.session_id); }}, "Open")),
         keyRow(),
         el("button", {className:"btn danger sm", type:"button", onclick: async () => {
           if(!current) return;

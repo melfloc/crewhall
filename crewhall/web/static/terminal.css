@@ -1,0 +1,14 @@
+:root { --tbg:#0b0d12; --tfg:#e6e8ee; --tborder:#2a2f3a; --taccent:#4c8bf5; }
+* { box-sizing:border-box; }
+html, body { margin:0; height:100%; background:var(--tbg); color:var(--tfg);
+  font:13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tbar { display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--tborder); }
+.spacer { flex:1; }
+.tbadge { padding:2px 8px; border:1px solid var(--tborder); border-radius:999px; font-size:12px; }
+.tconn { font-size:12px; opacity:.8; }
+.tconn.connected { color:#46a758; } .tconn.reconnecting { color:#e3a008; }
+.tconn.readonly { color:#a855f7; } .tconn.closed { color:#e5484d; }
+.tsearch { background:#12151d; color:var(--tfg); border:1px solid var(--tborder); border-radius:6px; padding:4px 8px; }
+.tbtn { background:#1a1f2b; color:var(--tfg); border:1px solid var(--tborder); border-radius:6px; padding:4px 10px; cursor:pointer; }
+.tbtn:hover { border-color:var(--taccent); }
+main#xterm { position:absolute; top:45px; left:0; right:0; bottom:0; padding:6px; }

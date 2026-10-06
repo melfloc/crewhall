@@ -5,6 +5,38 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.68.0] — 2026-10-06
+
+_Terminales web en vivo (Fase 2): xterm.js, streaming binario, resize y multi-cliente._
+
+Threat model:
+- **Activo**: el daemon/terminal. **Atacante**: cliente lento o malicioso. **Vector**: congelar
+  el daemon o la terminal acumulando salida. **Mitigación**: cada cliente tiene cola acotada
+  (`client_queue_bytes`) y cubo de fichas (`max_bytes_per_sec`); el hilo lector nunca bloquea y
+  descarta al cliente lento solo a él (cierre 1013).
+- **Activo**: el teclado de la terminal. **Atacante**: otra pestaña. **Vector**: dos escritores
+  simultáneos. **Mitigación**: un único escritor; `0x07` transfiere el teclado y degrada al anterior.
+- **Activo**: el proceso/sockets. **Atacante**: cliente. **Vector**: tramas malformadas o enormes.
+  **Mitigación**: `max_message_bytes`, sin fragmentación (1003), sin máscara → 1002, sobredimensión
+  → 1009; cierre tras 50 tipos desconocidos.
+- **Activo**: recursos del host remoto. **Vector**: agotar `MaxSessions` de sshd. **Mitigación**:
+  el stream usa un `ControlPath` propio (`%C-stream`).
+- **Activo**: FIFOs/procesos. **Vector**: fugas. **Mitigación**: directorio 0700 verificado,
+  `trap` remoto y parada de `pipe-pane`/borrado del FIFO al irse el último cliente o cerrar.
+
+Cambios:
+- `web/ws.py`: tramas binarias, ping/pong, cierre con código, `FrameReader` con límites y
+  detección de fragmentación; el decoder antiguo sigue funcionando.
+- `crewhall/terminal_stream.py`: `TerminalHub` por terminal con hilo lector, colas acotadas y
+  cubo de fichas; fuentes `pipe-pane` local, ssh remoto (script con FIFO propio y `trap`) y
+  sondeo `capture-pane` de reserva; `send-keys -H` con fusión de 10 ms; resize.
+- Protocolo `/ws/terminal/<id>`: entrada `0x01`, salida `0x02`, resize `0x03`, ping/pong
+  `0x04/0x05`, control `0x06`, claim `0x07`; estado inicial con escapes y cursor.
+- Cliente: xterm.js 6.0.0 + addon-fit 0.11.0 + addon-search 0.16.0 vendorizados (integridad
+  verificada) en `web/static/vendor/xterm/`; página propia `/terminal.html` (CSP propio con
+  `style-src 'unsafe-inline'`, sin relajar el CSP global) con reconexión exponencial, búsqueda
+  (Ctrl+F), indicadores de host/conexión y botón «Take keyboard».
+
 ## [0.67.0] — 2026-10-06
 
 _Terminales interactivas (Fase 1): sesiones "crudas" con `kind="terminal"` en local y por SSH._

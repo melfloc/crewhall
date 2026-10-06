@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import struct
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -250,6 +251,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_index()
         if path == "/login":
             return self._serve_login_page()
+        if path == "/terminal.html":
+            return self._serve_terminal_page()
         if path.startswith("/static/") or path == "/sw.js":
             # like the index, static assets hold no secrets; the API enforces auth
             return self._serve_static("sw.js" if path == "/sw.js" else path[len("/static/"):])
@@ -262,6 +265,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(str(exc), 502)
         if path == "/ws":
             return self._websocket()
+        if path.startswith("/ws/terminal/"):
+            return self._ws_terminal(unquote(path[len("/ws/terminal/"):]), parsed)
         if path.startswith("/api/bundle/"):
             return self._bundle_download(unquote(path[len("/api/bundle/"):]))
         if path == "/api/op":
@@ -430,6 +435,26 @@ class Handler(BaseHTTPRequestHandler):
             extra=[("Set-Cookie", auth.cookie_header(session, secure=self.security.secure_cookie))],
         )
 
+    def _serve_terminal_page(self) -> None:
+        try:
+            with open(os.path.join(STATIC, "terminal.html"), "rb") as fh:
+                body = fh.read()
+        except OSError:
+            return self._error("terminal page missing", 500)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        # xterm.js needs inline styles for its dynamic sizing; this page is a
+        # separate, same-origin document, so its CSP is relaxed only here.
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+        )
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _serve_login_page(self) -> None:
         body = _LOGIN_HTML.encode("utf-8")
         self.send_response(200)
@@ -502,6 +527,196 @@ class Handler(BaseHTTPRequestHandler):
             self._ws_loop()
         except (OSError, ValueError):
             pass
+
+    # -- terminal WebSocket ------------------------------------------------
+    def _terminal_context(self, terminal_id: str):
+        """(info, host_cfg) for an attachable terminal, or raise RpcError."""
+        from .. import settings, terminals as termlib
+
+        termlib.validate_terminal_id(terminal_id)
+        info = self.control.call("terminal_info", id=terminal_id)["terminal"]
+        host = info.get("host")
+        host_cfg = settings.host(host) if host else None
+        return info, host_cfg
+
+    def _ws_terminal(self, terminal_id: str, parsed) -> None:
+        from .. import settings
+
+        if not settings.get("terminals.enabled"):
+            return self._error("not found", 404)
+        if not self.headers.get("Sec-WebSocket-Key"):
+            return self._error("not a websocket request", 400)
+        try:
+            info, host_cfg = self._terminal_context(terminal_id)
+        except (RpcError, ValueError):
+            return self._error("not found", 404)
+        meta = info.get("meta") or {}
+        pane = meta.get("pane_id") or meta.get("tmux_session") or ""
+        tmux_session = meta.get("tmux_session") or ""
+        socket_name = meta.get("socket") or "crewhall"
+        if not pane or not tmux_session:
+            return self._error("terminal is not attachable", 409)
+
+        # Phase 3 authorization (scopes/ticket/Origin) happens here.
+        if not self._authorize_terminal_ws(terminal_id, info, parsed):
+            return
+
+        accept = ws.accept_key(self.headers.get("Sec-WebSocket-Key", ""))
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+
+        from ..terminal_stream import HubClient, TerminalHub
+
+        queue_bytes = int(settings.get("terminals.client_queue_bytes"))
+        max_rate = int(settings.get("terminals.max_bytes_per_sec"))
+        readonly = bool(info.get("readonly"))
+        with self.server.terminal_hubs_lock:
+            hub = self.server.terminal_hubs.get(terminal_id)
+            if hub is None:
+                hub = TerminalHub(
+                    terminal_id, pane=pane, tmux_session=tmux_session, socket=socket_name,
+                    host_cfg=host_cfg, queue_bytes=queue_bytes, max_bytes_per_sec=max_rate,
+                    cols=int(info.get("cols") or 120), rows=int(info.get("rows") or 32),
+                )
+                hub.readonly = readonly
+                hub.host = info.get("host")
+                self.server.terminal_hubs[terminal_id] = hub
+
+        send_lock = threading.Lock()
+
+        def send_raw(data: bytes) -> None:
+            with send_lock:
+                self.connection.sendall(data)
+
+        def send_frame(payload: bytes) -> None:
+            send_raw(ws.encode_binary(payload))
+
+        def send_output(data: bytes) -> None:
+            send_frame(bytes([0x02]) + data)
+
+        def control_state(mode: str) -> dict[str, Any]:
+            return {
+                "mode": mode, "cols": int(info.get("cols") or 120),
+                "rows": int(info.get("rows") or 32), "stream": hub.stream_mode,
+                "readonly": readonly, "closed": False, "host": info.get("host"),
+            }
+
+        def send_control(obj: dict[str, Any]) -> None:
+            send_frame(bytes([0x06]) + json.dumps(obj).encode("utf-8"))
+
+        client = HubClient(send_output, queue_bytes=queue_bytes, max_bytes_per_sec=max_rate)
+        client.control_cb = lambda obj: send_control({**control_state(client.mode), **obj})
+
+        hub.start()
+        snap = hub.snapshot()
+        if snap:
+            client.enqueue(snap)
+        hub.add_client(client)
+        mode = hub.mode_for_new_client(client)
+        send_control(control_state(mode))
+        try:
+            self._terminal_ws_loop(hub, client, send_raw, send_control, control_state, info)
+        finally:
+            client.close(ws.CLOSE_GOING_AWAY)
+            hub.remove_client(client)
+            try:
+                self.connection.close()
+            except OSError:
+                pass
+
+    def _terminal_ws_loop(self, hub, client, send_raw, send_control, control_state, info) -> None:
+        import select
+
+        from .. import settings
+        from .. import terminals as termlib
+
+        max_size = int(settings.get("terminals.max_message_bytes"))
+        idle_timeout = int(settings.get("terminals.idle_timeout") or 0)
+        reader = ws.FrameReader(self.connection, max_size, timeout=0.5)
+        unknown = 0
+        last_activity = time.monotonic()
+
+        def close_with(code: int) -> None:
+            try:
+                send_raw(ws.encode_close(code))
+            except OSError:
+                pass
+
+        while True:
+            if idle_timeout and time.monotonic() - last_activity >= idle_timeout:
+                send_control({**control_state(client.mode), "closed": True})
+                return
+            try:
+                frame = reader.read()
+            except TimeoutError:
+                continue
+            except ws.FrameError as exc:
+                close_with(exc.code)
+                return
+            except (OSError, ValueError):
+                return
+            if frame is None:
+                return
+            last_activity = time.monotonic()
+            if frame.opcode == ws.OP_CLOSE:
+                return
+            if frame.opcode == ws.OP_PING:
+                send_raw(ws.encode_pong(frame.payload))
+                continue
+            if frame.opcode == ws.OP_PONG:
+                continue
+            if not frame.fin or frame.opcode == ws.OP_CONT:
+                close_with(ws.CLOSE_UNSUPPORTED)
+                return
+            if frame.opcode != ws.OP_BINARY:
+                unknown += 1
+                if unknown > 50:
+                    close_with(ws.CLOSE_PROTOCOL)
+                    return
+                continue
+            payload = frame.payload
+            if not payload:
+                unknown += 1
+                if unknown > 50:
+                    close_with(ws.CLOSE_PROTOCOL)
+                    return
+                continue
+            mtype, body = payload[0], payload[1:]
+            if mtype == 0x01:  # input
+                if client.mode == "write" and not hub.readonly:
+                    hub.feed_input(body)
+            elif mtype == 0x03:  # resize
+                if len(body) == 4 and client.mode == "write" and not hub.readonly:
+                    cols = struct.unpack(">H", body[:2])[0]
+                    rows = struct.unpack(">H", body[2:])[0]
+                    if 10 <= cols <= 500 and 2 <= rows <= 200 and hub.resize(cols, rows):
+                        info["cols"], info["rows"] = cols, rows
+                        for other in list(hub.clients):
+                            if other is not client:
+                                other.notify({"cols": cols, "rows": rows})
+            elif mtype == 0x04:  # app ping
+                send_raw(ws.encode_binary(bytes([0x05])))
+            elif mtype == 0x05:  # app pong
+                pass
+            elif mtype == 0x07:  # claim keyboard
+                if not hub.readonly:
+                    hub.claim(client)
+                    send_control(control_state(client.mode))
+            else:
+                unknown += 1
+                if unknown > 50:
+                    close_with(ws.CLOSE_PROTOCOL)
+                    return
+
+    def _authorize_terminal_ws(self, terminal_id: str, info: dict[str, Any], parsed) -> bool:
+        """Phase 3 hook: default allows (Phase 2). Overridden by the ticket check."""
+        checker = getattr(self, "_check_terminal_ticket", None)
+        if checker is not None:
+            return checker(terminal_id, info, parsed)
+        return True
 
     # Cadence of the server-side adaptation loop. The focused agent (the one the
     # browser is showing) is refreshed fast; the state snapshot and the other
@@ -624,7 +839,20 @@ class _TrackingHTTPServer(ThreadingHTTPServer):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._clients: set[Any] = set()
         self._clients_lock = threading.Lock()
+        self.terminal_hubs: dict[str, Any] = {}
+        self.terminal_hubs_lock = threading.Lock()
+        self.tickets: dict[str, Any] = {}
+        self.tickets_lock = threading.Lock()
         super().__init__(*args, **kwargs)
+
+    def close_terminal_hubs(self) -> None:
+        with self.terminal_hubs_lock:
+            hubs, self.terminal_hubs = list(self.terminal_hubs.values()), {}
+        for hub in hubs:
+            try:
+                hub.stop()
+            except Exception:
+                pass
 
     def process_request(self, request: Any, client_address: Any) -> None:
         with self._clients_lock:
@@ -697,6 +925,10 @@ class WebServer:
         if self._httpd is not None:
             if self._serving:  # shutdown() would block forever otherwise
                 self._httpd.shutdown()
+            try:
+                self._httpd.close_terminal_hubs()
+            except Exception:
+                pass
             self._httpd.server_close()
             self._httpd.close_clients()
 

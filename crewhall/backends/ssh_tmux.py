@@ -107,12 +107,16 @@ class SshTmuxBackend(TmuxBackend):
         self._unreachable = False
 
     # ---------------------------------------------------------------- transport
-    def _ssh_local_argv(self, *, allocate_tty: bool = False) -> list[str]:
+    def _ssh_local_argv(
+        self, *, allocate_tty: bool = False, control_suffix: str | None = None
+    ) -> list[str]:
         argv = ["ssh"]
         if allocate_tty:
             argv.append("-t")
         argv += list(SSH_BASE_OPTIONS)
-        control_path = os.path.join(control_dir(), "%C")
+        # A distinct ControlPath (``%C-stream``) keeps long-lived stream
+        # processes from exhausting the host's MaxSessions.
+        control_path = os.path.join(control_dir(), "%C" + (control_suffix or ""))
         _check_control_path(control_path)
         argv += ["-o", f"ControlPath={control_path}"]
         if self.known_hosts:
