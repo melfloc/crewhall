@@ -44,7 +44,9 @@ function mountTerminalView(container, termId, opts){
     if(typeof c.readonly === "boolean") st.readonly = c.readonly;
     if(typeof c.mode === "string") st.mode = c.mode;
     if(c.host !== undefined){ const h = hostEl(); if(h) h.textContent = c.host || "local"; }
-    if(c.cols && c.rows && term){ try{ if(term.cols!==c.cols||term.rows!==c.rows) term.resize(c.cols, c.rows); }catch(e){} }
+    // Never resize from the control frame: this client fits its own container
+    // (and, when it holds the keyboard, tells the server its size). Resizing to
+    // the server's cols/rows would leave empty space below the grid.
     if(c.closed){ st.closed = true; setConn("closed", "s-error"); }
     else if(st.readonly) setConn("read-only", "s-waiting_input");
     else if(st.mode === "write") setConn("connected · keyboard", "s-ready");

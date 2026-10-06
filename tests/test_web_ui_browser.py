@@ -1757,6 +1757,12 @@ class TerminalPane(_Browser):
             "() => (document.querySelector('.xterm-rows') || {}).textContent?.includes('hello')",
             timeout=10000)
         self.assertIn("terminal", self.page.inner_text("#head"))
+        # The grid fills the panel: it must not leave a gap at the bottom.
+        fills = self.page.evaluate(
+            "() => { const v = document.querySelector('.xterm-viewport').getBoundingClientRect().height;"
+            " const s = document.querySelector('.xterm-screen').getBoundingClientRect().height;"
+            " return s >= v - 25; }")
+        self.assertTrue(fills, "xterm grid does not fill the viewport")
 
 
 

@@ -5,6 +5,13 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.71.1] — 2026-10-06
+
+- **Corrección**: la terminal ya llena el panel. El frame de control `0x06` traía
+  `cols/rows` del servidor y el cliente redimensionaba xterm a ese tamaño, dejando un
+  hueco vacío abajo; ahora el cliente se ajusta a su contenedor (`fit`) y solo envía su
+  tamaño al servidor. Afecta al panel principal y a `/terminal.html`.
+
 ## [0.71.0] — 2026-10-06
 
 - **`terminals.master_grants`** (def. `false`, requiere `CONFIRM`): la **sesión maestra**

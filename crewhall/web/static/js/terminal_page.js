@@ -45,9 +45,8 @@
     if(typeof c.readonly === "boolean") readonly = c.readonly;
     if(typeof c.mode === "string") mode = c.mode;
     if(typeof c.host === "string" || c.host === null) badge.textContent = c.host || "local";
-    if(c.cols && c.rows){
-      try { if(term.cols !== c.cols || term.rows !== c.rows) term.resize(c.cols, c.rows); } catch (e) {}
-    }
+    // Fit to this window; do not adopt the server's cols/rows (it would leave
+    // empty space below the grid when the sizes differ).
     if(c.closed){ closed = true; setConn("closed", "closed"); }
     claimBtn.disabled = readonly;
     if(c.closed) setConn("closed", "closed");
