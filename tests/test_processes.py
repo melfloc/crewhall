@@ -104,10 +104,17 @@ class FakeAgentProcess(unittest.TestCase):
             self.assertEqual(out["signal"], "INT")
             self.assertEqual(session.events()[-1]["type"], "process_signal")
             # Once finished, its output stays readable among the finished ones.
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline and c.list_processes("c")["shells"]:
-                time.sleep(0.05)
-            self.assertEqual([t["task"] for t in c.list_processes("c")["finished"]], ["btask01"])
+            # Wait for both: the shell to stop and the task to be reclassified as
+            # finished (the machine may be busy under a full test run).
+            deadline = time.monotonic() + 15
+            finished: list[dict] = []
+            while time.monotonic() < deadline:
+                listing = c.list_processes("c")
+                finished = listing["finished"]
+                if not listing["shells"] and any(t["task"] == "btask01" for t in finished):
+                    break
+                time.sleep(0.1)
+            self.assertEqual([t["task"] for t in finished], ["btask01"])
 
     def test_a_stopped_agent_has_no_processes(self):
         c = Controller(adopt=False)
