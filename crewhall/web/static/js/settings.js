@@ -43,7 +43,17 @@ function settingsGroup(group, title, exclude = []){
       const listy = f.item.type === "list" || f.item.type === "paths";
       const v = f.get(); if(JSON.stringify(v) !== JSON.stringify(listy ? (f.item.value||[]).join("\n") : f.item.value) ) changes[f.item.key] = v; });
     if(!Object.keys(changes).length){ save.disabled = true; return; }
-    try { SK.data = await op("settings_set", {changes}); toast("Settings saved", "ok"); renderSettings(); }
+    const needsConfirm = Object.keys(changes).some(k =>
+      k === "terminals.enabled" || k.endsWith(".command") || k.endsWith(".env"));
+    if(needsConfirm){
+      const ok = await confirmTyped({title:"Confirm privileged change?", word:"CONFIRM", ok:"Apply",
+        message:"This change lets the daemon run arbitrary code as your user. Type CONFIRM to proceed."});
+      if(!ok) return;
+    }
+    try {
+      SK.data = await op("settings_set", {changes, ...(needsConfirm ? {confirm:"CONFIRM"} : {})});
+      toast("Settings saved", "ok"); renderSettings();
+    }
     catch(e){ flash(e.message); }
   };
   const restore = el("button", {className:"btn", type:"button", onclick:async()=>{
@@ -341,32 +351,9 @@ async function previewReset(level){
 }
 /* ----- terminals (raw interactive shells; closed by default) ----- */
 async function tabTerminals(view){
-  const items = SK.data.items.filter(i => i.group === "terminals");
-  const enabledItem = items.find(i => i.key === "terminals.enabled");
-  const enabledNow = !!(enabledItem && enabledItem.value);
-  const cb = el("input", {type:"checkbox", id:"sf-terminals-enabled", checked:enabledNow});
-  const save = el("button", {className:"btn primary", type:"button"},
-    enabledNow ? "Disable terminals" : "Enable terminals");
-  save.onclick = async () => {
-    const want = cb.checked;
-    if(want === enabledNow){ toast("No change", "info", 1800); return; }
-    if(want){
-      const ok = await confirmTyped({title:"Enable terminals?", word:"CONFIRM", ok:"Enable",
-        message:"A web terminal is arbitrary code execution as your user. Enable it only when you need it."});
-      if(!ok){ cb.checked = false; return; }
-    }
-    try{
-      SK.data = await op("settings_set", {changes:{"terminals.enabled":want}, confirm:"CONFIRM"});
-      toast("Settings saved", "ok"); renderSettings();
-    }catch(e){ flash(e.message); }
-  };
-  const enableBox = el("div", {className:"set-group"},
-    el("div", {className:"field check-row"}, el("label", {className:"check"}, cb, el("span", {}, "Web terminals")),
-      el("div", {className:"hint"}, enabledItem ? enabledItem.help : "")),
-    el("div", {className:"dlg-actions", style:"justify-content:flex-start"}, save));
-  view.replaceChildren(enableBox,
-    settingsGroup("terminals", "terminals", ["terminals.enabled"]),
-    el("div", {className:"hint"}, "When disabled, terminal routes return 404 and the CLI exits with code 2."));
+  view.replaceChildren(settingsGroup("terminals", "terminals"),
+    el("div", {className:"hint"}, "Enabling Web terminals is privileged and asks you to type CONFIRM. "
+      + "When disabled, terminal routes return 404 and the CLI exits with code 2."));
 }
 
 async function waitDaemonBack(out){

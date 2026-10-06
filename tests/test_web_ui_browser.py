@@ -1595,7 +1595,7 @@ class Terminals(_Browser):
         self.page.click('#settings-nav button[data-tab="terminals"]')
         self.page.wait_for_selector("#sf-terminals-enabled")
         self.page.check("#sf-terminals-enabled")
-        self.page.get_by_role("button", name="Enable terminals").click()
+        self.page.locator("#settings-body .set-group .btn.primary").click()
         self.page.wait_for_selector("#dlg[open] #typed-confirm")
         self.page.fill("#typed-confirm", "CONFIRM")
         self.page.locator("#dlg .btn.danger.solid").click()
