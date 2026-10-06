@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import inspect
 import threading
 import time
 from typing import Any
@@ -131,7 +132,15 @@ class InteractiveSession:
         self.send_key("ENTER")
 
     def capture(self, escapes: bool = False) -> str:
-        return self.backend.capture(escapes=escapes)
+        # Older/third-party backends may still expose capture() without the
+        # optional ``escapes`` argument; only pass it when they accept it.
+        fn = self.backend.capture
+        try:
+            if "escapes" in inspect.signature(fn).parameters:
+                return fn(escapes=escapes)
+        except (TypeError, ValueError):
+            pass
+        return fn()
 
     def read(self, timeout: float | None = None) -> str:
         deadline = None if timeout is None else time.monotonic() + timeout
