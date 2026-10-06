@@ -1667,6 +1667,15 @@ class Terminals(_Browser):
         self.assertEqual(payload["changes"], {"terminals.enabled": True})
         self.assertEqual(payload["confirm"], "CONFIRM")
 
+    def test_terminal_cwd_uses_path_autocomplete(self):
+        self.page.click("#termBtn")
+        self.page.wait_for_selector("#termDlg[open]")
+        self.page.click("#termDlg .btn:has-text('New terminal')")
+        self.page.wait_for_selector("#term-cwd")
+        self.assertEqual(self.page.get_attribute("#term-cwd", "aria-autocomplete"), "list")
+        self.page.fill("#term-cwd", "/srv/")
+        self.page.wait_for_selector(".path-pop .path-opt", timeout=5000)
+
     def test_readonly_disables_input(self):
         self.terms = [{"session_id": "term_deadbeef", "kind": "terminal", "host": None,
                        "title": "ro", "status": "running", "cwd": "/tmp", "readonly": True}]

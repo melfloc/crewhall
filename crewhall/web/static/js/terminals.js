@@ -162,12 +162,16 @@
       el("option", {value:"sh"}, "sh"), el("option", {value:"fish"}, "fish"));
     const ro = el("input", {type:"checkbox", id:"term-ro"});
     const shellField = el("div", {className:"field"}, el("label", {}, "Shell (local only)"), shell);
+    const cwdField = el("div", {className:"field"}, el("label", {}, "Working directory"), cwd);
+    queueMicrotask(() => attachPathComplete(cwd));
     hostSel.addEventListener("change", () => {
       shellField.style.display = hostSel.value ? "none" : "";
+      cwd.dataset.remote = hostSel.value ? "1" : "";  // a remote path is not completed locally
+      cwd.placeholder = hostSel.value ? "/home/user/project (on the host)" : "/absolute/path (optional)";
     });
     const form = el("div", {className:"stack term-new"},
       el("div", {className:"field"}, el("label", {}, "Run on"), hostSel),
-      el("div", {className:"field"}, el("label", {}, "Working directory"), cwd),
+      cwdField,
       el("div", {className:"field"}, el("label", {}, "Title"), title),
       shellField,
       el("label", {className:"field"}, ro, " Read-only"),

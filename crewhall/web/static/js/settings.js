@@ -147,10 +147,12 @@ async function tabProviders(box){
 const HOST_STATE_LABEL = {ok:"reachable", unreachable:"unreachable", reconnecting:"reconnecting", unknown:"not checked yet"};
 function hostForm(h, onDone){
   const editing = !!h, id = k => `hf-${k}`;
-  const f = (k, label, value, ph, hint, mono = true) => el("div", {className:"field"},
-    el("label", {htmlFor:id(k)}, label),
-    el("input", {className:"input" + (mono ? " mono" : ""), id:id(k), value:value ?? "", placeholder:ph, spellcheck:false, autocomplete:"off", disabled:editing && k === "name"}),
-    hint ? el("div", {className:"hint"}, hint) : null);
+  const f = (k, label, value, ph, hint, mono = true) => {
+    const input = el("input", {className:"input" + (mono ? " mono" : ""), id:id(k), value:value ?? "", placeholder:ph, spellcheck:false, autocomplete:"off", disabled:editing && k === "name"});
+    if(k === "identity" || k === "known_hosts") queueMicrotask(() => attachPathComplete(input));
+    return el("div", {className:"field"}, el("label", {htmlFor:id(k)}, label), input,
+      hint ? el("div", {className:"hint"}, hint) : null);
+  };
   const tunnel = el("input", {type:"checkbox", id:id("tunnel"), checked:!!(h && h.tunnel)});
   const err = el("div", {className:"err", role:"alert"});
   const val = k => document.getElementById(id(k)).value.trim();
