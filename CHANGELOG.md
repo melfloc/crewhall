@@ -5,6 +5,31 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.66.0] — 2026-10-05
+
+_Teams con host SSH y workspace remoto._
+
+- Un team puede declarar un **host**: su `workspace` es entonces un directorio **del
+  host** y solo agentes de ese host pueden ser miembros. Los agentes nuevos del team
+  heredan host, backend (`ssh-tmux`) y directorio; con `workspace_mode: worktree` el
+  worktree se crea sobre el repo remoto. Un team sin host se comporta como siempre.
+- Honestidad/seguridad: el directorio remoto se **verifica por SSH** al crearlo o
+  cambiarlo (host caído o ruta inexistente → error claro) y nunca se toca el sistema de
+  ficheros local; la ruta debe ser absoluta (sin NUL ni saltos de línea). La
+  restauración al arrancar el daemon **no usa la red**: un host caído no pierde el
+  team ni retrasa el arranque.
+- Un agente de otro host (o local) no puede unirse a un team remoto, ni al crearlo, ni
+  con `add_member`, ni con `team_up`; el host de un team solo cambia mientras no tiene
+  miembros.
+- Specs/bundles: `[team] host = "…"`; los agentes heredan el host, un `cwd` relativo se
+  resuelve en el host y no contra la máquina local; importar un bundle ya no descarta
+  agentes remotos por «directorio no encontrado» en local.
+- Web UI: New team → «Run on» y «Directory on <host>»; el selector «Run on» de un
+  agente nuevo queda fijado al host del team con su directorio; la barra lateral muestra
+  `host:/directorio`. TUI y CLI (`agent team create --host H -w /ruta`,
+  `set-workspace --host`) equivalentes.
+- Corrección: añadir o quitar un miembro hacía perder el `workspace_mode` del team.
+
 ## [0.65.0] — 2026-10-05
 
 _Configurar y elegir hosts SSH desde el Web UI, la TUI y la CLI._

@@ -834,7 +834,9 @@ def cmd_agent_messages(args: argparse.Namespace) -> int:
 def _print_team(team: dict[str, Any]) -> None:
     members = team.get("members", [])
     missing = team.get("missing", [])
-    print(f"● {team['team_id']}  name={team['name']}  members={len(members)}")
+    where = f"  host={team['host']}" if team.get("host") else ""
+    ws = f"  workspace={team['workspace']}" if team.get("workspace") else ""
+    print(f"● {team['team_id']}  name={team['name']}  members={len(members)}{where}{ws}")
     for member in members:
         name = member.get("name") or "-"
         print(
@@ -851,6 +853,7 @@ def cmd_team_create(args: argparse.Namespace) -> int:
         name=args.name,
         agent_ids=args.agents,
         workspace=getattr(args, "workspace", None),
+        host=getattr(args, "host", None),
     )
     _print_team(resp["team"])
     return 0
@@ -874,8 +877,9 @@ def cmd_team_up(args: argparse.Namespace) -> int:
 
 
 def cmd_team_set_workspace(args: argparse.Namespace) -> int:
+    extra = {"host": args.host} if getattr(args, "host", None) is not None else {}
     resp = _client(args).call(
-        "team_set_workspace", target=args.target, workspace=args.workspace
+        "team_set_workspace", target=args.target, workspace=args.workspace, **extra
     )
     _print_team(resp["team"])
     return 0
@@ -894,7 +898,8 @@ def cmd_team_list(args: argparse.Namespace) -> int:
             (m.get("name") or m["agent_id"]) for m in team["members"]
         )
         missing = f"  missing={team['missing']}" if team["missing"] else ""
-        print(f"{team['team_id']}  {team['name']}  members=[{names}]{missing}")
+        where = f"  host={team['host']}" if team.get("host") else ""
+        print(f"{team['team_id']}  {team['name']}  members=[{names}]{missing}{where}")
     return 0
 
 
@@ -1330,7 +1335,11 @@ def build_parser() -> argparse.ArgumentParser:
     tc.add_argument("name")
     tc.add_argument("agents", nargs="*")
     tc.add_argument("-w", "--workspace", default=None,
-                    help="shared workspace directory (default cwd for its agents)")
+                    help="shared workspace directory (default cwd for its agents; "
+                         "a path on the host with --host)")
+    tc.add_argument("--host", default=None,
+                    help="configured SSH host: the team's agents run there, the workspace is "
+                         "a directory on it")
     tc.set_defaults(func=cmd_team_create)
 
     tu = tsub.add_parser("up", help="create a team and its agents from a team.toml/json file")
@@ -1340,6 +1349,8 @@ def build_parser() -> argparse.ArgumentParser:
     tw = tsub.add_parser("set-workspace", help="set/replace a team's workspace")
     tw.add_argument("target")
     tw.add_argument("workspace", nargs="?", default=None)
+    tw.add_argument("--host", default=None,
+                    help="move an empty team to this host ('' = back to this machine)")
     tw.set_defaults(func=cmd_team_set_workspace)
 
     tl = tsub.add_parser("list", help="list teams")

@@ -27,6 +27,10 @@ async function openNewAgent(teamId){
   $("newAgent").showModal(); $("na-name").focus();
 }
 function updateHostUi(){
+  // A remote team fixes the host (and its directory): its agents run there.
+  const team = teamById($("na-team").value);
+  if(team && team.host){ $("na-host").value = team.host; }
+  $("na-host").disabled = !!(team && team.host);
   const name = $("na-host").value, hosts = S.hosts || [];
   const h = hosts.find(x => x.name === name);
   const remote = !!name;
@@ -54,12 +58,14 @@ function updateCwdHint(){
   if(!_naPath){ _naPath = true; attachPathComplete($("na-cwd")); }
   const t = teamById($("na-team").value);
   const hint = $("na-cwd-hint");
-  if(hint && $("na-host").value) hint.textContent = "Absolute path on the remote machine. Empty = the SSH user's home directory.";
+  if(hint && $("na-host").value) hint.textContent = t && t.host && t.workspace
+    ? `Leave empty to use the team directory on ${t.host}: ${t.workspace}`
+    : "Absolute path on the remote machine. Empty = the SSH user's home directory.";
   else if(hint) hint.textContent = t && t.workspace
     ? `Leave empty to inherit the team workspace: ${t.workspace}`
     : "Leave empty to use the server's working directory";
 }
-$("na-team").onchange = updateCwdHint;
+$("na-team").onchange = ()=>{ updateHostUi(); };
 $("na-cancel").onclick = ()=> $("newAgent").close();
 $("newAgent").addEventListener("click", e => { if(e.target === $("newAgent")) $("newAgent").close(); });
 async function createAgent(){
@@ -118,10 +124,21 @@ async function teamAction(act, teamId){
       for(const id of chosen){ await op("team_remove_member", {target:teamId, agent:id}); }
       toast(`${chosen.length} member(s) removed`, "ok");
     } else if(act==="set-ws"){
-      const r = await promptDlg({title:`Workspace for ${team.name}`, sub:"New agents in this team start in this directory.",
-        fields:[{key:"ws", label:"Absolute path", value:team.workspace||"", placeholder:"/home/me/project", mono:true, path:true, hint:"Leave empty to clear the workspace."}]});
+      const hosts = await hostChoices();
+      // The host of a team can only change while it has no members.
+      const canMove = hosts.length && !(team.members||[]).length;
+      const fields = [];
+      if(canMove) fields.push({key:"host", label:"Run on", type:"select", value:team.host||"", options:hostOptions(hosts)});
+      fields.push({key:"ws", label:team.host ? `Directory on ${team.host}` : "Absolute path", value:team.workspace||"",
+        placeholder:team.host ? "/home/user/project (on the host)" : "/home/me/project", mono:true, path:!team.host,
+        remoteWhen:canMove ? "host" : null, remoteLabel:"Directory on {host}", remotePlaceholder:"/home/user/project (on the host)",
+        hint:team.host ? `A path on ${team.host}; it is checked over SSH. Leave empty to clear the workspace.` : "Leave empty to clear the workspace."});
+      const r = await promptDlg({title:`Workspace for ${team.name}`, sub:team.host
+        ? `This team runs on ${team.host}: its agents start in this directory there.` : "New agents in this team start in this directory.", fields});
       if(!r) return;
-      await op("team_set_workspace", {target:teamId, workspace: r.ws||null});
+      const params = {target:teamId, workspace: r.ws||null};
+      if(canMove) params.host = r.host || "";
+      await op("team_set_workspace", params);
       toast("Workspace updated", "ok");
     } else if(act==="rm-team"){
       if(!await confirmDlg({title:`Delete team “${team.name}”?`, message:"Its agents will NOT be stopped.", ok:"Delete team", danger:true})) return;
@@ -131,12 +148,22 @@ async function teamAction(act, teamId){
   } catch(e){ flash(e.message); }
 }
 
+async function hostChoices(){
+  try { return (await op("host_list")).hosts || []; } catch(e){ return S.state?.hosts || []; }
+}
+const hostOptions = (hosts) => [{value:"", label:"This machine"},
+  ...hosts.map(h => ({value:h.name, label:`${h.name} — ${h.ssh}${h.port !== 22 ? ":" + h.port : ""} (${h.state})`}))];
 async function newTeam(){
-  const r = await promptDlg({title:"New team", sub:"Teams let agents message each other and share a workspace.", ok:"Create team",
-    fields:[{key:"name", label:"Name", required:true, placeholder:"e.g. backend"},
-            {key:"workspace", label:"Workspace (optional)", mono:true, path:true, placeholder:"/absolute/path"}]});
+  const hosts = await hostChoices();
+  const fields = [{key:"name", label:"Name", required:true, placeholder:"e.g. backend"}];
+  if(hosts.length) fields.push({key:"host", label:"Run on", type:"select", options:hostOptions(hosts),
+    hint:"A remote team runs all its agents on that machine, in a directory there."});
+  fields.push({key:"workspace", label:"Workspace (optional)", mono:true, path:true, placeholder:"/absolute/path",
+    remoteWhen:hosts.length ? "host" : null, remoteLabel:"Directory on {host} (optional)", remotePlaceholder:"/home/user/project (on the host)"});
+  const r = await promptDlg({title:"New team", sub:"Teams let agents message each other and share a workspace.", ok:"Create team", fields});
   if(!r) return;
-  try { await op("team_create", {name:r.name, agent_ids:[], workspace:r.workspace||null}); toast(`Team ${r.name} created`, "ok"); }
+  try { await op("team_create", {name:r.name, agent_ids:[], workspace:r.workspace||null, host:r.host||null});
+    toast(`Team ${r.name} created`, "ok"); }
   catch(e){ flash(e.message); }
 }
 

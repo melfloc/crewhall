@@ -1470,5 +1470,55 @@ class RemoteHosts(_Browser):
         self.assertEqual(self.errors, [])
 
 
+REMOTE_TEAM = {"team_id": "t2", "name": "Prod team", "workspace": "/srv/app", "host": "prod",
+               "members": [{"agent_id": "sess_rem", "name": "remote-one", "kind": "claude"}], "missing": []}
+
+
+class RemoteTeams(_Browser):
+    agents = [REMOTE_AGENT]
+    teams = [REMOTE_TEAM]
+    hosts = [PROD]
+
+    def test_sidebar_shows_the_team_host_and_directory(self):
+        self.assertIn("prod:/srv/app", self.page.locator("#nav").inner_text())
+
+    def test_new_team_can_target_a_host_and_a_remote_directory(self):
+        self.page.evaluate("(() => { newTeam(); })()")
+        self.page.wait_for_selector("#dlg[open] #pf-host")
+        self.page.fill("#pf-name", "ops")
+        self.page.select_option("#pf-host", "prod")
+        self.assertIn("Directory on prod", self.page.inner_text("#dlg label[for=pf-workspace]"))
+        self.assertEqual(self.page.get_attribute("#pf-workspace", "data-remote"), "1")
+        self.page.fill("#pf-workspace", "/srv/ops")
+        self.page.locator("#dlg .btn.primary").click()
+        deadline = time.monotonic() + 5
+        while "team_create" not in self.calls and time.monotonic() < deadline:
+            time.sleep(0.1)
+        payload = next(p for p in self.payloads if p.get("op") == "team_create")
+        self.assertEqual((payload["name"], payload["host"], payload["workspace"]), ("ops", "prod", "/srv/ops"))
+
+    def test_a_local_team_sends_no_host(self):
+        self.page.evaluate("(() => { newTeam(); })()")
+        self.page.wait_for_selector("#dlg[open] #pf-host")
+        self.page.fill("#pf-name", "local-team")
+        self.page.locator("#dlg .btn.primary").click()
+        deadline = time.monotonic() + 5
+        while "team_create" not in self.calls and time.monotonic() < deadline:
+            time.sleep(0.1)
+        payload = next(p for p in self.payloads if p.get("op") == "team_create")
+        self.assertIsNone(payload["host"])
+
+    def test_new_agent_in_a_remote_team_is_locked_to_its_host_and_directory(self):
+        self.page.evaluate("openNewAgent('t2')")
+        self.page.wait_for_selector("#newAgent[open]")
+        self.assertEqual(self.page.input_value("#na-host"), "prod")
+        self.assertTrue(self.page.locator("#na-host").is_disabled())
+        self.assertIn("/srv/app", self.page.inner_text("#na-cwd-hint"))
+        self.page.fill("#na-name", "w2")
+        self.page.locator("#na-ok").click()
+        payload = next(p for p in self.payloads if p.get("op") == "agent_create")
+        self.assertEqual((payload["host"], payload["team"], payload["cwd"]), ("prod", "t2", None))
+
+
 if __name__ == "__main__":
     unittest.main()

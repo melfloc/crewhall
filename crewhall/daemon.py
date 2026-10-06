@@ -608,6 +608,8 @@ class Server:
             request["name"],
             request["agent_ids"],
             workspace=request.get("workspace"),
+            workspace_mode=request.get("workspace_mode"),
+            host=request.get("host"),
         )
         return {"team": self.controller.team_info(team.team_id)}
 
@@ -629,8 +631,9 @@ class Server:
         return {"team": self.controller.team_info(team.team_id)}
 
     def _op_team_set_workspace(self, request: dict[str, Any]) -> dict[str, Any]:
+        extra = {"host": request["host"] or None} if "host" in request else {}
         team = self.controller.set_team_workspace(
-            request["target"], request.get("workspace")
+            request["target"], request.get("workspace"), **extra
         )
         return {"team": self.controller.team_info(team.team_id)}
 

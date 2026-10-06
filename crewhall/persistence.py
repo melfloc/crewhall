@@ -64,6 +64,7 @@ class StateStore:
                     "created_at": team.created_at,
                     "workspace": team.workspace,
                     "workspace_mode": getattr(team, "workspace_mode", None),
+                    "host": getattr(team, "host", None),
                 }
             )
         agents = []

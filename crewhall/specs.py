@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import tomllib
 from typing import Any
 
@@ -51,6 +52,14 @@ def _check_host(value: Any) -> str | None:
             f"unknown host {value!r}; configure it under \"hosts\" in settings.json"
         )
     return value
+
+
+def _remote_workspace(value: Any) -> str | None:
+    if not value:
+        return None
+    if not isinstance(value, str) or not value.startswith("/") or any(c in value for c in "\0\n\r"):
+        raise SpecError("team workspace: a remote workspace must be an absolute path on the host")
+    return posixpath.normpath(value)
 
 
 def profiles_path() -> str:
@@ -128,12 +137,19 @@ def parse_team_data(
     agents = data.get("agent", [])
     if not isinstance(agents, list) or not agents:
         raise SpecError("at least one [[agent]] is required")
+    try:
+        team_host = _check_host(team.get("host"))
+    except SpecError as exc:
+        raise SpecError(f"team host: {exc}") from exc
+    remote_ws = _remote_workspace(team.get("workspace")) if team_host else None
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for i, raw in enumerate(agents, 1):
         if not isinstance(raw, dict) or set(raw) - AGENT_KEYS:
             raise SpecError(f"agent #{i}: allowed keys are {sorted(AGENT_KEYS)}")
         entry = apply_profile(raw, profiles)
+        if team_host and not entry.get("host"):
+            entry["host"] = team_host  # a remote team's agents run on its host
         name = entry.get("name")
         if not name or not isinstance(name, str):
             raise SpecError(f"agent #{i}: name is required")
@@ -150,6 +166,10 @@ def parse_team_data(
         except SpecError as exc:
             raise SpecError(f"agent {name!r}: {exc}") from exc
         entry["host"] = host
+        if team_host and host != team_host:
+            raise SpecError(
+                f"agent {name!r}: team host is {team_host!r}, the agent asks for {host!r}"
+            )
         if host:
             if entry.get("backend") == "pty":
                 raise SpecError(
@@ -158,7 +178,14 @@ def parse_team_data(
             if entry.get("backend") in (None, "", "auto"):
                 entry["backend"] = "ssh-tmux"
         cwd = entry.get("cwd")
-        if cwd and not host:
+        if cwd and host and team_host:
+            # Relative to the remote workspace; never resolved on this machine.
+            if not str(cwd).startswith("/"):
+                if not remote_ws:
+                    raise SpecError(f"agent {name!r}: a relative cwd needs the team workspace")
+                cwd = posixpath.join(remote_ws, cwd)
+            entry["cwd"] = posixpath.normpath(cwd)
+        elif cwd and not host:
             cwd = os.path.expanduser(cwd)
             entry["cwd"] = cwd if os.path.isabs(cwd) else os.path.join(base, cwd)
         # With a host, cwd is a path on the remote machine: never expand or
@@ -166,8 +193,10 @@ def parse_team_data(
         entry.pop("profile", None)
         out.append(entry)
     workspace = team.get("workspace")
-    if workspace:
+    if team_host:
+        workspace = remote_ws  # a path on the host: never expanded locally
+    elif workspace:
         workspace = os.path.expanduser(workspace)
         if not os.path.isabs(workspace):
             workspace = os.path.join(base, workspace)
-    return {"name": team["name"], "workspace": workspace, "agents": out}
+    return {"name": team["name"], "workspace": workspace, "host": team_host, "agents": out}

@@ -175,16 +175,31 @@ async function confirmDlg({title, message, ok = "Confirm", danger = false}){
 }
 async function promptDlg({title, sub, fields, ok = "Save"}){
   return openDlg(close => {
-    const inputs = fields.map(f => el("input", {className:"input" + (f.mono ? " mono" : ""), value:f.value||"",
-      placeholder:f.placeholder||"", autocomplete:"off", spellcheck:false, id:"pf-" + f.key}));
+    // type:"select" fields take options:[{value,label}]; a field with remoteWhen:"<key>" turns into
+    // a path *on that host* (no local completion) while the select named <key> has a value.
+    const inputs = fields.map(f => f.type === "select"
+      ? el("select", {className:"select", id:"pf-" + f.key, disabled:!!f.disabled},
+          ...f.options.map(o => el("option", {value:o.value, textContent:o.label, selected:o.value === (f.value||"")})))
+      : el("input", {className:"input" + (f.mono ? " mono" : ""), value:f.value||"",
+          placeholder:f.placeholder||"", autocomplete:"off", spellcheck:false, id:"pf-" + f.key}));
     fields.forEach((f, i) => { if(f.path) queueMicrotask(() => attachPathComplete(inputs[i])); });
+    const labels = fields.map(f => el("label", {htmlFor:"pf-" + f.key}, f.label));
+    const sync = () => fields.forEach((f, i) => {
+      if(!f.remoteWhen) return;
+      const j = fields.findIndex(x => x.key === f.remoteWhen), host = j >= 0 ? inputs[j].value : "";
+      inputs[i].dataset.remote = host ? "1" : "";
+      labels[i].textContent = host ? (f.remoteLabel || "Directory on the host").replace("{host}", host) : f.label;
+      inputs[i].placeholder = host ? (f.remotePlaceholder || "/path/on/the/host") : (f.placeholder || "");
+    });
+    fields.forEach((f, i) => { if(f.type === "select") inputs[i].onchange = sync; });
+    queueMicrotask(sync);
     const err = el("div", {className:"err", role:"alert"});
     return el("form", {onsubmit:e=>{ e.preventDefault();
         const out = {}; for(let i = 0; i < fields.length; i++){ out[fields[i].key] = inputs[i].value.trim();
           if(fields[i].required && !out[fields[i].key]){ err.textContent = fields[i].label + " is required"; inputs[i].classList.add("invalid"); inputs[i].focus(); return; } }
         close(out); }},
       el("h3", {}, title), sub ? el("p", {className:"sub"}, sub) : null,
-      ...fields.map((f, i) => el("div", {className:"field"}, el("label", {htmlFor:"pf-" + f.key}, f.label), inputs[i],
+      ...fields.map((f, i) => el("div", {className:"field"}, labels[i], inputs[i],
         f.hint ? el("div", {className:"hint"}, f.hint) : null)),
       err, dlgActions(close, ok));
   });

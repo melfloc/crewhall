@@ -52,7 +52,8 @@ function render(){
     const collapsed = S.collapsed.has(t.team_id) && !filtering;
     const working = members.filter(m => m.state === "working").length;
     const body = el("div", {className:"team-body"},
-      t.workspace ? el("div", {className:"team-ws", style:"padding:6px 8px 4px", title:t.workspace}, ic("folder","sm"), " ", t.workspace) : null,
+      t.workspace || t.host ? el("div", {className:"team-ws", style:"padding:6px 8px 4px", title:t.host ? `${t.host}:${t.workspace||""}` : t.workspace},
+        ic("folder","sm"), " ", t.host ? `${t.host}:${t.workspace||"~"}` : t.workspace) : null,
       shown.map(agentRow), !members.length ? el("div", {className:"empty-side"}, "No members yet") : null,
       t.missing?.length ? el("div", {className:"team-missing"}, `× ${t.missing.join(", ")} (missing)`) : null);
     const more = el("button", {className:"btn icon sm ghost", type:"button", "aria-label":`Actions for team ${t.name}`, title:"Team actions",

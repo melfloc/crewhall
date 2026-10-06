@@ -126,6 +126,12 @@ _OPENCODE_INTERACTION_EVENTS = (
 )
 
 
+def _shq(value: str) -> str:
+    import shlex
+
+    return shlex.quote(value)
+
+
 def _ssh_hint(cfg: dict[str, Any], detail: str) -> str:
     low = detail.lower()
     dest, port = cfg["ssh"], cfg.get("port", 22)
@@ -152,6 +158,7 @@ class Controller:
         self.registry = Registry()
         self.agents = AgentRegistry(on_add=self._wire_harness)
         self.teams = TeamRegistry(self.agents)
+        self.teams.remote_validator = self._verify_remote_dir
         self._agent_tokens: dict[str, str] = {}
         self._base_env: dict[str, dict[str, str]] = {}
         # Extra CLI arguments per agent (e.g. ``--agent reviewer``), kept so a
@@ -908,6 +915,18 @@ class Controller:
             raise ValueError(f"provider {kind!r} is disabled in Settings")
         given = parse_agent_args(args)
         extra_args = [*settings.provider_args(kind, given), *given]  # provider defaults first
+        team_obj = self._team_or_none(team)
+        if team_obj is not None and team_obj.host:
+            # A remote team: its agents run on its host, in its directory.
+            if host and host != team_obj.host:
+                raise ValueError(
+                    f"team {team_obj.name!r} runs on host {team_obj.host!r}; "
+                    f"an agent of another host ({host!r}) cannot join it"
+                )
+            if backend == "pty":
+                raise ValueError(f"the pty backend cannot reach the remote host {team_obj.host!r}")
+            host = team_obj.host
+            cwd = cwd or team_obj.workspace
         if host:
             settings.host(host)  # reject an unknown host before doing any work
             if backend == "pty":
@@ -1007,6 +1026,8 @@ class Controller:
                     workspace=team.get("workspace"),
                     workspace_mode=team.get("workspace_mode"),
                     created_at=team.get("created_at"),
+                    host=team.get("host"),
+                    verify_remote=False,  # never block a restart on a host that is down
                 )
             except Exception:
                 continue
@@ -1338,6 +1359,14 @@ class Controller:
     def get_agent(self, target: str) -> Harness:
         return self.agents.resolve(target)
 
+    def _team_or_none(self, team: str | None) -> Team | None:
+        if not team:
+            return None
+        try:
+            return self.teams.get(team)
+        except Exception:  # noqa: BLE001 - unknown team: the caller reports it later
+            return None
+
     def _agent_host_state(self, harness: Harness) -> str | None:
         """``ok`` / ``unreachable`` / ``reconnecting`` for a remote agent (None = local).
 
@@ -1510,9 +1539,27 @@ class Controller:
                       team_ids: set[str] | None = None) -> list[dict[str, Any]]:
         return self.requests.list(open_only=open_only, agent=agent, team_ids=team_ids)
 
+    def _verify_remote_dir(self, host: str, path: str) -> None:
+        """Confirm over SSH that ``path`` is an accessible directory on ``host``."""
+        from .team import TeamError
+
+        try:
+            cfg = settings.host(host)
+        except settings.SettingsError as exc:
+            raise TeamError(str(exc)) from exc
+        proc = ssh_tmux_backend.SshTmuxBackend(cfg)._ssh_run(
+            'sh -c \'[ -d "$1" ] && [ -x "$1" ]\' sh ' + _shq(path), timeout=20.0
+        )
+        if proc.returncode == 255:
+            raise TeamError(f"host {host} is unreachable: cannot confirm the workspace {path}")
+        if proc.returncode != 0:
+            raise TeamError(f"workspace does not exist or is not accessible on {host}: {path}")
+
     def create_team(
         self, name: str, agent_ids: list[str] | tuple[str, ...], **kwargs: Any
     ) -> Team:
+        if kwargs.get("host"):
+            settings.host(kwargs["host"])  # an unknown host is rejected up front
         team = self.teams.create(name, agent_ids, **kwargs)
         self._persist()
         return team
@@ -1524,7 +1571,10 @@ class Controller:
             team = self.teams.get(name)
             created_team = False
         except Exception:  # noqa: BLE001 (TeamNotFound)
-            team = self.create_team(name, [], workspace=spec.get("workspace"))
+            team = self.create_team(
+                name, [], workspace=spec.get("workspace"),
+                workspace_mode=spec.get("workspace_mode"), host=spec.get("host"),
+            )
             created_team = True
         created: list[str] = []
         existing: list[str] = []
@@ -1534,8 +1584,9 @@ class Controller:
                 existing.append(agent_name)
                 try:
                     self.add_team_member(team.team_id, agent_name)
-                except Exception:  # noqa: BLE001 (already a member)
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    if "already a member" not in str(exc):
+                        raise  # e.g. an existing agent on another host than a remote team
                 continue
             self.create_agent(
                 entry.get("kind") or "opencode",
@@ -1554,8 +1605,10 @@ class Controller:
             "existing": existing,
         }
 
-    def set_team_workspace(self, team: str, workspace: str | None) -> Team:
-        updated = self.teams.set_workspace(team, workspace)
+    def set_team_workspace(self, team: str, workspace: str | None, **kwargs: Any) -> Team:
+        if kwargs.get("host"):
+            settings.host(kwargs["host"])
+        updated = self.teams.set_workspace(team, workspace, **kwargs)
         self._persist()
         return updated
 
@@ -1580,7 +1633,8 @@ class Controller:
                                "cwd": info.cwd, "args": list(self._agent_args.get(agent_id, [])),
                                "host": self._agent_hosts.get(agent_id)})
             out.append({"name": team.name, "workspace": team.workspace,
-                        "workspace_mode": getattr(team, "workspace_mode", None), "agents": agents})
+                        "workspace_mode": getattr(team, "workspace_mode", None),
+                        "host": team.host, "agents": agents})
         return out
 
     def team_info(self, target: str) -> dict[str, Any]:

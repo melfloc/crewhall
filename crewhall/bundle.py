@@ -74,7 +74,8 @@ def live_team_files(teams: list[dict[str, Any]]) -> dict[str, bytes]:
         slug = _slug(team["name"])
         if any(os.path.exists(os.path.join(teams_dir, slug + ext)) for ext in (".toml", ".json")):
             continue
-        spec = {"team": {k: v for k, v in (("name", team["name"]), ("workspace", team.get("workspace"))) if v},
+        spec = {"team": {k: v for k, v in (("name", team["name"]), ("workspace", team.get("workspace")),
+                                           ("host", team.get("host"))) if v},
                 "agent": [{k: v for k, v in a.items() if v not in (None, "", [])} for a in agents]}
         out[f"config/teams/{slug}.json"] = json.dumps(spec, indent=2, ensure_ascii=False).encode()
     return out
@@ -111,8 +112,9 @@ def plan_specs(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         agents = []
         for a in spec["agents"]:
             cwd = a.get("cwd") or spec.get("workspace")
-            agents.append({"name": a["name"], "kind": a.get("kind"), "cwd": cwd,
-                           "cwd_ok": not cwd or os.path.isdir(os.path.expanduser(cwd))})
+            remote = a.get("host") or spec.get("host")  # checked on the host when it is created
+            agents.append({"name": a["name"], "kind": a.get("kind"), "cwd": cwd, "host": remote,
+                           "cwd_ok": not cwd or bool(remote) or os.path.isdir(os.path.expanduser(cwd))})
         plan.append({"team": spec["name"], "workspace": spec.get("workspace"), "agents": agents})
     return plan
 
@@ -125,7 +127,8 @@ def apply_specs(specs: list[dict[str, Any]], team_up) -> dict[str, Any]:
         usable, ws = [], spec.get("workspace")
         for a in spec["agents"]:
             cwd = a.get("cwd") or ws
-            if cwd and not os.path.isdir(os.path.expanduser(cwd)):
+            remote = a.get("host") or spec.get("host")
+            if cwd and not remote and not os.path.isdir(os.path.expanduser(cwd)):
                 skipped.append({"agent": a["name"], "team": spec["name"], "reason": f"directory not found: {cwd}"})
             else:
                 usable.append(a)

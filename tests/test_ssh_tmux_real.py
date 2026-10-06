@@ -658,5 +658,87 @@ class SshWorktreeRealTests(unittest.TestCase):
         self.assertIn("not a git repository", c._worktree_warnings["a2"])
 
 
+@unittest.skipUnless(HAVE and shutil.which("git"), "ssh/sshd/tmux/git not installed")
+class SshRemoteTeamRealTests(unittest.TestCase):
+    """A team bound to a host and a directory on it (checked and used over SSH)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sshd = SshdHarness()
+        cls.sshd.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.sshd.cleanup()
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="ati-sshteam-", dir="/tmp")
+        env = mock.patch.dict(os.environ, {
+            "XDG_CONFIG_HOME": os.path.join(self.root, "config"),
+            "XDG_STATE_HOME": os.path.join(self.root, "state"),
+            "XDG_RUNTIME_DIR": os.path.join(self.root, "run"),
+        })
+        env.start(); self.addCleanup(env.stop)
+        os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, self.sshd.state_dir, ignore_errors=True)
+        settings.patch({"hosts": {HOST_ALIAS: self.sshd.host_config()}})
+        self.work = os.path.join(self.root, "remote workspace")  # "remote" dir (loopback host)
+        os.makedirs(self.work)
+        self.c = Controller(adopt=False, persist=False)
+        # never start a real agent CLI: a plain shell stands in for it
+        patch = mock.patch.object(Controller, "_launch_command", lambda *a, **k: ["/bin/bash"])
+        patch.start(); self.addCleanup(patch.stop)
+
+    def test_workspace_is_verified_on_the_host(self):
+        from crewhall.team import TeamError
+
+        with self.assertRaisesRegex(TeamError, "does not exist"):
+            self.c.create_team("t", [], workspace=os.path.join(self.root, "missing"), host=HOST_ALIAS)
+        self.assertEqual(self.c.teams.list(), [])
+        team = self.c.create_team("t", [], workspace=self.work, host=HOST_ALIAS)
+        self.assertEqual((team.host, team.workspace), (HOST_ALIAS, self.work))
+        self.sshd.stop()
+        self.addCleanup(self.sshd.start)
+        with self.assertRaisesRegex(TeamError, "unreachable"):
+            self.c.create_team("t2", [], workspace=self.work, host=HOST_ALIAS)
+
+    def test_agents_of_a_remote_team_start_on_its_host_in_its_directory(self):
+        self.c.create_team("t", [], workspace=self.work, host=HOST_ALIAS)
+        agent = self.c.create_agent("claude", name="worker", team="t")
+        self.addCleanup(agent.session.close)
+        summary = self.c.agent_summary(agent)
+        self.assertEqual((summary["host"], summary["backend"]), (HOST_ALIAS, "ssh-tmux"))
+        self.assertEqual(agent.session.spec.cwd, self.work)
+        agent.session.write("pwd")
+        agent.session.send_enter()
+        self.assertIn(self.work, agent.session.read_until(self.work, timeout=15))
+        self.assertEqual(self.c.team_info("t")["members"][0]["name"], "worker")
+
+    def test_remote_team_with_worktree_mode_uses_the_remote_repo(self):
+        subprocess.run(["git", "-C", self.work, "init", "-q", "-b", "main"], check=True)
+        subprocess.run(["git", "-C", self.work, "-c", "user.email=t@e.com", "-c", "user.name=t",
+                        "commit", "-q", "--allow-empty", "-m", "i"], check=True)
+        self.c.create_team("t", [], workspace=self.work, host=HOST_ALIAS, workspace_mode="worktree")
+        agent = self.c.create_agent("claude", name="wt", team="t")
+        self.addCleanup(agent.session.close)
+        info = self.c.worktree_info(agent.agent_id)
+        self.assertEqual(info["host"], HOST_ALIAS)
+        self.assertEqual(info["repo"], self.work)
+        self.assertEqual(agent.session.spec.cwd, info["path"])
+        self.assertTrue(os.path.isdir(info["path"]))
+        self.assertNotIn(agent.agent_id, self.c._worktree_warnings)
+
+    def test_local_agents_cannot_join_a_remote_team(self):
+        from crewhall.team import TeamError
+
+        self.c.create_team("t", [], workspace=self.work, host=HOST_ALIAS)
+        local = mock.Mock(agent_id="loc1", name="loc")
+        local.session.spec.host = None
+        self.c.register_agent(local)
+        with self.assertRaisesRegex(TeamError, "team host is"):
+            self.c.add_team_member("t", "loc1")
+
+
 if __name__ == "__main__":
     unittest.main()

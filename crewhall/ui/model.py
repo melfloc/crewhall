@@ -586,9 +586,15 @@ class AppModel:
         bdef = backends.index("tmux") if "tmux" in backends else 0
         title = "NEW AGENT IN TEAM" if team_id else "NEW AGENT"
         hosts = [h["name"] for h in self.meta.get("hosts", [])]
+        team = next((t for t in self.teams if t["team_id"] == team_id), None) if team_id else None
+        team_host = (team or {}).get("host")
+        if team_host and team_host not in hosts:
+            hosts = [*hosts, team_host]
+        # A remote team fixes the host: its agents run there, in its directory.
+        host_index = (hosts.index(team_host) + 1) if team_host else 0
         host_field = (
             [ModalField("host", "Run on (a host = directory on that machine)", "select",
-                        options=["(this machine)", *hosts], index=0)]
+                        options=["(this machine)", *hosts], index=host_index)]
             if hosts else []
         )
         self._new_modal(
@@ -600,7 +606,8 @@ class AppModel:
                 ModalField("kind", "Agent type", "select", options=kinds, index=0),
                 ModalField("backend", "Backend", "select", options=backends, index=bdef),
                 *host_field,
-                ModalField("cwd", "Working directory", "text", self.cwd),
+                ModalField("cwd", "Working directory", "text",
+                           (team or {}).get("workspace") or "" if team_host else self.cwd),
                 ModalField("args", "Command arguments (optional)", "text", ""),
             ],
             button=0,
@@ -1009,6 +1016,12 @@ class AppModel:
             backend = self._option(fields["backend"])
             host = self._option(fields["host"]) if "host" in fields else None
             host = None if host == "(this machine)" else host
+            team_obj = next((t for t in self.teams if t["team_id"] == modal.target), None)
+            if team_obj and team_obj.get("host"):
+                if host and host != team_obj["host"]:
+                    modal.error = f"team runs on {team_obj['host']}: pick that host"
+                    return
+                host = team_obj["host"]
             cwd = fields["cwd"].value.strip() or (None if host else self.cwd)
             extra = fields["args"].value.strip()
             if not name:

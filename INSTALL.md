@@ -204,6 +204,11 @@ connection*), o `crewhall host add prod1 deploy@prod1 --identity ~/.ssh/id_crewh
 máquina. Antes de la primera conexión acepta la clave del host una vez desde una
 terminal (`ssh deploy@prod1`): crewhall nunca la acepta automáticamente.
 
+**Teams remotos.** Un team puede tener un host y un directorio en él
+(`crewhall agent team create backend --host prod1 -w /srv/app`, o *New team → Run on*).
+Sus agentes arrancan ahí, en ese directorio, y solo se aceptan agentes de ese host. En
+un spec: `[team] name = "backend"`, `host = "prod1"`, `workspace = "/srv/app"`.
+
 **Qué funciona en un agente remoto.** Crear, escribir, capturar, redimensionar,
 terminar y readoptar; mensajería, hooks y permisos (con `tunnel`); historial y
 actividad de Claude (transcript leído por SSH); worktrees (`workspace_mode:

@@ -93,7 +93,7 @@ function renderMission(){
     onchange:(e)=>{ S.missionTeam = e.target.value || null; renderMission(); }},
     el("option", {value:""}, "All agents"), ...teams.map(t => el("option", {value:t.team_id, selected:t.team_id === S.missionTeam}, `Team: ${t.name}`)));
   setKids(body,
-    el("div", {className:"mc-scope"}, sel, team && team.workspace ? el("span", {className:"muted", title:team.workspace}, ic("folder","sm"), " ", team.workspace) : null),
+    el("div", {className:"mc-scope"}, sel, team && (team.workspace || team.host) ? el("span", {className:"muted", title:team.workspace||""}, ic("folder","sm"), " ", team.host ? `${team.host}:${team.workspace||"~"}` : team.workspace) : null),
     missionSummary(agents),
     el("h4", {className:"mc-h"}, team ? team.name : "Agents", el("span", {className:"chip"}, agents.length)),
     (() => { const grid = el("div", {className:"mc-grid"});

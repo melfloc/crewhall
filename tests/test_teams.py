@@ -25,6 +25,7 @@ class TeamModel(unittest.TestCase):
                 "created_at": 1234.5,
                 "workspace": None,
                 "workspace_mode": None,
+                "host": None,
             },
         )
 
