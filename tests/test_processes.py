@@ -103,15 +103,21 @@ class FakeAgentProcess(unittest.TestCase):
             out = c.signal_process("c", listing["shells"][0]["pid"], "int")
             self.assertEqual(out["signal"], "INT")
             self.assertEqual(session.events()[-1]["type"], "process_signal")
-            # Once finished, its output stays readable among the finished ones.
-            # Wait for both: the shell to stop and the task to be reclassified as
-            # finished (the machine may be busy under a full test run).
+            # Stop it for good: SIGINT can be ignored by the shell while it waits
+            # on a child (especially under load), so fall back to TERM until it
+            # is gone, then its output stays readable among the finished ones.
             deadline = time.monotonic() + 15
-            finished: list[dict] = []
             while time.monotonic() < deadline:
                 listing = c.list_processes("c")
-                finished = listing["finished"]
-                if not listing["shells"] and any(t["task"] == "btask01" for t in finished):
+                if not listing["shells"]:
+                    break
+                c.signal_process("c", listing["shells"][0]["pid"], "term")
+                time.sleep(0.2)
+            finished: list[dict] = []
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                finished = c.list_processes("c")["finished"]
+                if any(t["task"] == "btask01" for t in finished):
                     break
                 time.sleep(0.1)
             self.assertEqual([t["task"] for t in finished], ["btask01"])
