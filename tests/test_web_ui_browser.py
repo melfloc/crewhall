@@ -466,6 +466,27 @@ class SidebarReorder(_Browser):
         self.assertEqual(order[:2], ["t2", "t1"])
 
 
+class SidebarAgentOrder(_Browser):
+    agents = [WORKING, READY]
+    teams = [{"team_id": "t1", "name": "Alpha", "workspace": None,
+              "members": [{"agent_id": "sess_w", "name": "alpha", "kind": "opencode"},
+                          {"agent_id": "sess_r", "name": "beta", "kind": "claude"}],
+              "missing": []}]
+
+    def _names(self):
+        return self.page.eval_on_selector_all(
+            '#nav .team[data-team="t1"] .agent-row .nm', "els => els.map(e => e.textContent)")
+
+    def test_dragging_an_agent_within_a_team_reorders_it(self):
+        self.assertEqual(self._names(), ["alpha", "beta"])
+        self.page.locator('#nav .team[data-team="t1"] .agent-row:has-text("beta")').first.drag_to(
+            self.page.locator('#nav .team[data-team="t1"] .agent-row:has-text("alpha")').first)
+        self.page.wait_for_timeout(400)
+        self.assertEqual(self._names(), ["beta", "alpha"])
+        order = self.page.evaluate("JSON.parse(localStorage.getItem('at.agentOrder')||'{}')")
+        self.assertEqual(order.get("t1", [])[0], "sess_r")
+
+
 class Dialogs(_Browser):
     agents = [WORKING, READY, ATTN]
     teams = [TEAM]

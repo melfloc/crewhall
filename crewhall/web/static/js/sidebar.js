@@ -11,7 +11,30 @@ function orderTeams(teams){
   const rank = t => idx.has(t.team_id) ? idx.get(t.team_id) : 1e9;
   return [...teams].sort((a,b)=> rank(a) - rank(b));
 }
-function agentOrderIds(){ try{ return JSON.parse(store.get("at.agentOrder")||"[]"); }catch(e){ return []; } }
+const UNGROUPED = "__ungrouped";
+function agentOrders(){
+  try{
+    const v = JSON.parse(store.get("at.agentOrder") || "{}");
+    if(Array.isArray(v)) return {[UNGROUPED]: v};      // legacy flat list
+    return (v && typeof v === "object") ? v : {};
+  }catch(e){ return {}; }
+}
+function saveAgentOrders(m){ store.set("at.agentOrder", JSON.stringify(m)); }
+function orderAgents(agents, key){
+  const ids = agentOrders()[key] || [];
+  const idx = new Map(ids.map((id, i) => [id, i]));
+  const rank = a => idx.has(a.agent_id) ? idx.get(a.agent_id) : 1e9;
+  return [...agents].sort((a, b) => rank(a) - rank(b));
+}
+function reorderAgentIn(key, src, before){
+  if(!key || !src) return;
+  const m = agentOrders();
+  const ids = (m[key] || []).filter(x => x !== src);
+  let to = ids.indexOf(before); if(to < 0) to = ids.length;
+  ids.splice(to, 0, src);
+  m[key] = ids;
+  saveAgentOrders(m); render();
+}
 function dragStart(e, kind, id){
   DRAG = {kind, id};
   try{ e.dataTransfer.setData("text/plain", kind + ":" + id); e.dataTransfer.effectAllowed = "move"; }catch(_){}
@@ -33,13 +56,11 @@ function dropUngrouped(e, node){
   e.preventDefault(); node.classList.remove("drop-target");
   if(DRAG && DRAG.kind === "agent") moveAgentToTeam(DRAG.id, null);
 }
-function dropAgent(e, beforeId, node){
-  e.preventDefault(); node.classList.remove("drop-target");
+function dropAgent(e, beforeId, node, key){
+  e.preventDefault(); e.stopPropagation();  // do not also hit the team's drop (move)
+  node.classList.remove("drop-target");
   if(DRAG && DRAG.kind === "agent" && DRAG.id !== beforeId){
-    const ids = agentOrderIds().filter(x => x !== DRAG.id);
-    let to = ids.indexOf(beforeId); if(to < 0) to = ids.length;
-    ids.splice(to, 0, DRAG.id);
-    store.set("at.agentOrder", JSON.stringify(ids)); render();
+    reorderAgentIn(key, DRAG.id, beforeId);
   }
 }
 function reorderTeam(src, before){
@@ -49,6 +70,14 @@ function reorderTeam(src, before){
   store.set("at.teamOrder", JSON.stringify(ids)); render();
 }
 async function moveAgentToTeam(agentId, teamId){
+  // Forget its position in any previous group so it lands cleanly in the new one.
+  const orders = agentOrders();
+  let changed = false;
+  for(const k of Object.keys(orders)){
+    const kept = (orders[k] || []).filter(id => id !== agentId);
+    if(kept.length !== (orders[k] || []).length){ orders[k] = kept; changed = true; }
+  }
+  if(changed) saveAgentOrders(orders);
   const current = (S.state.teams||[]).filter(t => (t.members||[]).some(m => m.agent_id === agentId));
   for(const t of current){
     if(t.team_id !== teamId){
@@ -84,8 +113,8 @@ function navSignature(agents, teams, filtering){
   // Not sorted: the array order is the user's drag order, so reordering rebuilds.
   const t = teams.map(x => `${x.team_id}:${(x.members||[]).map(m=>m.agent_id).join(",")}:${S.collapsed.has(x.team_id)}`);
   const tm = (S.terminals||[]).map(x => `${x.session_id}:${x.status}:${x.readonly}:${x.title||""}:${x.host||""}`).sort();
-  return JSON.stringify({ a, t, tm, f: S.filter, q: S.q.trim().toLowerCase(), filtering: !!filtering,
-                          inbox: inboxItems().length });
+  return JSON.stringify({ a, t, tm, o: agentOrders(), f: S.filter, q: S.q.trim().toLowerCase(),
+                          filtering: !!filtering, inbox: inboxItems().length });
 }
 function render(){
   if(!S.state) { if(!$("nav").children.length) $("nav").replaceChildren(el("div",{className:"skel"}),el("div",{className:"skel"}),el("div",{className:"skel"})); return; }
@@ -118,7 +147,7 @@ function render(){
     const body = el("div", {className:"team-body"},
       t.workspace || t.host ? el("div", {className:"team-ws", style:"padding:6px 8px 4px", title:t.host ? `${t.host}:${t.workspace||""}` : t.workspace},
         ic("folder","sm"), " ", t.host ? `${t.host}:${t.workspace||"~"}` : t.workspace) : null,
-      shown.map(a => dndAgentRow(a, false)), !members.length ? el("div", {className:"empty-side"}, "No members yet") : null,
+      orderAgents(shown, t.team_id).map(a => dndAgentRow(a, t.team_id)), !members.length ? el("div", {className:"empty-side"}, "No members yet") : null,
       t.missing?.length ? el("div", {className:"team-missing"}, `× ${t.missing.join(", ")} (missing)`) : null);
     const more = el("button", {className:"btn icon sm ghost", type:"button", "aria-label":`Actions for team ${t.name}`, title:"Team actions",
       onclick:(e)=>{ e.stopPropagation(); openMenu(more, [
@@ -148,13 +177,12 @@ function render(){
   });
   const terms = (S.terminals||[]).filter(termMatches);
   if(terms.length){ kids.push(el("div", {className:"group-label"}, "Terminals")); terms.forEach(t => kids.push(terminalRow(t))); }
-  const order = agentOrderIds(), rank = a => { const i = order.indexOf(a.agent_id); return i < 0 ? 1e9 : i; };
-  const ungrouped = agents.filter(a => !grouped.has(a.agent_id) && matches(a)).sort((a,b)=> rank(a) - rank(b));
+  const ungrouped = orderAgents(agents.filter(a => !grouped.has(a.agent_id) && matches(a)), UNGROUPED);
   if(ungrouped.length){
     const label = el("div", {className:"group-label", ondragover:(e)=>dragOver(e, label),
         ondragleave:()=>label.classList.remove("drop-target"), ondrop:(e)=>dropUngrouped(e, label)}, "Ungrouped");
     kids.push(label);
-    ungrouped.forEach(a => kids.push(dndAgentRow(a, true)));
+    ungrouped.forEach(a => kids.push(dndAgentRow(a, UNGROUPED)));
   }
   if(!agents.length) kids.push(el("div", {className:"empty-side"}, el("div", {style:"font-weight:600;color:var(--fg);margin-bottom:4px"}, "No agents yet"), "Create your first agent to get started."));
   else if(!kids.length) kids.push(el("div", {className:"empty-side"}, "No agents match", filtering ? el("div", {}, el("button", {className:"btn sm", style:"margin-top:10px", onclick:()=>{ S.q=""; S.filter="all"; $("q").value=""; syncSearch(); render(); }}, "Clear filters")) : null));
@@ -211,14 +239,14 @@ function agentRow(a){
     n ? el("span", {className:"badge pulse", title:"waiting for your answer"}, n) : null, more);
   return row;
 }
-function dndAgentRow(a, allowReorder){
+function dndAgentRow(a, key){
   const row = agentRow(a);
   row.draggable = true;
   row.addEventListener("dragstart", (e)=>dragStart(e, "agent", a.agent_id));
   row.addEventListener("dragend", dragEnd);
   row.addEventListener("dragover", (e)=>dragOver(e, row));
   row.addEventListener("dragleave", ()=>row.classList.remove("drop-target"));
-  if(allowReorder) row.addEventListener("drop", (e)=>dropAgent(e, a.agent_id, row));
+  if(key) row.addEventListener("drop", (e)=>dropAgent(e, a.agent_id, row, key));
   return row;
 }
 function agentMenu(a){
