@@ -1571,6 +1571,9 @@ class Terminals(_Browser):
         self.page.click("#termBtn")
         self.page.wait_for_selector("#termDlg[open] #term-list")
         self.assertIn("shell", self.page.inner_text("#term-list"))
+        # The modal uses the window, not a narrow column.
+        width = self.page.locator("#termDlg").evaluate("d => d.getBoundingClientRect().width")
+        self.assertGreater(width, 900)
 
     def test_create_send_and_close(self):
         self.page.click("#termBtn")
