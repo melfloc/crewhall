@@ -1530,6 +1530,14 @@ class Terminals(_Browser):
         if op == "meta_info":
             return {"ok": True, "harnesses": [{"kind": "claude"}], "backends": ["tmux"],
                     "hosts": self.hosts, "terminals_enabled": True}
+        if op == "settings_get":
+            r = super()._reply(body)
+            r["items"] = list(r.get("items", [])) + [
+                {"key": "terminals.enabled", "group": "terminals", "type": "bool",
+                 "value": False, "label": "Web terminals", "help": "Off by default.", "env": None, "stored": False},
+                {"key": "terminals.max_total", "group": "terminals", "type": "int", "min": 1, "max": 32,
+                 "value": 8, "label": "Max terminals (total)", "help": "", "env": None, "stored": False}]
+            return r
         if op == "terminal_list":
             return {"ok": True, "terminals": self.terms}
         if op == "terminal_create":
@@ -1580,6 +1588,21 @@ class Terminals(_Browser):
         self.page.click("#termDlg .btn.danger:has-text('Close terminal')")
         self.page.wait_for_timeout(200)
         self.assertIn("terminal_close", self.calls)
+
+    def test_settings_has_a_terminals_tab_that_asks_for_confirm(self):
+        self.page.click("#settingsBtn")
+        self.page.wait_for_selector('#settings-nav button[data-tab="terminals"]')
+        self.page.click('#settings-nav button[data-tab="terminals"]')
+        self.page.wait_for_selector("#sf-terminals-enabled")
+        self.page.check("#sf-terminals-enabled")
+        self.page.get_by_role("button", name="Enable terminals").click()
+        self.page.wait_for_selector("#dlg[open] #typed-confirm")
+        self.page.fill("#typed-confirm", "CONFIRM")
+        self.page.locator("#dlg .btn.danger.solid").click()
+        self.page.wait_for_timeout(300)
+        payload = next(p for p in self.payloads if p.get("op") == "settings_set")
+        self.assertEqual(payload["changes"], {"terminals.enabled": True})
+        self.assertEqual(payload["confirm"], "CONFIRM")
 
     def test_readonly_disables_input(self):
         self.terms = [{"session_id": "term_deadbeef", "kind": "terminal", "host": None,

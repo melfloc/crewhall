@@ -1,6 +1,7 @@
 "use strict";
 /* ---------- Settings: providers, agents, access & network, maintenance, interface, emergency ---------- */
-const SET_TABS = [["providers", "Providers"], ["agents", "Agents"], ["hosts", "Remote hosts"], ["access", "Access & network"],
+const SET_TABS = [["providers", "Providers"], ["agents", "Agents"], ["hosts", "Remote hosts"], ["terminals", "Terminals"],
+                  ["access", "Access & network"],
                   ["maintenance", "Maintenance"], ["interface", "Interface"], ["audit", "Audit"], ["emergency", "Emergency"]];
 const SK = { tab:"providers", data:null };
 
@@ -32,8 +33,8 @@ function setField(item, onChange){
 }
 
 // A group of schema items with its own Save / Restore-defaults.
-function settingsGroup(group, title){
-  const items = SK.data.items.filter(i => i.group === group);
+function settingsGroup(group, title, exclude = []){
+  const items = SK.data.items.filter(i => i.group === group && !exclude.includes(i.key));
   const save = el("button", {className:"btn primary", type:"button", disabled:true}, "Save");
   const fields = items.map(it => setField(it, () => { save.disabled = false; }));
   save.onclick = async () => {
@@ -338,6 +339,36 @@ async function previewReset(level){
     toast(bad ? `Done with ${bad} problem(s): ${out.errors[0]}` : "Done: " + out.done.slice(-3).join(" · "), bad ? "err" : "ok", 7000);
   } catch(e){ flash(e.message); }
 }
+/* ----- terminals (raw interactive shells; closed by default) ----- */
+async function tabTerminals(view){
+  const items = SK.data.items.filter(i => i.group === "terminals");
+  const enabledItem = items.find(i => i.key === "terminals.enabled");
+  const enabledNow = !!(enabledItem && enabledItem.value);
+  const cb = el("input", {type:"checkbox", id:"sf-terminals-enabled", checked:enabledNow});
+  const save = el("button", {className:"btn primary", type:"button"},
+    enabledNow ? "Disable terminals" : "Enable terminals");
+  save.onclick = async () => {
+    const want = cb.checked;
+    if(want === enabledNow){ toast("No change", "info", 1800); return; }
+    if(want){
+      const ok = await confirmTyped({title:"Enable terminals?", word:"CONFIRM", ok:"Enable",
+        message:"A web terminal is arbitrary code execution as your user. Enable it only when you need it."});
+      if(!ok){ cb.checked = false; return; }
+    }
+    try{
+      SK.data = await op("settings_set", {changes:{"terminals.enabled":want}, confirm:"CONFIRM"});
+      toast("Settings saved", "ok"); renderSettings();
+    }catch(e){ flash(e.message); }
+  };
+  const enableBox = el("div", {className:"set-group"},
+    el("div", {className:"field check-row"}, el("label", {className:"check"}, cb, el("span", {}, "Web terminals")),
+      el("div", {className:"hint"}, enabledItem ? enabledItem.help : "")),
+    el("div", {className:"dlg-actions", style:"justify-content:flex-start"}, save));
+  view.replaceChildren(enableBox,
+    settingsGroup("terminals", "terminals", ["terminals.enabled"]),
+    el("div", {className:"hint"}, "When disabled, terminal routes return 404 and the CLI exits with code 2."));
+}
+
 async function waitDaemonBack(out){
   const note = el("div", {className:"restart-overlay", role:"status"}, el("div", {className:"spinner"}), el("div", {}, "Restarting the daemon…"),
     out.backup ? el("div", {className:"muted"}, "Backup: " + out.backup) : null);
@@ -361,6 +392,7 @@ async function renderSettings(){
   if(SK.tab === "providers") await tabProviders(view);
   else if(SK.tab === "agents") view.replaceChildren(settingsGroup("agents", "agent"));
   else if(SK.tab === "hosts") await tabHosts(view);
+  else if(SK.tab === "terminals") await tabTerminals(view);
   else if(SK.tab === "access") await tabAccess(view);
   else if(SK.tab === "maintenance") view.replaceChildren(settingsGroup("maintenance", "maintenance"),
     el("div", {className:"dlg-actions", style:"justify-content:flex-start"},
