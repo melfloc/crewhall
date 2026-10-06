@@ -541,6 +541,41 @@ python3 -m crewhall ui --cwd DIR
 # (o `crewhall ui` si haces `pip install -e .`)
 ```
 
+## 8-bis. Terminales web
+
+Además de los agentes, crewhall puede exponer **terminales** interactivas reales
+(shells) en el Web UI y la CLI. Están **desactivadas por defecto** y se tratan como
+capacidad privilegiada: una terminal es ejecución arbitraria de código como tu usuario.
+
+- Aparecen **en el panel lateral como los agentes** (estado, host, `read-only`) y el
+  panel principal es una **terminal real `xterm.js`**: se escribe directamente y las
+  combinaciones de teclas funcionan (sin caja de input aparte). El panel **Terminals**
+  las lista y gestiona, y cada una puede abrirse en su propia pestaña.
+- Locales o por SSH, reutilizando el transporte fijo por `argv` de `ssh-tmux`; el
+  stream remoto usa su propio `ControlPath` para no agotar `MaxSessions`.
+- **Acceso con alcances.** El token maestro del Web UI **no** da acceso a terminales:
+  la sesión del navegador debe *desbloquearse* con un **token de terminal**
+  (`terminal:read`/`terminal:write`, limitado a hosts). El token se muestra **una vez**
+  y solo se guarda `sha256`:
+
+  ```bash
+  crewhall web terminal-token new --scope write --host local --ttl 8h --label portatil
+  crewhall web terminal-token list
+  crewhall web terminal-token revoke <id>
+  ```
+
+  En el Web UI: **Ajustes → Access & network → Terminal tokens**; la pestaña Terminals
+  ofrece crear uno si no hay ninguno. El desbloqueo se recuerda durante la sesión del
+  navegador (se pide de nuevo tras reiniciar el daemon o al caducar la sesión).
+- **Activar** con `terminals.enabled` (requiere `CONFIRM`): Ajustes → Terminals, o
+  `crewhall settings set terminals.enabled true --confirm`. La CLI local
+  (`crewhall terminal new|ls|send|key|capture|close|attach`) es de confianza: el socket
+  UNIX ya es de tu usuario, así que no necesita token.
+- Límites por token/host/total, timeout de inactividad que cierra al cliente (no a la
+  terminal), tamaño máximo de mensaje y tope de clientes WebSocket.
+- **Arrastrar y soltar** en el panel lateral: reordena equipos y mueve un agente a otro
+  equipo.
+
 ## 9. Cómo ejecutar
 
 Sin dependencias externas (solo stdlib de Python ≥ 3.10). Opcional: `pip install -e .`.

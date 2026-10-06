@@ -59,6 +59,9 @@ tmux *or* a plain PTY.
   `at/<team>/<agent>`, isolated under the state directory.
 - **Mission Control**, a live activity view, conversation history, cost/usage,
   cleanup/reset, bundles and a settings panel — all in the Web UI.
+- **Web terminals** (off by default): real `xterm.js` shells shown in the sidebar
+  like agents and in the main pane, local or over SSH, gated by scoped tokens.
+- **Drag & drop** in the sidebar: reorder teams and move an agent to another team.
 
 ## Install
 
@@ -106,6 +109,40 @@ dedicated non-root user, a dedicated key and pin its host key in `known_hosts`
 first. A host that is down is reported as `host_unreachable` and the agent is
 never marked as exited; it reconnects when the host returns.
 
+## Web terminals
+
+Besides agents, crewhall can expose raw interactive **terminals** (real shells)
+in the Web UI and the CLI. They are **off by default** and treated as a privileged
+capability: a terminal is arbitrary code execution as your user.
+
+- Terminals appear **in the sidebar like agents** (state, host, `read-only`) and the
+  main pane is a **real `xterm.js` terminal** — you type directly into it and key
+  combinations work (no separate input box). A **Terminals** panel lists and manages
+  all of them, and each can also be opened in its own tab.
+- Local or over SSH, reusing the same fixed, argv-only `ssh-tmux` transport as
+  agents; the remote output stream uses its own SSH `ControlPath` so it never
+  exhausts the host's `MaxSessions`.
+- **Scoped access.** The master Web UI token grants **no** terminal access. A browser
+  session must *unlock* with a separate **terminal token** carrying `terminal:read`
+  or `terminal:write`, restricted to a set of hosts. Tokens are shown **once** and
+  stored only as `sha256`:
+
+  ```bash
+  crewhall web terminal-token new --scope write --host local --ttl 8h --label laptop
+  crewhall web terminal-token list
+  crewhall web terminal-token revoke <id>
+  ```
+
+  In the Web UI: **Settings → Access & network → Terminal tokens**; the Terminals tab
+  offers to create one if you have none. The unlock is remembered for the browser
+  session (it is asked again after a daemon restart or when the session expires).
+- **Enable it** with `terminals.enabled` (typed `CONFIRM`): Settings → Terminals, or
+  `crewhall settings set terminals.enabled true --confirm`. The local CLI
+  (`crewhall terminal new|ls|send|key|capture|close|attach`) is trusted: the UNIX
+  socket already belongs to your user, so it needs no token.
+- Limits per token/host/total, an idle timeout that drops the client (not the
+  terminal), a maximum message size and a cap on WebSocket clients.
+
 ## Upgrading from agent-terminal
 
 - Command: `crewhall` (`agent-terminal` stays as an alias).
@@ -123,10 +160,14 @@ Security is the first constraint, not a feature:
 
 - The daemon socket is `0600`. The Web UI is authenticated (token/session) unless it
   is bound to localhost *and* you leave the local token requirement off; Host/Origin
-  allow-lists, a strict CSP (no inline scripts/styles), `nosniff`, `frame-ancestors
-  'none'` and per-IP login throttling are on by default.
-- Every new capability is **off by default** (MCP, worktrees); nothing accepts a
-  trust/permission dialog automatically.
+  allow-lists, a strict CSP (no inline scripts/evals; inline styles only so `xterm.js`
+  can size itself), `nosniff`, `frame-ancestors 'none'` and per-IP login throttling
+  are on by default.
+- Every new capability is **off by default** (MCP, worktrees, web terminals); nothing
+  accepts a trust/permission dialog automatically.
+- **Web terminals** need a separate scoped token (the master token alone cannot open a
+  shell); the WebSocket handshake checks `Origin` and a single-use ticket, and terminal
+  auditing records only metadata (never the typed text or the output).
 - Access tokens and credentials never appear in logs, bundles, the audit log,
   activity, fixtures or errors; sensitive settings are masked.
 - Privileged operations are recorded in `state/audit.jsonl` (0600, append-only,
