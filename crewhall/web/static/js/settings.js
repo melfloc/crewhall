@@ -257,8 +257,64 @@ async function tabAccess(box){
         try { const r = await op("web_session_revoke"); toast(`${r.revoked} session(s) revoked`, "ok"); } catch(e){ flash(e.message); } }}, "Sign out all devices"),
       el("button", {className:"btn", type:"button", onclick:()=>{ closeSettings(); openAccess(); }}, "Connected devices…")),
     el("div", {className:"hint"}, "Rotating creates a new token (shown once), makes the old one stop working and signs out the other devices. This browser stays signed in."));
+  parts.push(el("h4", {className:"mc-h"}, "Terminal tokens"), await terminalTokensSection());
   parts.push(el("h4", {className:"mc-h"}, "Security"), settingsGroup("security", "security"));
   box.replaceChildren(...parts);
+}
+
+function parseTtlJs(value){
+  const t = String(value || "").trim().toLowerCase();
+  if(!t || t === "0") return null;
+  const units = {s:1, m:60, h:3600, d:86400};
+  const last = t[t.length-1];
+  if(units[last]) return Math.round(parseFloat(t.slice(0,-1)) * units[last]);
+  return Math.round(parseFloat(t));
+}
+
+function showIssuedToken(token, rec){
+  openDlg(close => el("form", {onsubmit:e=>{ e.preventDefault(); close(true); }},
+    el("h3", {}, "Terminal token"),
+    el("p", {className:"sub"}, "Copy it now: it is shown only once."),
+    el("input", {className:"input mono", id:"newTermToken", value:token, readOnly:true, onfocus:e=>e.target.select()}),
+    el("div", {className:"hint"}, `${(rec.scopes||[]).join(", ")} · hosts ${(rec.hosts||[]).join(",")} · ${rec.id}`),
+    el("div", {className:"dlg-actions"}, el("button", {className:"btn primary", type:"submit"}, "Done"))));
+}
+
+async function terminalTokensSection(){
+  const wrap = el("div", {className:"tt-sec"});
+  let data = {tokens: []};
+  try { data = await op("terminal_token_list"); } catch(e){}
+  const scope = el("select", {className:"select", id:"tt-scope"},
+    el("option", {value:"read"}, "read"), el("option", {value:"write"}, "write"));
+  const hosts = el("input", {className:"input mono", id:"tt-hosts", placeholder:"all, or local,prod1"});
+  const ttl = el("input", {className:"input", id:"tt-ttl", value:"8h", style:"max-width:90px"});
+  const label = el("input", {className:"input", id:"tt-label", placeholder:"label"});
+  const issue = el("button", {className:"btn primary", type:"button", onclick:async()=>{
+    try{
+      const hv = hosts.value.trim();
+      const r = await op("terminal_token_issue", {scope:scope.value,
+        hosts: hv ? hv.split(",").map(s=>s.trim()).filter(Boolean) : null,
+        ttl: parseTtlJs(ttl.value), label: label.value});
+      showIssuedToken(r.token, r.record);
+      renderSettings();
+    }catch(e){ flash(e.message); }
+  }}, "Issue token");
+  for(const t of (data.tokens || [])){
+    wrap.append(el("div", {className:"tt-row"},
+      el("span", {className:"mono"}, t.id),
+      el("span", {}, (t.scopes || []).join(",")),
+      el("span", {}, (t.hosts || []).join(",")),
+      el("span", {className:"muted"}, t.expired ? "expired" : (t.label || "")),
+      el("button", {className:"btn sm danger", type:"button", onclick:async()=>{
+        if(!await confirmDlg({title:"Revoke token?", message:t.id, ok:"Revoke", danger:true})) return;
+        try { await op("terminal_token_revoke", {id:t.id}); toast("Revoked", "ok"); renderSettings(); }
+        catch(e){ flash(e.message); } }}, "Revoke")));
+  }
+  if(!(data.tokens || []).length) wrap.append(el("div", {className:"hint"}, "No terminal tokens yet."));
+  wrap.append(el("div", {className:"field"}, el("label", {}, "New terminal token"),
+    el("div", {className:"row"}, scope, hosts, ttl, label, issue)),
+    el("div", {className:"hint"}, "A terminal token grants terminal:read or terminal:write, limited to the hosts you list. Unlock the browser with it (the terminal tab does this automatically) before opening a terminal."));
+  return wrap;
 }
 async function rotateToken(){
   if(!await confirmDlg({title:"Rotate the access token?", message:"The current token stops working immediately. Other devices are signed out and need the new token.", ok:"Rotate", danger:true})) return;

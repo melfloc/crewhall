@@ -1,6 +1,8 @@
 """Browser test for the xterm terminal page against a real daemon + web server."""
 from __future__ import annotations
 
+import http.client
+import json
 import os
 import shutil
 import socket
@@ -62,28 +64,58 @@ class TerminalPageBrowser(unittest.TestCase):
             env=cls.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         assert _wait(lambda: os.path.exists(cls.sock)), "daemon did not start"
-        # Enable terminals in the shared config before starting the web server.
-        from crewhall import settings
-
-        saved = {k: os.environ.get(k) for k in ("XDG_CONFIG_HOME", "XDG_STATE_HOME",
-                                                "XDG_RUNTIME_DIR")}
+        # Keep the isolated XDG for the whole class so token files are shared
+        # with the daemon/web subprocesses (restored in tearDownClass).
+        cls._saved = {k: os.environ.get(k) for k in ("XDG_CONFIG_HOME", "XDG_STATE_HOME",
+                                                     "XDG_RUNTIME_DIR")}
         os.environ.update({"XDG_CONFIG_HOME": cls.env["XDG_CONFIG_HOME"],
                            "XDG_STATE_HOME": cls.env["XDG_STATE_HOME"],
                            "XDG_RUNTIME_DIR": cls.env["XDG_RUNTIME_DIR"]})
-        try:
-            settings.patch({"terminals.enabled": True}, confirm=True)
-        finally:
-            for k, v in saved.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
+        from crewhall import settings
+        from crewhall.web import auth
+
+        settings.patch({"terminals.enabled": True}, confirm=True)
+        cls.master = auth.generate_token(rotate=True)
         cls.web = subprocess.Popen(
             [sys.executable, "-P", "-m", "crewhall", "web", "--port", str(cls.port),
-             "--socket", cls.sock],
+             "--socket", cls.sock, "--require-auth"],
             env=cls.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         assert _wait(lambda: _port_open(cls.port)), "web did not start"
+
+    # -- HTTP helpers ------------------------------------------------------
+    def _post(self, path, body, cookie=None, origin=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        headers = {"Content-Type": "application/json"}
+        if cookie:
+            headers["Cookie"] = cookie
+        if origin:
+            headers["Origin"] = origin
+        conn.request("POST", path, json.dumps(body).encode(), headers)
+        resp = conn.getresponse()
+        raw = resp.read()
+        sc = resp.getheader("Set-Cookie")
+        conn.close()
+        return resp.status, (json.loads(raw.decode() or "{}") if raw else {}), sc
+
+    def _origin(self):
+        return f"http://127.0.0.1:{self.port}"
+
+    def _login(self):
+        status, _data, sc = self._post("/login", {"token": self.master}, origin=self._origin())
+        assert status == 200
+        return sc.split(";", 1)[0]
+
+    def _unlock_write(self, cookie):
+        from crewhall.web import terminal_tokens
+
+        token, _ = terminal_tokens.issue("browser", scope="write", hosts=["*"], ttl=3600)
+        self._post("/api/terminal-unlock", {"token": token}, cookie=cookie, origin=self._origin())
+
+    def _ticket(self, cookie, term_id, mode):
+        _s, data, _ = self._post("/api/terminal-ticket", {"id": term_id, "mode": mode},
+                                 cookie=cookie, origin=self._origin())
+        return data.get("ticket", "")
 
     @classmethod
     def tearDownClass(cls):
@@ -97,6 +129,11 @@ class TerminalPageBrowser(unittest.TestCase):
                 except Exception:
                     pass
         subprocess.run(["tmux", "-L", cls.tmux_socket, "kill-server"], capture_output=True)
+        for k, v in getattr(cls, "_saved", {}).items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         shutil.rmtree(cls.root, ignore_errors=True)
 
     def setUp(self):
@@ -113,11 +150,20 @@ class TerminalPageBrowser(unittest.TestCase):
             pass
 
     def test_type_echo_and_claim(self):
+        cookie = self._login()
+        self._unlock_write(cookie)
+        term_id = self.term["session_id"]
+        ticket_a = self._ticket(cookie, term_id, "write")
+        ticket_b = self._ticket(cookie, term_id, "read")
         with sync_playwright() as pw:
             browser = pw.chromium.launch(executable_path=CHROMIUM, args=["--no-sandbox"])
             try:
-                a = browser.new_page(viewport={"width": 1200, "height": 700})
-                a.goto(f"http://127.0.0.1:{self.port}/terminal.html?id={self.term['session_id']}")
+                context = browser.new_context(viewport={"width": 1200, "height": 700})
+                context.add_cookies([{"name": "at_session",
+                                      "value": cookie.split("=", 1)[1],
+                                      "url": f"http://127.0.0.1:{self.port}"}])
+                a = context.new_page()
+                a.goto(f"http://127.0.0.1:{self.port}/terminal.html?id={term_id}&ticket={ticket_a}")
                 a.wait_for_selector(".xterm", timeout=10000)
                 a.wait_for_function(
                     "() => document.getElementById('term-conn-state').textContent.includes('keyboard')",
@@ -129,8 +175,8 @@ class TerminalPageBrowser(unittest.TestCase):
                     "() => document.querySelector('.xterm-rows').textContent.includes('hola')",
                     timeout=10000)
                 # A second connection is read-only and can claim the keyboard.
-                b = browser.new_page(viewport={"width": 1200, "height": 700})
-                b.goto(f"http://127.0.0.1:{self.port}/terminal.html?id={self.term['session_id']}")
+                b = context.new_page()
+                b.goto(f"http://127.0.0.1:{self.port}/terminal.html?id={term_id}&ticket={ticket_b}")
                 b.wait_for_selector(".xterm", timeout=10000)
                 b.wait_for_function(
                     "() => document.getElementById('term-conn-state').textContent.includes('read-only')",

@@ -37,6 +37,8 @@ AUDITED = {
     "web_token_rotate", "web_token_revoke", "web_session_revoke", "web_login",
     "terminal_create", "terminal_close", "terminal_write", "terminal_key",
     "terminal_resize", "terminal_capture",
+    "terminal_ws_open", "terminal_ws_close", "terminal_ws_mode",
+    "web_terminal_token_issue", "web_terminal_token_revoke",
 }
 
 
@@ -69,6 +71,49 @@ def _rotate_locked() -> None:
         pass
 
 
+def _prune_locked() -> None:
+    """Drop entries older than ``audit.retention_days`` (0 = keep forever)."""
+    try:
+        from . import settings
+
+        days = int(settings.get("audit.retention_days"))
+    except Exception:
+        days = 0
+    if not days:
+        return
+    cutoff = time.time() - days * 86400
+    path = audit_path()
+    for index in range(1, KEEP + 1):
+        gen = f"{path}.{index}"
+        try:
+            if os.path.getmtime(gen) < cutoff:
+                os.unlink(gen)
+        except OSError:
+            pass
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return
+    kept, changed = [], False
+    for line in lines:
+        try:
+            ts = float(json.loads(line).get("ts", 0))
+        except (ValueError, json.JSONDecodeError):
+            kept.append(line)
+            continue
+        if ts >= cutoff:
+            kept.append(line)
+        else:
+            changed = True
+    if changed:
+        tmp = path + ".prune"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.writelines(kept)
+        os.replace(tmp, path)
+
+
 def record(op: str, *, actor: str = "local", result: str = "ok", summary: str = "",
            extra: dict[str, Any] | None = None) -> None:
     """Append one event. Never raises: auditing must not break an operation."""
@@ -88,6 +133,7 @@ def record(op: str, *, actor: str = "local", result: str = "ok", summary: str = 
             directory = os.path.dirname(audit_path())
             os.makedirs(directory, mode=0o700, exist_ok=True)
             _rotate_locked()
+            _prune_locked()
             fd = os.open(audit_path(), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
                 os.write(fd, (line + "\n").encode("utf-8"))
@@ -203,4 +249,23 @@ def summarize(op: str, request: dict[str, Any], result: dict[str, Any] | None = 
         elif op == "terminal_key":
             parts.append(f"key={request.get('key')}")
         return " ".join(parts)
+    if op.startswith("terminal_ws_"):
+        parts = [f"id={request.get('terminal_id') or request.get('id')}"]
+        if request.get("host"):
+            parts.append(f"host={request['host']}")
+        if request.get("mode"):
+            parts.append(f"mode={request['mode']}")
+        if request.get("token_id"):
+            parts.append(f"token={request['token_id']}")
+        if op == "terminal_ws_close":
+            for field in ("duration", "in_bytes", "out_bytes"):
+                if request.get(field) is not None:
+                    parts.append(f"{field}={request[field]}")
+            if request.get("reason"):
+                parts.append(f"reason={request['reason']}")
+        return " ".join(parts)
+    if op == "web_terminal_token_issue":
+        return f"id={request.get('id')} scope={request.get('scope')}"
+    if op == "web_terminal_token_revoke":
+        return f"id={request.get('id')}"
     return ""

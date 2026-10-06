@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import socket
 import struct
 import threading
@@ -11,7 +12,23 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ..client import Client, RpcError, ensure_daemon
-from . import auth, ws
+from . import auth, terminal_tokens, ws
+
+# Terminal ops that need a write scope vs a read scope.
+TERMINAL_WRITE_OPS = {
+    "terminal_create", "terminal_write", "terminal_key", "terminal_resize",
+    "terminal_close",
+}
+TERMINAL_READ_OPS = {"terminal_list", "terminal_info", "terminal_capture"}
+MAX_WS_CLIENTS_PER_TERMINAL = 8
+MAX_WS_CLIENTS_PER_SESSION = 4
+TICKET_TTL = 30.0
+
+
+def _session_key(value: str | None) -> str:
+    import hashlib
+
+    return hashlib.sha256((value or "").encode("utf-8")).hexdigest()[:16]
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.realpath(os.path.join(HERE, "static"))
@@ -283,6 +300,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._do_logout()
         if parsed.path == "/api/bundle":
             return self._bundle_upload(parse_qs(parsed.query))
+        if parsed.path == "/api/terminal-unlock":
+            return self._do_terminal_unlock()
+        if parsed.path == "/api/terminal-ticket":
+            return self._do_terminal_ticket()
         if parsed.path != "/api/op":
             return self._error("not found", 404)
         if not self._guard():
@@ -296,7 +317,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(f"bad json: {exc}")
         op = payload.pop("op", None)
         if op in ("web_sessions", "web_session_revoke", "web_token_status",
-                  "web_token_revoke", "web_token_rotate", "audit_list"):
+                  "web_token_revoke", "web_token_rotate", "audit_list",
+                  "terminal_token_list", "terminal_token_issue", "terminal_token_revoke"):
             return self._web_admin(op, payload)
         if op == "frontend_set" and payload.get("mode") == "off":
             # From a browser this would cut the connection you are using, with no way back from here.
@@ -399,6 +421,34 @@ class Handler(BaseHTTPRequestHandler):
             audit.record("web_token_revoke", actor=self._audit_actor(), result="ok",
                          summary=f"removed={removed}")
             return self._json({"ok": True, "removed": removed})
+        if op == "terminal_token_list":
+            return self._json({"ok": True, "tokens": terminal_tokens.list_tokens(),
+                               "file_permissions_ok": terminal_tokens.file_permissions_ok()})
+        if op == "terminal_token_issue":
+            scope = "write" if payload.get("scope") == "write" else "read"
+            ttl = payload.get("ttl")
+            try:
+                ttl = int(ttl) if ttl not in (None, "", 0) else None
+            except (TypeError, ValueError):
+                ttl = None
+            token, rec = terminal_tokens.issue(
+                payload.get("label") or "", scope=scope,
+                hosts=payload.get("hosts"), ttl=ttl,
+            )
+            audit.record("web_terminal_token_issue", actor=self._audit_actor(), result="ok",
+                         summary=audit.summarize("web_terminal_token_issue",
+                                                 {"id": rec["id"], "scope": scope}, {}))
+            return self._json({"ok": True, "token": token, "record": {
+                "id": rec["id"], "label": rec["label"], "scopes": rec["scopes"],
+                "hosts": rec["hosts"], "expires_at": rec["expires_at"]}})
+        if op == "terminal_token_revoke":
+            token_id = payload.get("id")
+            removed = terminal_tokens.revoke(token_id)
+            audit.record("web_terminal_token_revoke", actor=self._audit_actor(),
+                         result="ok" if removed else "error",
+                         summary=audit.summarize("web_terminal_token_revoke",
+                                                 {"id": token_id}, {}))
+            return self._json({"ok": True, "revoked": removed})
 
     def _do_login(self) -> None:
         from .. import audit
@@ -455,6 +505,93 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _session_or_new(self) -> tuple[str | None, list[tuple[str, str]]]:
+        """Existing session cookie, or a fresh one when auth is not required."""
+        session = auth.session_value(self.headers)
+        if session:
+            return session, []
+        if self.security.require_auth:
+            return None, []
+        session = auth.issue_session(ip=self._client_label(),
+                                     user_agent=self.headers.get("User-Agent", ""))
+        return session, [("Set-Cookie", auth.cookie_header(
+            session, secure=self.security.secure_cookie))]
+
+    def _do_terminal_unlock(self) -> None:
+        from .. import audit
+
+        if not self._host_ok() or not self._origin_ok():
+            return self._error("request not allowed", 403)
+        raw = self._read_body()
+        if raw is None:
+            return
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._error("bad json")
+        ip = "tt:" + self._client_label()
+        retry = auth.login_retry_after(ip)
+        if retry > 0:
+            return self._error("too many attempts; try again later", 429,
+                               extra=[("Retry-After", str(int(retry) + 1))])
+        token = payload.get("token")
+        rec = terminal_tokens.verify(token) if isinstance(token, str) else None
+        if not rec:
+            auth.note_login_failure(ip)
+            return self._error("invalid terminal token", 401)
+        auth.note_login_success(ip)
+        session, extra = self._session_or_new()
+        if not session:
+            return self._error("sign in first", 401)
+        auth.unlock_terminal(session, scopes=rec["scopes"], hosts=rec["hosts"],
+                             token_id=rec["id"])
+        return self._json({"ok": True, "scopes": rec["scopes"], "hosts": rec["hosts"]},
+                          extra=extra)
+
+    def _do_terminal_ticket(self) -> None:
+        from .. import settings
+
+        if not settings.get("terminals.enabled"):
+            return self._error("not found", 404)
+        if not self._host_ok() or not self._origin_ok():
+            return self._error("request not allowed", 403)
+        raw = self._read_body()
+        if raw is None:
+            return
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._error("bad json")
+        terminal_id = payload.get("id")
+        mode = "write" if payload.get("mode") == "write" else "read"
+        session, extra = self._session_or_new()
+        grant = auth.terminal_grant(session)
+        if not grant:
+            return self._error("forbidden", 403)
+        needed = (terminal_tokens.SCOPE_WRITE if mode == "write"
+                  else terminal_tokens.SCOPE_READ)
+        if not terminal_tokens.scopes_imply(grant.get("scopes"), needed):
+            return self._error("forbidden", 403)
+        try:
+            info = self.control.call("terminal_info", id=terminal_id)["terminal"]
+        except RpcError:
+            return self._error("not found", 404)
+        if not terminal_tokens.host_allowed(grant.get("hosts"), info.get("host")):
+            return self._error("forbidden", 403)
+        if info.get("readonly"):
+            mode = "read"
+        ticket = secrets.token_urlsafe(32)
+        with self.server.tickets_lock:
+            now = time.time()
+            for key in [k for k, v in self.server.tickets.items() if v.get("expires", 0) < now]:
+                self.server.tickets.pop(key, None)
+            self.server.tickets[ticket] = {
+                "terminal_id": terminal_id, "mode": mode, "session": _session_key(session),
+                "origin": self.headers.get("Origin", ""), "expires": now + TICKET_TTL,
+                "used": False,
+            }
+        return self._json({"ok": True, "ticket": ticket, "mode": mode}, extra=extra)
+
     def _serve_login_page(self) -> None:
         body = _LOGIN_HTML.encode("utf-8")
         self.send_response(200)
@@ -469,14 +606,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._error("missing op")
         if op not in ALLOWED_OPS:
             return self._error(f"operation not allowed: {op}", 403)
+        # Never trust underscore-prefixed fields from the client (e.g. _actor).
+        params = {k: v for k, v in params.items() if not str(k).startswith("_")}
+        grant = None
         if op.startswith("terminal_"):
             from .. import settings
 
             if not settings.get("terminals.enabled"):
                 # Closed by default: the route does not even exist.
                 return self._error("not found", 404)
+            grant = self._authorize_terminal_op(op, params)
+            if grant is None:
+                return self._error("forbidden", 403)
             if op == "terminal_create":
-                params = {**params, "owner": self._client_label()}
+                params = {**params, "owner": grant.get("token_id")}
         if op in ("interaction_respond", "agent_process_signal"):
             params = {**params, "by": "web"}  # the audit trail names the channel, not the client's claim
         try:
@@ -484,7 +627,34 @@ class Handler(BaseHTTPRequestHandler):
         except RpcError as exc:
             return self._error(str(exc), 502)
         result.pop("ok", None)
+        if op == "terminal_list" and grant is not None and "*" not in set(grant.get("hosts") or []):
+            allowed = set(grant.get("hosts") or [])
+            result["terminals"] = [
+                t for t in (result.get("terminals") or []) if (t.get("host") or "local") in allowed
+            ]
         return self._json({"ok": True, **result})
+
+    def _authorize_terminal_op(self, op: str, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Return the session's terminal grant when the op is allowed, else None."""
+        session = auth.session_value(self.headers)
+        grant = auth.terminal_grant(session)
+        if not grant:
+            return None
+        needed = (terminal_tokens.SCOPE_WRITE if op in TERMINAL_WRITE_OPS
+                  else terminal_tokens.SCOPE_READ)
+        if not terminal_tokens.scopes_imply(grant.get("scopes"), needed):
+            return None
+        host = params.get("host")
+        if op in ("terminal_info", "terminal_write", "terminal_key", "terminal_capture",
+                  "terminal_resize", "terminal_close"):
+            try:
+                info = self.control.call("terminal_info", id=params.get("id"))["terminal"]
+            except RpcError:
+                return None
+            host = info.get("host")
+        if not terminal_tokens.host_allowed(grant.get("hosts"), host):
+            return None
+        return grant
 
     def _serve_static(self, rel: str) -> None:
         full = os.path.realpath(os.path.join(STATIC, rel))
@@ -557,9 +727,33 @@ class Handler(BaseHTTPRequestHandler):
         if not pane or not tmux_session:
             return self._error("terminal is not attachable", 409)
 
-        # Phase 3 authorization (scopes/ticket/Origin) happens here.
-        if not self._authorize_terminal_ws(terminal_id, info, parsed):
-            return
+        # Phase 3: Origin (anti-CSWSH), session, scopes and a single-use ticket.
+        origin = self.headers.get("Origin", "")
+        if origin:
+            if not self.security.origin_allowed(origin):
+                return self._error("forbidden", 403)
+        elif not settings.get("terminals.allow_no_origin"):
+            return self._error("forbidden", 403)
+        session = auth.session_value(self.headers)
+        if self.security.require_auth and not session:
+            return self._error("unauthorized", 401)
+        grant = auth.terminal_grant(session)
+        if not grant:
+            return self._error("forbidden", 403)
+        query = parse_qs(parsed.query)
+        ticket = (query.get("ticket") or [""])[0]
+        rec = self._consume_ticket(ticket, terminal_id, session, origin)
+        if rec is None:
+            return self._error("forbidden", 403)
+        mode = rec["mode"]
+        needed = (terminal_tokens.SCOPE_WRITE if mode == "write"
+                  else terminal_tokens.SCOPE_READ)
+        if not terminal_tokens.scopes_imply(grant.get("scopes"), needed):
+            return self._error("forbidden", 403)
+        if not terminal_tokens.host_allowed(grant.get("hosts"), info.get("host")):
+            return self._error("forbidden", 403)
+        if not self._reserve_terminal_client(terminal_id, session):
+            return self._error("too many terminal connections", 429)
 
         accept = ws.accept_key(self.headers.get("Sec-WebSocket-Key", ""))
         self.send_response(101, "Switching Protocols")
@@ -568,6 +762,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Sec-WebSocket-Accept", accept)
         self.end_headers()
 
+        from .. import audit
         from ..terminal_stream import HubClient, TerminalHub
 
         queue_bytes = int(settings.get("terminals.client_queue_bytes"))
@@ -586,6 +781,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.terminal_hubs[terminal_id] = hub
 
         send_lock = threading.Lock()
+        counters = {"in": 0, "out": 0}
+        started = time.time()
+        token_id = grant.get("token_id")
 
         def send_raw(data: bytes) -> None:
             with send_lock:
@@ -595,6 +793,7 @@ class Handler(BaseHTTPRequestHandler):
             send_raw(ws.encode_binary(payload))
 
         def send_output(data: bytes) -> None:
+            counters["out"] += len(data)
             send_frame(bytes([0x02]) + data)
 
         def control_state(mode: str) -> dict[str, Any]:
@@ -608,30 +807,95 @@ class Handler(BaseHTTPRequestHandler):
             send_frame(bytes([0x06]) + json.dumps(obj).encode("utf-8"))
 
         client = HubClient(send_output, queue_bytes=queue_bytes, max_bytes_per_sec=max_rate)
-        client.control_cb = lambda obj: send_control({**control_state(client.mode), **obj})
+        mode_seen = {"v": mode}
 
-        hub.start()
-        snap = hub.snapshot()
-        if snap:
-            client.enqueue(snap)
-        hub.add_client(client)
-        mode = hub.mode_for_new_client(client)
-        send_control(control_state(mode))
+        def control_cb(obj: dict[str, Any]) -> None:
+            new_mode = obj.get("mode")
+            if new_mode and new_mode != mode_seen["v"]:
+                mode_seen["v"] = new_mode
+                audit.record("terminal_ws_mode", actor=self._audit_actor(), result="ok",
+                             summary=audit.summarize("terminal_ws_mode", {
+                                 "terminal_id": terminal_id, "host": info.get("host"),
+                                 "mode": new_mode, "token_id": token_id}, {}))
+            send_control({**control_state(client.mode), **obj})
+
+        client.control_cb = control_cb
+
+        audit.record("terminal_ws_open", actor=self._audit_actor(), result="ok",
+                     summary=audit.summarize("terminal_ws_open", {
+                         "terminal_id": terminal_id, "host": info.get("host"),
+                         "mode": mode, "token_id": token_id}, {}))
         try:
-            self._terminal_ws_loop(hub, client, send_raw, send_control, control_state, info)
+            hub.start()
+            snap = hub.snapshot()
+            if snap:
+                client.enqueue(snap)
+            hub.add_client(client)
+            if mode == "read":
+                # A read ticket is never granted the keyboard, even if first.
+                client.mode = "read"
+                actual = "read"
+            else:
+                actual = hub.mode_for_new_client(client)
+            send_control(control_state(actual))
+            self._terminal_ws_loop(hub, client, send_raw, send_control, control_state,
+                                   info, counters)
         finally:
             client.close(ws.CLOSE_GOING_AWAY)
             hub.remove_client(client)
+            self._release_terminal_client(session)
+            audit.record("terminal_ws_close", actor=self._audit_actor(), result="ok",
+                         summary=audit.summarize("terminal_ws_close", {
+                             "terminal_id": terminal_id, "host": info.get("host"),
+                             "token_id": token_id, "duration": round(time.time() - started, 1),
+                             "in_bytes": counters["in"], "out_bytes": counters["out"]}, {}))
             try:
                 self.connection.close()
             except OSError:
                 pass
 
-    def _terminal_ws_loop(self, hub, client, send_raw, send_control, control_state, info) -> None:
-        import select
+    def _consume_ticket(self, ticket: str, terminal_id: str, session: str | None,
+                        origin: str) -> dict[str, Any] | None:
+        if not ticket:
+            return None
+        now = time.time()
+        with self.server.tickets_lock:
+            for key in [k for k, v in self.server.tickets.items() if v.get("expires", 0) < now]:
+                self.server.tickets.pop(key, None)
+            rec = self.server.tickets.get(ticket)
+            if not rec or rec.get("used") or rec.get("expires", 0) < now:
+                return None
+            if (rec.get("terminal_id") != terminal_id
+                    or rec.get("session") != _session_key(session)
+                    or rec.get("origin", "") != origin):
+                return None
+            rec["used"] = True
+            return dict(rec)
 
+    def _reserve_terminal_client(self, terminal_id: str, session: str | None) -> bool:
+        key = _session_key(session)
+        with self.server.terminal_hubs_lock:
+            hub = self.server.terminal_hubs.get(terminal_id)
+            if hub is not None and len(hub.clients) >= MAX_WS_CLIENTS_PER_TERMINAL:
+                return False
+            used = self.server.terminal_clients_by_session.get(key, 0)
+            if used >= MAX_WS_CLIENTS_PER_SESSION:
+                return False
+            self.server.terminal_clients_by_session[key] = used + 1
+            return True
+
+    def _release_terminal_client(self, session: str | None) -> None:
+        key = _session_key(session)
+        with self.server.terminal_hubs_lock:
+            used = self.server.terminal_clients_by_session.get(key, 0)
+            if used <= 1:
+                self.server.terminal_clients_by_session.pop(key, None)
+            else:
+                self.server.terminal_clients_by_session[key] = used - 1
+
+    def _terminal_ws_loop(self, hub, client, send_raw, send_control, control_state,
+                          info, counters) -> None:
         from .. import settings
-        from .. import terminals as termlib
 
         max_size = int(settings.get("terminals.max_message_bytes"))
         idle_timeout = int(settings.get("terminals.idle_timeout") or 0)
@@ -686,6 +950,7 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             mtype, body = payload[0], payload[1:]
             if mtype == 0x01:  # input
+                counters["in"] += len(body)
                 if client.mode == "write" and not hub.readonly:
                     hub.feed_input(body)
             elif mtype == 0x03:  # resize
@@ -710,13 +975,6 @@ class Handler(BaseHTTPRequestHandler):
                 if unknown > 50:
                     close_with(ws.CLOSE_PROTOCOL)
                     return
-
-    def _authorize_terminal_ws(self, terminal_id: str, info: dict[str, Any], parsed) -> bool:
-        """Phase 3 hook: default allows (Phase 2). Overridden by the ticket check."""
-        checker = getattr(self, "_check_terminal_ticket", None)
-        if checker is not None:
-            return checker(terminal_id, info, parsed)
-        return True
 
     # Cadence of the server-side adaptation loop. The focused agent (the one the
     # browser is showing) is refreshed fast; the state snapshot and the other
@@ -843,6 +1101,7 @@ class _TrackingHTTPServer(ThreadingHTTPServer):
         self.terminal_hubs_lock = threading.Lock()
         self.tickets: dict[str, Any] = {}
         self.tickets_lock = threading.Lock()
+        self.terminal_clients_by_session: dict[str, int] = {}
         super().__init__(*args, **kwargs)
 
     def close_terminal_hubs(self) -> None:

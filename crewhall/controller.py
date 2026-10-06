@@ -925,12 +925,20 @@ class Controller:
         readonly_val = termlib.validate_readonly(readonly)
         cols_val = self._terminal_dim(cols, "cols", 10, 500)
         rows_val = self._terminal_dim(rows, "rows", 2, 200)
+        existing = self.list_terminals()
         termlib.check_limits(
-            self.list_terminals(),
+            existing,
             host_name,
             int(settings.get("terminals.max_total")),
             int(settings.get("terminals.max_per_host")),
         )
+        max_per_token = int(settings.get("terminals.max_per_token"))
+        if owner and max_per_token:
+            same = sum(1 for t in existing if t.get("owner") == owner)
+            if same >= max_per_token:
+                raise termlib.TerminalError(
+                    f"too many terminals for this token (max {max_per_token})"
+                )
         spec = SessionSpec(
             command=[shell_path] if shell_path else "",
             cwd=cwd_val,

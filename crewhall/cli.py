@@ -1124,6 +1124,50 @@ def cmd_web_token(args: argparse.Namespace) -> int:
     raise SystemExit("usage: crewhall web token generate|revoke|show")
 
 
+def _parse_ttl(value: str | None) -> int | None:
+    if value in (None, "", "0"):
+        return None
+    text = str(value).strip().lower()
+    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    if text[-1] in units:
+        return int(float(text[:-1]) * units[text[-1]])
+    return int(float(text))
+
+
+def cmd_terminal_token(args: argparse.Namespace) -> int:
+    from .web import terminal_tokens
+
+    action = getattr(args, "tt_action", None)
+    if action == "new":
+        ttl = _parse_ttl(getattr(args, "ttl", None))
+        token, rec = terminal_tokens.issue(
+            getattr(args, "label", "") or "", scope=getattr(args, "scope", "read"),
+            hosts=getattr(args, "host", None), ttl=ttl,
+        )
+        print(f"terminal token {rec['id']} written to {terminal_tokens.store_path()} (mode 0600)")
+        print(f"scopes: {', '.join(rec['scopes'])}  hosts: {', '.join(rec['hosts'])}")
+        print(f"token (shown once): {token}")
+        return 0
+    if action == "list":
+        tokens = terminal_tokens.list_tokens()
+        if getattr(args, "json", False):
+            print(json.dumps(tokens, indent=2))
+            return 0
+        if not tokens:
+            print("no terminal tokens")
+            return 0
+        for t in tokens:
+            state = "expired" if t["expired"] else "active"
+            print(f"{t['id']}  {state:<8} scopes={','.join(t['scopes'])}  "
+                  f"hosts={','.join(t['hosts'])}  label={t['label'] or '-'}")
+        return 0
+    if action == "revoke":
+        removed = terminal_tokens.revoke(args.id)
+        print("token revoked" if removed else "no such token")
+        return 0 if removed else 1
+    raise SystemExit("usage: crewhall web terminal-token new|list|revoke")
+
+
 def cmd_web_status(args: argparse.Namespace) -> int:
     from .web import auth, tailscale
 
@@ -1544,6 +1588,20 @@ def build_parser() -> argparse.ArgumentParser:
     wt.add_argument("token_action", choices=["generate", "revoke", "show"])
     wt.add_argument("--rotate", action="store_true")
     wt.set_defaults(func=cmd_web)
+    wtt = wsub.add_parser("terminal-token", help="manage scoped terminal tokens")
+    ttsub = wtt.add_subparsers(dest="tt_action", required=True)
+    tt = ttsub.add_parser("new", help="issue a terminal token (shown once)")
+    tt.add_argument("--scope", choices=["read", "write"], default="read")
+    tt.add_argument("--host", default=None, help="comma-separated hosts (default: all)")
+    tt.add_argument("--ttl", default="8h", help="e.g. 8h, 30m, 0 (no expiry)")
+    tt.add_argument("--label", default="")
+    tt.set_defaults(func=cmd_terminal_token)
+    tt = ttsub.add_parser("list", help="list terminal tokens (no secrets)")
+    tt.add_argument("--json", action="store_true")
+    tt.set_defaults(func=cmd_terminal_token)
+    tt = ttsub.add_parser("revoke", help="revoke a terminal token by id")
+    tt.add_argument("id")
+    tt.set_defaults(func=cmd_terminal_token)
     ws = wsub.add_parser("status", help="show Web UI security/tailscale status")
     ws.set_defaults(func=cmd_web)
     p.set_defaults(func=cmd_web)

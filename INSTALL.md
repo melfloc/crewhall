@@ -251,3 +251,25 @@ agentes en ejecución se cierran.
 - **Un agente `claude` se queda en el diálogo de confianza de carpeta** → ábrelo una vez con
   `claude` en esa carpeta y acepta; crewhall no lo acepta por ti a propósito.
 - **Cualquier duda** → `crewhall doctor` primero.
+
+## Activar terminales (shells interactivas en el Web UI / CLI)
+
+Las terminales están **desactivadas por defecto**. Para activarlas:
+
+1. Activa la función (requiere escribir `CONFIRM`):
+   - Web UI → **Ajustes → Terminals → Web terminals** (marca y pulsa Save; escribe
+     `CONFIRM`), o
+   - `crewhall settings set terminals.enabled true --confirm` si tu CLI lo soporta.
+   Se aplica en vivo, sin reiniciar el daemon.
+2. Emite un **token de terminal** (se muestra una sola vez):
+   `crewhall web terminal-token new --scope write --host local --ttl 8h --label mi-portatil`
+   (o Web UI → **Ajustes → Access & network → Terminal tokens → Issue token**).
+   `--scope read` solo permite ver; `--scope write` permite crear y escribir. `--host`
+   limita a hosts concretos (`local`, nombres de host configurados, o `*`).
+3. En el Web UI, abre la pestaña **Terminals** y pulsa **Open** en una terminal (o crea
+   una nueva). La primera vez pedirá **desbloquear** con el token de terminal; se
+   recuerda durante la sesión del navegador.
+
+Para revocar: `crewhall web terminal-token revoke <id>` o el botón *Revoke* en Ajustes.
+La CLI local (`crewhall terminal …`) no necesita token: el socket UNIX ya es de tu
+usuario.

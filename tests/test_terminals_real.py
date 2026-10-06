@@ -274,6 +274,17 @@ class TerminalStreamRemoteRealTests(unittest.TestCase):
         settings.patch({"terminals.enabled": False})
         settings.patch({"hosts": {}}, confirm=True)
 
+    def test_terminal_ssh_argv_uses_fixed_options(self):
+        from crewhall.backends.ssh_tmux import SSH_BASE_OPTIONS, SshTmuxBackend
+
+        backend = SshTmuxBackend(self.host)
+        for argv in (backend._ssh_local_argv(), backend._ssh_local_argv(control_suffix="-stream")):
+            for opt in SSH_BASE_OPTIONS:
+                self.assertIn(opt, argv)
+            self.assertIn("ForwardAgent=no", argv)
+            self.assertIn("StrictHostKeyChecking=yes", argv)
+            self.assertIn("BatchMode=yes", argv)
+
     def test_remote_stream_uses_distinct_controlpath_and_echoes(self):
         from crewhall import terminal_stream
         from crewhall.backends.ssh_tmux import SshTmuxBackend

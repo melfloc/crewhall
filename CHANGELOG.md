@@ -5,6 +5,42 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.69.0] — 2026-10-06
+
+_Seguridad de terminales web (Fase 3): tokens con alcances, tickets WS y límites._
+
+Threat model:
+- **Activo**: ejecución de código. **Atacante**: cualquiera con el token maestro de la UI.
+  **Vector**: abrir terminales solo por tener la sesión. **Mitigación**: el token maestro y
+  las sesiones **no** tienen alcances de terminal; hay que **desbloquear** con un token de
+  terminal con alcance (`terminal:read`/`terminal:write`) y host permitido.
+- **Activo**: la sesión del navegador. **Atacante**: sitio externo. **Vector**: CSWSH.
+  **Mitigación**: el handshake WS exige `Origin` permitido (sin `Origin` se rechaza salvo
+  `terminals.allow_no_origin=true`) y un **ticket** de un solo uso ligado a
+  terminal/modo/sesión/`Origin`.
+- **Activo**: recursos. **Atacante**: cliente. **Vector**: abuso. **Mitigación**: límites por
+  token/host/total, máximo de clientes WS por terminal (8) y por sesión (4), timeout de
+  inactividad, tamaño máximo de mensaje.
+- **Activo**: secretos. **Atacante**: quien lea logs/estado. **Vector**: fuga. **Mitigación**:
+  auditoría solo de metadatos (nunca el texto ni la salida); `audit.jsonl` y
+  `web-terminal-tokens.json` en 0600; el token nunca se guarda en claro (solo `sha256`).
+
+Cambios:
+- `web/terminal_tokens.py`: almacén 0600 con escritura atómica `{id,label,hash,scopes,hosts,
+  created_at,expires_at,last_used}`; `terminal:write` implica `terminal:read`; verificación
+  por hash constante.
+- Sesiones: `POST /api/terminal-unlock` adjunta alcances/hosts a la sesión (límites de
+  intentos como el login); el token maestro y las sesiones normales siguen sin alcances.
+- Handshake WS: orden `función activada (404) → Origin (403) → sesión → alcance/host (403)` y
+  ticket de un solo uso (`POST /api/terminal-ticket`, 30 s). Se descartan los campos `_*` del
+  cliente; el `host` se obtiene con `terminal_info` en el servidor.
+- Límites: `terminals.max_per_token`, `max_per_host`, `max_total`, clientes WS por terminal y
+  por sesión, `idle_timeout` (cierra la conexión, no la terminal), `max_message_bytes`.
+- Auditoría: `terminal_ws_open/close/mode` (contadores, duración, sin contenido) y
+  `web_terminal_token_issue/revoke`; retención `audit.retention_days` (def. 90).
+- CLI `crewhall web terminal-token new|list|revoke` y sección «Terminal tokens» en
+  Ajustes → Access & network. Documentado en `SECURITY.md` e `INSTALL.md`.
+
 ## [0.68.0] — 2026-10-06
 
 _Terminales web en vivo (Fase 2): xterm.js, streaming binario, resize y multi-cliente._

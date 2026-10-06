@@ -18,17 +18,38 @@
     op("terminal_key", {id: current.session_id, key}).catch(e => toast(String(e), "error"));
   }
 
+  async function requestTicket(id, mode){
+    const r = await fetch("/api/terminal-ticket", {
+      method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id, mode}),
+    });
+    return {status: r.status, body: await r.json().catch(() => ({}))};
+  }
+
+  async function unlockTerminal(){
+    const token = await promptDlg({title:"Unlock terminals", ok:"Unlock",
+      sub:"Paste a terminal token (Settings → Access & network → Terminal tokens).",
+      fields:[{key:"token", label:"Terminal token", mono:true, required:true}]});
+    if(!token) return false;
+    const r = await fetch("/api/terminal-unlock", {
+      method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({token: token.token}),
+    });
+    if(!r.ok){ toast("Invalid terminal token", "error"); return false; }
+    return true;
+  }
+
   async function openTerminalPage(id, mode){
+    const want = mode || (current && current.readonly ? "read" : "write");
+    let res = await requestTicket(id, want).catch(() => ({status: 0, body: {}}));
+    if(res.status === 403){
+      if(!await unlockTerminal()) return;
+      res = await requestTicket(id, want).catch(() => ({status: 0, body: {}}));
+    }
     let url = "/terminal.html?id=" + encodeURIComponent(id);
-    try{
-      const r = await fetch("/api/terminal-ticket", {
-        method: "POST", credentials: "same-origin",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({id, mode: mode || (current && current.readonly ? "read" : "write")}),
-      });
-      const j = await r.json().catch(() => ({}));
-      if(r.ok && j.ticket) url += "&ticket=" + encodeURIComponent(j.ticket);
-    }catch(e){ /* older server: open without a ticket */ }
+    if(res.body && res.body.ticket) url += "&ticket=" + encodeURIComponent(res.body.ticket);
     window.open(url, "_blank", "noopener");
   }
 

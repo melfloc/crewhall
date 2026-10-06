@@ -184,7 +184,8 @@ def issue_session(ttl: int | None = None, *, ip: str = "", user_agent: str = "")
             ttl = int(settings.get("security.session_ttl_hours")) * 3600
         except Exception:  # noqa: BLE001 - never block a login over a settings problem
             ttl = SESSION_TTL
-    payload = {"sub": "web", "exp": int(time.time()) + ttl}
+    # A per-login nonce keeps two sessions issued in the same second distinct.
+    payload = {"sub": "web", "exp": int(time.time()) + ttl, "jti": secrets.token_hex(8)}
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     body = base64.urlsafe_b64encode(raw).rstrip(b"=")
     sig = hmac.new(_session_secret(), body, hashlib.sha256).digest()
@@ -227,6 +228,14 @@ def revoke_sessions(keep: str | None = None) -> int:
         _SESSIONS.clear()
         if kept:
             _SESSIONS[_label_key(keep)] = kept
+    with _TERMINAL_LOCK:
+        if keep:
+            rec = _TERMINAL_GRANTS.get(_label_key(keep))
+            _TERMINAL_GRANTS.clear()
+            if rec:
+                _TERMINAL_GRANTS[_label_key(keep)] = rec
+        else:
+            _TERMINAL_GRANTS.clear()
     return n
 
 
@@ -234,8 +243,46 @@ def revoke_session(value: str | None) -> bool:
     """Drop one issued session (used by logout)."""
     if not value:
         return False
+    with _TERMINAL_LOCK:
+        _TERMINAL_GRANTS.pop(_label_key(value), None)
     with _SESSIONS_LOCK:
         return _SESSIONS.pop(_label_key(value), None) is not None
+
+
+def session_value(headers: Any) -> str | None:
+    """Return the verified session cookie value, if any."""
+    cookie = headers.get("Cookie", "")
+    for part in cookie.split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == COOKIE_NAME and verify_session(value):
+            return value
+    return None
+
+
+# Terminal scopes attached to a web session by "unlocking" with a terminal
+# token. Process-local, never persisted; cleared when sessions are revoked.
+_TERMINAL_GRANTS: dict[str, dict[str, Any]] = {}
+_TERMINAL_LOCK = threading.Lock()
+
+
+def unlock_terminal(value: str | None, *, scopes: list[str], hosts: list[str],
+                    token_id: str) -> bool:
+    if not value:
+        return False
+    with _TERMINAL_LOCK:
+        _TERMINAL_GRANTS[_label_key(value)] = {
+            "scopes": list(scopes), "hosts": list(hosts),
+            "token_id": token_id, "unlocked_at": time.time(),
+        }
+    return True
+
+
+def terminal_grant(value: str | None) -> dict[str, Any] | None:
+    if not value:
+        return None
+    with _TERMINAL_LOCK:
+        rec = _TERMINAL_GRANTS.get(_label_key(value))
+        return dict(rec) if rec else None
 
 
 def verify_session(value: str | None) -> bool:
