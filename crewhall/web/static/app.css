@@ -575,3 +575,14 @@ dialog.settings { width:min(980px,96vw); max-height:90vh; }
 .chip.host-ok { color:var(--ready); }
 .chip.host-reconnecting { background:var(--work-soft); color:var(--work); }
 .chip.host-unreachable { background:var(--err-soft); color:var(--err); }
+
+/* ---- terminals (Phase 1) ---- */
+.term-body{display:grid;grid-template-columns:minmax(180px,240px) 1fr;gap:12px;padding:12px}
+.term-list{display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:60vh}
+.term-row{display:flex;gap:8px;justify-content:flex-start;text-align:left;width:100%}
+.term-row .nm{font-weight:600}
+.term-main{display:flex;flex-direction:column;gap:8px;min-width:0}
+#term-view{min-height:240px;max-height:55vh;overflow:auto;margin:0}
+.term-line{display:flex;gap:8px}
+.term-line .input{flex:1}
+.term-new{border:1px solid var(--line,#333);border-radius:8px;padding:10px;margin-top:10px}

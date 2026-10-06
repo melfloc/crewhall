@@ -114,6 +114,8 @@ ALLOWED_OPS = {
     "agent_archive_list", "agent_archive_get",
     "request_list", "request_cancel",
     "worktree_list", "worktree_discard", "host_list", "host_set", "host_remove", "host_test",
+    "terminal_create", "terminal_list", "terminal_info", "terminal_write",
+    "terminal_key", "terminal_capture", "terminal_resize", "terminal_close",
 }
 
 
@@ -442,6 +444,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._error("missing op")
         if op not in ALLOWED_OPS:
             return self._error(f"operation not allowed: {op}", 403)
+        if op.startswith("terminal_"):
+            from .. import settings
+
+            if not settings.get("terminals.enabled"):
+                # Closed by default: the route does not even exist.
+                return self._error("not found", 404)
+            if op == "terminal_create":
+                params = {**params, "owner": self._client_label()}
         if op in ("interaction_respond", "agent_process_signal"):
             params = {**params, "by": "web"}  # the audit trail names the channel, not the client's claim
         try:

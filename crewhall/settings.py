@@ -113,6 +113,22 @@ def _static_schema() -> list[dict[str, Any]]:
           restart=True),
         s("maintenance.keep_backups", "maintenance", "int", 5, "Backups to keep",
           "Pre-update and pre-reset backups kept in the state directory.", min=1, max=100),
+        s("terminals.enabled", "terminals", "bool", False, "Web terminals",
+          "Exposes raw interactive shells in the Web UI and CLI. Off by default; "
+          "enabling it is privileged and needs typed confirmation.", restart=True),
+        s("terminals.max_total", "terminals", "int", 8, "Max terminals (total)",
+          "Hard cap on terminals that may exist at once.", min=1, max=32),
+        s("terminals.max_per_host", "terminals", "int", 4, "Max terminals per host",
+          "Cap per host; local counts as one host.", min=1, max=16),
+        s("terminals.idle_timeout", "terminals", "int", 900, "Idle timeout (s)",
+          "Disconnect an idle client after this many seconds (0 = never). Does not close the terminal.",
+          min=0, max=86400, min_nonzero=30),
+        s("terminals.max_message_bytes", "terminals", "int", 65536, "Max message (bytes)",
+          "Largest keyboard/message frame accepted.", min=1024, max=1048576),
+        s("terminals.max_bytes_per_sec", "terminals", "int", 4194304, "Max output (bytes/s)",
+          "Per-client output rate cap; a client above it is dropped.", min=65536, max=67108864),
+        s("terminals.client_queue_bytes", "terminals", "int", 524288, "Client queue (bytes)",
+          "Per-client output buffer; when full that client is dropped.", min=65536, max=8388608),
     ]
 
 
@@ -148,6 +164,10 @@ def _validate(item: dict[str, Any], value: Any) -> Any:
         value = int(value)
         if not item["min"] <= value <= item["max"]:
             raise SettingsError(f"{item['key']}: must be between {item['min']} and {item['max']}")
+        if item.get("min_nonzero") and 0 < value < item["min_nonzero"]:
+            raise SettingsError(
+                f"{item['key']}: must be 0 or between {item['min_nonzero']} and {item['max']}"
+            )
         return value
     if typ == "choice":
         if value not in item["choices"]:
@@ -605,6 +625,8 @@ def patch(changes: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
         raise SettingsError(
             "changing a provider " + " or ".join(sorted(touched)) + " needs typed confirmation"
         )
+    if changes.get("terminals.enabled") is True and not confirm:
+        raise SettingsError("enabling terminals needs typed confirmation")
     with _LOCK:
         data = json.loads(json.dumps(load()))
         for key, value in changes.items():

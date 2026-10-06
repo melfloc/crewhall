@@ -83,7 +83,10 @@ class TmuxBackend(Backend):
         return proc
 
     def start(self, spec: SessionSpec) -> None:
+        from ..terminals import is_terminal
+
         argv = spec.argv()
+        terminal = is_terminal(spec)
         cwd = spec.cwd or os.getcwd()
         name = self.session.session_id
         # The tmux server may predate this process; pass the session env
@@ -108,37 +111,46 @@ class TmuxBackend(Backend):
                 ["/bin/sh", "-c", '. "$0" && rm -f "$0" && exec "$@"', env_file, *argv]
             )
 
-        self._check(
-            "new-session",
-            "-d",
-            "-s",
-            name,
-            "-x",
-            str(spec.cols),
-            "-y",
-            str(spec.rows),
-            "-c",
-            cwd,
-            command,
-            # Same tmux command queue as new-session: a command that exits at once
-            # must leave a dead pane (with its exit status), not a vanished session.
-            ";",
-            "set-option",
-            "-t",
-            name,
-            "remain-on-exit",
-            "on",
-        )
+        new_args = [
+            "new-session", "-d", "-s", name, "-x", str(spec.cols), "-y", str(spec.rows),
+        ]
+        if cwd:
+            new_args += ["-c", cwd]
+        # A terminal with no start command uses tmux's own login shell (or the
+        # chosen shell, passed as a single argv element).
+        if not (terminal and not argv):
+            new_args.append(command)
+        # Same tmux command queue as new-session: a command that exits at once
+        # must leave a dead pane (with its exit status), not a vanished session.
+        new_args += [";", "set-option", "-t", name, "remain-on-exit", "on"]
+        if terminal:
+            # The size is fixed by `resize-window`, not by any attaching client.
+            new_args += [";", "set-option", "-t", name, "window-size", "manual"]
+        self._check(*new_args)
         self.tmux_name = name
         self._run("set-option", "-t", name, "@at_backend", "tmux")
         self._run("set-option", "-t", name, "@at_command", spec.display())
         self._run("set-option", "-t", name, "@at_created", str(self.session.created_at))
+        self._set_terminal_labels(spec, name)
         self.pane_id = self._first_pane()
 
         self._reader = threading.Thread(
             target=self._read_loop, name=f"tmux-reader-{name}", daemon=True
         )
         self._reader.start()
+
+    def _set_terminal_labels(self, spec: SessionSpec, name: str) -> None:
+        from ..terminals import is_terminal
+
+        if not is_terminal(spec):
+            return
+        # Every value is passed as an argv element; never interpolated.
+        self._run("set-option", "-t", name, "@at_kind", "terminal")
+        self._run("set-option", "-t", name, "@at_readonly", "1" if spec.readonly else "0")
+        if spec.title:
+            self._run("set-option", "-t", name, "@at_title", spec.title)
+        if spec.owner:
+            self._run("set-option", "-t", name, "@at_owner", spec.owner)
 
     def adopt(self, name: str) -> None:
         self.tmux_name = name
@@ -189,10 +201,13 @@ class TmuxBackend(Backend):
     def _target(self) -> str:
         return self.pane_id or self.tmux_name or ""
 
-    def capture(self) -> str:
+    def capture(self, escapes: bool = False) -> str:
         if not self.tmux_name:
             return ""
-        proc = self._run("capture-pane", "-p", "-t", self._target(), "-S", "-")
+        args = ["capture-pane", "-p", "-t", self._target(), "-S", "-"]
+        if escapes:
+            args.append("-e")
+        proc = self._run(*args)
         if proc.returncode != 0:
             return ""
         return proc.stdout
@@ -286,6 +301,10 @@ def existing_sessions(socket: str | None = None) -> list[dict]:
             ("command", "@at_command"),
             ("created_at", "@at_created"),
             ("backend", "@at_backend"),
+            ("kind", "@at_kind"),
+            ("readonly", "@at_readonly"),
+            ("title", "@at_title"),
+            ("owner", "@at_owner"),
         ):
             opt = subprocess.run(
                 ["tmux", "-L", socket, "-f", "/dev/null",

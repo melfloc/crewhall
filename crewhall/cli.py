@@ -206,6 +206,90 @@ def cmd_attach(args: argparse.Namespace) -> int:
     return subprocess.call(cmd)
 
 
+def _terminals_enabled(args: argparse.Namespace) -> bool:
+    if _client(args).call("meta_info").get("terminals_enabled"):
+        return True
+    print("terminals are disabled (enable in Settings)", file=sys.stderr)
+    return False
+
+
+def _print_terminal(info: dict[str, Any]) -> None:
+    host = info.get("host") or "local"
+    ro = " readonly" if info.get("readonly") else ""
+    print(
+        f"{info['session_id']}  host={host}  status={info['status']}  "
+        f"cwd={info.get('cwd') or '-'}  title={info.get('title') or '-'}{ro}"
+    )
+
+
+def cmd_terminal_new(args: argparse.Namespace) -> int:
+    if not _terminals_enabled(args):
+        return 2
+    resp = _client(args).call(
+        "terminal_create",
+        host=args.host, cwd=argparse_cwd(args.cwd), shell=args.shell,
+        command=args.command, title=args.title, readonly=args.readonly,
+        cols=args.cols, rows=args.rows,
+    )
+    _print_terminal(resp["terminal"])
+    return 0
+
+
+def cmd_terminal_ls(args: argparse.Namespace) -> int:
+    if not _terminals_enabled(args):
+        return 2
+    terminals = _client(args).call("terminal_list", host=args.host)["terminals"]
+    if args.json:
+        print(json.dumps(terminals, indent=2))
+        return 0
+    if not terminals:
+        print("no terminals")
+        return 0
+    for info in terminals:
+        _print_terminal(info)
+    return 0
+
+
+def cmd_terminal_send(args: argparse.Namespace) -> int:
+    if not _terminals_enabled(args):
+        return 2
+    _client(args).call(
+        "terminal_write", id=args.target, text=args.text, enter=args.enter
+    )
+    return 0
+
+
+def cmd_terminal_key(args: argparse.Namespace) -> int:
+    if not _terminals_enabled(args):
+        return 2
+    _client(args).call("terminal_key", id=args.target, key=args.key)
+    return 0
+
+
+def cmd_terminal_capture(args: argparse.Namespace) -> int:
+    if not _terminals_enabled(args):
+        return 2
+    out = _client(args).call(
+        "terminal_capture", id=args.target, recent=True, max_lines=args.lines,
+        escapes=args.escapes,
+    )["output"]
+    sys.stdout.write(out)
+    return 0
+
+
+def cmd_terminal_close(args: argparse.Namespace) -> int:
+    if not _terminals_enabled(args):
+        return 2
+    _client(args).call("terminal_close", id=args.target)
+    return 0
+
+
+def cmd_terminal_attach(args: argparse.Namespace) -> int:
+    if not _terminals_enabled(args):
+        return 2
+    return cmd_attach(argparse.Namespace(**{**vars(args), "target": args.target}))
+
+
 def _print_agent(info: dict[str, Any]) -> None:
     state = info.get("state")
     mark = "●" if state in ("ready", "waiting_input", "working") else "○"
@@ -1216,6 +1300,43 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("attach", help="attach a terminal to a tmux session")
     p.add_argument("target")
     p.set_defaults(func=cmd_attach)
+
+    p = sub.add_parser("terminal", help="web/CLI terminals (closed by default)")
+    tsub = p.add_subparsers(dest="terminal_command", required=True)
+    t = tsub.add_parser("new", help="create a terminal")
+    t.add_argument("--host", default=None, help="configured SSH host (default: this machine)")
+    t.add_argument("--cwd", default=None)
+    t.add_argument("--shell", default=None, help="bash, zsh, sh or fish (local only)")
+    t.add_argument("--title", default=None)
+    t.add_argument("--readonly", action="store_true")
+    t.add_argument("--command", default=None, help="text typed into the shell after start")
+    t.add_argument("--cols", type=int, default=120)
+    t.add_argument("--rows", type=int, default=32)
+    t.set_defaults(func=cmd_terminal_new)
+    t = tsub.add_parser("ls", help="list terminals")
+    t.add_argument("--host", default=None)
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_terminal_ls)
+    t = tsub.add_parser("send", help="write literal text into a terminal")
+    t.add_argument("target")
+    t.add_argument("text")
+    t.add_argument("--enter", action="store_true")
+    t.set_defaults(func=cmd_terminal_send)
+    t = tsub.add_parser("key", help="send a named key")
+    t.add_argument("target")
+    t.add_argument("key")
+    t.set_defaults(func=cmd_terminal_key)
+    t = tsub.add_parser("capture", help="print terminal output")
+    t.add_argument("target")
+    t.add_argument("--lines", type=int, default=500)
+    t.add_argument("--escapes", action="store_true")
+    t.set_defaults(func=cmd_terminal_capture)
+    t = tsub.add_parser("close", help="close a terminal")
+    t.add_argument("target")
+    t.set_defaults(func=cmd_terminal_close)
+    t = tsub.add_parser("attach", help="attach a terminal to its tmux session")
+    t.add_argument("target")
+    t.set_defaults(func=cmd_terminal_attach)
 
     p = sub.add_parser("host", help="remote SSH hosts")
     hsub = p.add_subparsers(dest="host_command", required=True)

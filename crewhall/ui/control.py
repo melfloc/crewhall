@@ -24,6 +24,7 @@ def meta_info() -> dict[str, Any]:
         "hosts": [{"name": n, "ssh": c["ssh"]} for n, c in settings.hosts().items()],
         "defaults": {"kind": settings.get("agents.default_kind"),
                      "backend": settings.get("agents.default_backend")},
+        "terminals_enabled": bool(settings.get("terminals.enabled")),
     }
 
 

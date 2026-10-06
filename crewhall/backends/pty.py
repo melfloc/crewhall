@@ -161,7 +161,7 @@ class PtyBackend(Backend):
     def send_key(self, key: str) -> None:
         self._write_bytes(pty_bytes(key))
 
-    def capture(self) -> str:
+    def capture(self, escapes: bool = False) -> str:
         return "".join(self._acc)
 
     def resize(self, cols: int, rows: int) -> None:

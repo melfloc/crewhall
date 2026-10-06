@@ -35,6 +35,8 @@ AUDITED = {
     "reset_plan", "reset_apply", "clean_plan", "clean_apply",
     "bundle_export", "bundle_import", "bundle_delete", "fs_complete",
     "web_token_rotate", "web_token_revoke", "web_session_revoke", "web_login",
+    "terminal_create", "terminal_close", "terminal_write", "terminal_key",
+    "terminal_resize", "terminal_capture",
 }
 
 
@@ -181,4 +183,24 @@ def summarize(op: str, request: dict[str, Any], result: dict[str, Any] | None = 
         return "clean"
     if op.startswith("web_token") or op.startswith("web_session"):
         return op
+    if op.startswith("terminal_"):
+        # Metadata only: never the text of a command nor any terminal output.
+        info = result.get("terminal") or {}
+        tid = request.get("id") or info.get("session_id") or result.get("closed")
+        parts = [f"id={tid}"]
+        host = request.get("host") or info.get("host")
+        if host:
+            parts.append(f"host={host}")
+        if op == "terminal_create":
+            owner = request.get("owner") or info.get("owner")
+            if owner:
+                parts.append(f"owner={owner}")
+        elif op == "terminal_write":
+            text = request.get("text") or ""
+            parts.append(f"bytes={len(str(text).encode('utf-8'))}")
+            parts.append(f"enter={bool(request.get('enter'))}")
+            parts.append(f"hash={_short_hash(text)}")
+        elif op == "terminal_key":
+            parts.append(f"key={request.get('key')}")
+        return " ".join(parts)
     return ""

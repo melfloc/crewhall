@@ -11,6 +11,8 @@ import uuid
 from typing import Any
 
 from . import brand, hooks, paths, settings
+from . import terminals as termlib
+from .terminals import is_terminal, new_terminal_id
 from .usage import parse_usage
 from . import activity as act
 from .backends import HostUnreachable, get_backend
@@ -789,7 +791,13 @@ class Controller:
                 created_f = float(created) if created else None
             except ValueError:
                 created_f = None
-            spec = SessionSpec(command=meta.get("command") or sid)
+            spec = SessionSpec(
+                command=meta.get("command") or sid,
+                kind=meta.get("kind") or "session",
+                readonly=(meta.get("readonly") == "1"),
+                title=meta.get("title") or None,
+                owner=meta.get("owner") or None,
+            )
             try:
                 session = InteractiveSession.adopt(
                     tmux_backend.TmuxBackend(), spec, sid, created_at=created_f
@@ -849,7 +857,14 @@ class Controller:
                 created_f = float(created) if created else None
             except ValueError:
                 created_f = None
-            spec = SessionSpec(command=meta.get("command") or sid, host=name)
+            spec = SessionSpec(
+                command=meta.get("command") or sid,
+                host=name,
+                kind=meta.get("kind") or "session",
+                readonly=(meta.get("readonly") == "1"),
+                title=meta.get("title") or None,
+                owner=meta.get("owner") or None,
+            )
             try:
                 session = InteractiveSession.adopt(
                     ssh_tmux_backend.SshTmuxBackend(cfg), spec, sid, created_at=created_f
@@ -870,6 +885,117 @@ class Controller:
         session.start()
         self.registry.add(session)
         return session
+
+    # -- terminals ---------------------------------------------------------
+    def terminals_enabled(self) -> bool:
+        return bool(settings.get("terminals.enabled"))
+
+    def _require_terminals_enabled(self) -> None:
+        if not self.terminals_enabled():
+            raise termlib.TerminalError("terminals are disabled")
+
+    @staticmethod
+    def _terminal_dim(value: Any, name: str, lo: int, hi: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise termlib.TerminalError(f"{name} must be a whole number")
+        value = int(value)
+        if not lo <= value <= hi:
+            raise termlib.TerminalError(f"{name} must be between {lo} and {hi}")
+        return value
+
+    def create_terminal(
+        self,
+        *,
+        host: str | None = None,
+        cwd: str | None = None,
+        shell: str | None = None,
+        command: str | None = None,
+        title: str | None = None,
+        readonly: Any = False,
+        cols: Any = 120,
+        rows: Any = 32,
+        owner: str | None = None,
+    ) -> InteractiveSession:
+        self._require_terminals_enabled()
+        host_name = termlib.validate_host(host)
+        cwd_val = termlib.validate_cwd(cwd, host_name)
+        shell_path = termlib.validate_shell(shell, host_name)
+        title_val = termlib.validate_title(title)
+        command_val = termlib.validate_command(command)
+        readonly_val = termlib.validate_readonly(readonly)
+        cols_val = self._terminal_dim(cols, "cols", 10, 500)
+        rows_val = self._terminal_dim(rows, "rows", 2, 200)
+        termlib.check_limits(
+            self.list_terminals(),
+            host_name,
+            int(settings.get("terminals.max_total")),
+            int(settings.get("terminals.max_per_host")),
+        )
+        spec = SessionSpec(
+            command=[shell_path] if shell_path else "",
+            cwd=cwd_val,
+            cols=cols_val,
+            rows=rows_val,
+            host=host_name,
+            kind=termlib.KIND_TERMINAL,
+            readonly=readonly_val,
+            title=title_val,
+            owner=owner,
+        )
+        session = InteractiveSession(
+            self._backend_for(None, host_name), spec, session_id=new_terminal_id()
+        )
+        session.start()
+        self.registry.add(session)
+        if command_val:
+            # Sent as literal text to the already-open shell, so the terminal
+            # stays alive after the command finishes.
+            session.write(command_val)
+            session.send_enter()
+        return session
+
+    def _resolve_terminal(self, target: str) -> InteractiveSession:
+        self._require_terminals_enabled()
+        session = self.registry.resolve(target)
+        if not is_terminal(session):
+            raise termlib.TerminalError(f"{target} is not a terminal")
+        return session
+
+    def _terminal_dict(self, session: InteractiveSession) -> dict[str, Any]:
+        session.poll()
+        info = session.info().to_dict()
+        meta = info.get("meta") or {}
+        info["host_unreachable"] = bool(meta.get("host_unreachable"))
+        return info
+
+    def list_terminals(self, host: str | None = None) -> list[dict[str, Any]]:
+        self._require_terminals_enabled()
+        wanted = termlib.validate_host(host)
+        out = []
+        for session in self.registry.all():
+            if not is_terminal(session):
+                continue
+            info = self._terminal_dict(session)
+            if host is not None and (info.get("host") or None) != wanted:
+                continue
+            out.append(info)
+        return out
+
+    def terminal_info(self, target: str) -> dict[str, Any]:
+        self._require_terminals_enabled()
+        return self._terminal_dict(self._resolve_terminal(target))
+
+    def close_terminal(self, target: str) -> str:
+        self._require_terminals_enabled()
+        session = self._resolve_terminal(target)
+        session.close()
+        self.registry.remove(session.session_id)
+        return session.session_id
+
+    def guard_terminal_input(self, session: InteractiveSession) -> None:
+        """Single choke point for read-only terminals across raw + terminal ops."""
+        if is_terminal(session) and bool(getattr(session.spec, "readonly", False)):
+            raise termlib.TerminalError("terminal is read-only")
 
     def get(self, target: str) -> InteractiveSession:
         return self.registry.resolve(target)
@@ -1767,11 +1893,19 @@ class Controller:
 
         return archive.read_archived(agent_id)
 
-    def list(self) -> list[dict[str, Any]]:
+    def list(self, kind: str = "session") -> list[dict[str, Any]]:
+        if kind not in ("session", "terminal", "all"):
+            kind = "session"
         out = []
         for session in self.registry.all():
             session.poll()
-            out.append(session.info().to_dict())
+            info = session.info()
+            terminal = is_terminal(info)
+            if kind == "terminal" and not terminal:
+                continue
+            if kind == "session" and terminal:
+                continue
+            out.append(info.to_dict())
         return out
 
     def prune(self) -> int:

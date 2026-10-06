@@ -130,8 +130,8 @@ class InteractiveSession:
     def send_enter(self) -> None:
         self.send_key("ENTER")
 
-    def capture(self) -> str:
-        return self.backend.capture()
+    def capture(self, escapes: bool = False) -> str:
+        return self.backend.capture(escapes=escapes)
 
     def read(self, timeout: float | None = None) -> str:
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -252,6 +252,10 @@ class InteractiveSession:
                 exited_at=self._exited_at,
                 host=meta.get("host"),
                 meta=meta,
+                kind=getattr(self.spec, "kind", "session"),
+                readonly=bool(getattr(self.spec, "readonly", False)),
+                title=getattr(self.spec, "title", None),
+                owner=getattr(self.spec, "owner", None),
             )
 
     def close(self) -> None:

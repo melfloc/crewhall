@@ -164,7 +164,10 @@ class SshTmuxBackend(TmuxBackend):
 
     # ------------------------------------------------------------------- launch
     def start(self, spec: SessionSpec) -> None:
+        from ..terminals import is_terminal
+
         argv = spec.argv()
+        terminal = is_terminal(spec)
         cwd = spec.cwd  # a *remote* path: never substitute the local cwd
         name = _remote_session_name(self.host_alias, self.session.session_id)
         env_items = [
@@ -175,7 +178,11 @@ class SshTmuxBackend(TmuxBackend):
         head = ["new-session", "-d", "-s", name, "-x", str(spec.cols), "-y", str(spec.rows)]
         if cwd:
             head += ["-c", cwd]
+        # Remote terminals always use the remote login shell: no command.
+        start_command = None if (terminal and not argv) else shlex.join(argv)
         tail = [";", "set-option", "-t", name, "remain-on-exit", "on"]
+        if terminal:
+            tail += [";", "set-option", "-t", name, "window-size", "manual"]
         tmux = ["tmux", "-L", self.remote_socket, "-f", "/dev/null"]
         if env_items:
             # Secrets travel over stdin into a 0600 remote temp file. The *pane*
@@ -196,7 +203,11 @@ class SshTmuxBackend(TmuxBackend):
             )
             proc = self._ssh_run(remote, input=env_data)
         else:
-            proc = self._run(*head, shlex.join(argv), *tail)
+            args = list(head)
+            if start_command is not None:
+                args.append(start_command)
+            args += tail
+            proc = self._run(*args)
         if proc.returncode != 0:
             if proc.returncode == 255:
                 raise HostUnreachable(
@@ -208,6 +219,7 @@ class SshTmuxBackend(TmuxBackend):
         self._run("set-option", "-t", name, "@at_backend", "tmux")
         self._run("set-option", "-t", name, "@at_command", spec.display())
         self._run("set-option", "-t", name, "@at_created", str(self.session.created_at))
+        self._set_terminal_labels(spec, name)
         self.pane_id = self._first_pane()
         self._reader = threading.Thread(
             target=self._read_loop, name=f"ssh-tmux-reader-{name}", daemon=True
@@ -296,6 +308,10 @@ def existing_sessions(host: dict[str, Any]) -> list[dict]:
             ("command", "@at_command"),
             ("created_at", "@at_created"),
             ("backend", "@at_backend"),
+            ("kind", "@at_kind"),
+            ("readonly", "@at_readonly"),
+            ("title", "@at_title"),
+            ("owner", "@at_owner"),
         ):
             opt = backend._run("show-options", "-t", name, "-v", option)
             if opt.returncode == 0:

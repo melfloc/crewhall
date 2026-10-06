@@ -5,6 +5,46 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.67.0] — 2026-10-06
+
+_Terminales interactivas (Fase 1): sesiones "crudas" con `kind="terminal"` en local y por SSH._
+
+Threat model:
+- **Activo**: el daemon (mismo usuario unix) y su capacidad de ejecutar procesos.
+  **Atacante**: cualquiera que pueda invocar una op `terminal_*` (CLI local o Web UI con token).
+  **Vector**: una terminal es ejecución arbitraria de código. **Mitigación**: cerrada por
+  defecto (`terminals.enabled=false`); sin habilitar, las ops fallan con "terminals are
+  disabled" y las rutas del Web UI devuelven 404; solo el usuario del daemon.
+- **Activo**: el host/shell/argv del proceso. **Atacante**: cliente que controla
+  `host/cwd/shell/title/command`. **Vector**: inyección de shell/argv. **Mitigación**:
+  validación estricta en `crewhall/terminals.py` antes de tocar tmux/SSH; todo se pasa
+  como elementos de `argv` (nunca interpolado en una cadena de shell).
+- **Activo**: el flujo de entrada de una terminal. **Atacante**: cliente. **Vector**:
+  saltarse `readonly` por las ops crudas `write/key/enter/interrupt`. **Mitigación**:
+  punto único `Controller.guard_terminal_input`.
+- **Activo**: hosts remotos. **Vector**: opciones SSH libres. **Mitigación**: se reutiliza
+  `SshTmuxBackend` con `SSH_BASE_OPTIONS` fijas.
+- **Activo**: recursos del daemon. **Vector**: agotamiento creando terminales. **Mitigación**:
+  límites `max_total`/`max_per_host`.
+
+Cambios:
+- Nuevo `kind="terminal"` en `SessionSpec`/`SessionInfo` (+ `readonly`, `title`, `owner`),
+  con `is_terminal` como único discriminador; nuevo módulo `crewhall/terminals.py` con
+  validadores y `new_terminal_id()`.
+- Etiquetas tmux `@at_kind/@at_readonly/@at_title/@at_owner` escritas en `start()` y leídas
+  en `existing_sessions()` de ambos backends; una sesión sin `@at_kind` sigue siendo
+  `session`. Las terminales arrancan sin comando (login shell; local puede elegir shell) y
+  con `window-size manual`.
+- Ops del daemon `terminal_create/list/info/write/key/capture/resize/close`; `list` crudo
+  acepta `kind` y excluye terminales por defecto; las ops crudas respetan `readonly`.
+- Settings: grupo `terminals` (`enabled=false`, límites, `idle_timeout`, bytes, cola);
+  activar `terminals.enabled` exige `CONFIRM`. `meta_info` expone `terminals_enabled`.
+- Auditoría solo de metadatos (`terminal_*`): id, host, owner, bytes, `enter`, `key` y un
+  hash corto del texto; nunca el texto ni la salida.
+- CLI `crewhall terminal new|ls|send|key|capture|close|attach` (código 2 si está
+  desactivado) y Web UI: botón y panel "Terminals" (lista, nueva, vista de texto, entrada,
+  teclas, cerrar), visibles solo si `terminals_enabled`.
+
 ## [0.66.0] — 2026-10-05
 
 _Teams con host SSH y workspace remoto._

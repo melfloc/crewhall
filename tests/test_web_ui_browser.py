@@ -302,7 +302,7 @@ class ConversationView(_Browser):
     def test_page_loads_every_module_from_static_without_errors(self):
         srcs = self.page.eval_on_selector_all("script[src]", "els => els.map(e => e.getAttribute('src'))")
         self.assertEqual(srcs, [
-            "/static/js/core.js", "/static/js/transport.js", "/static/js/sidebar.js",
+            "/static/js/core.js", "/static/js/transport.js", "/static/js/terminals.js", "/static/js/sidebar.js",
             "/static/js/agent.js", "/static/js/timeline.js", "/static/js/usage.js", "/static/js/cleaning.js",
             "/static/js/version.js", "/static/js/inbox.js", "/static/js/access.js", "/static/js/bundle.js", "/static/js/settings.js",
             "/static/js/archived.js", "/static/js/onboarding.js", "/static/js/mission.js", "/static/js/notify.js",
@@ -1518,6 +1518,85 @@ class RemoteTeams(_Browser):
         self.page.locator("#na-ok").click()
         payload = next(p for p in self.payloads if p.get("op") == "agent_create")
         self.assertEqual((payload["host"], payload["team"], payload["cwd"]), ("prod", "t2", None))
+
+
+class Terminals(_Browser):
+    agents = [READY]
+    terminals_enabled = True
+    hosts = [{"name": "prod", "ssh": "u@prod"}]
+
+    def _reply(self, body):
+        op = body.get("op")
+        if op == "meta_info":
+            return {"ok": True, "harnesses": [{"kind": "claude"}], "backends": ["tmux"],
+                    "hosts": self.hosts, "terminals_enabled": True}
+        if op == "terminal_list":
+            return {"ok": True, "terminals": self.terms}
+        if op == "terminal_create":
+            info = {"session_id": "term_deadbeef", "kind": "terminal", "host": body.get("host"),
+                    "title": body.get("title"), "status": "running", "cwd": body.get("cwd") or "",
+                    "readonly": bool(body.get("readonly"))}
+            self.terms = [info]
+            return {"ok": True, "terminal": info}
+        if op == "terminal_capture":
+            return {"ok": True, "output": "hello from shell\n$ "}
+        if op == "terminal_write":
+            self.writes.append(body)
+            return {"ok": True, "written": len(body.get("text") or "")}
+        if op == "terminal_key":
+            self.keys.append(body.get("key"))
+            return {"ok": True}
+        if op == "terminal_close":
+            self.terms = []
+            return {"ok": True, "closed": body.get("id")}
+        return super()._reply(body)
+
+    def setUp(self):
+        self.terms = [{"session_id": "term_deadbeef", "kind": "terminal", "host": None,
+                       "title": "shell", "status": "running", "cwd": "/tmp", "readonly": False}]
+        self.writes = []
+        self.keys = []
+        super().setUp()
+
+    def test_button_is_visible_and_opens_the_panel(self):
+        self.page.wait_for_selector("#termBtn:not(.init-hidden)")
+        self.page.click("#termBtn")
+        self.page.wait_for_selector("#termDlg[open] #term-list")
+        self.assertIn("shell", self.page.inner_text("#term-list"))
+
+    def test_create_send_and_close(self):
+        self.page.click("#termBtn")
+        self.page.wait_for_selector("#termDlg[open]")
+        self.page.click("#termDlg .btn:has-text('New terminal')")
+        self.page.wait_for_selector("#term-new-slot .term-new")
+        self.page.fill("#term-title", "t2")
+        self.page.click("#term-new-slot .btn.primary")
+        self.page.wait_for_timeout(300)
+        self.assertIn("terminal_create", self.calls)
+        self.page.fill("#term-input", "echo hola")
+        self.page.press("#term-input", "Enter")
+        self.page.wait_for_timeout(300)
+        self.assertTrue(any(w.get("text") == "echo hola" and w.get("enter") for w in self.writes))
+        self.page.click("#termDlg .btn.danger:has-text('Close terminal')")
+        self.page.wait_for_timeout(200)
+        self.assertIn("terminal_close", self.calls)
+
+    def test_readonly_disables_input(self):
+        self.terms = [{"session_id": "term_deadbeef", "kind": "terminal", "host": None,
+                       "title": "ro", "status": "running", "cwd": "/tmp", "readonly": True}]
+        self.page.click("#termBtn")
+        self.page.wait_for_selector("#termDlg[open] #term-list")
+        self.page.locator("#term-list .term-row").first.click()
+        self.page.wait_for_timeout(200)
+        self.assertTrue(self.page.locator("#term-input").is_disabled())
+
+
+class TerminalsDisabled(_Browser):
+    agents = [READY]
+
+    def test_button_is_hidden_when_disabled(self):
+        self.page.wait_for_timeout(500)
+        self.assertEqual(self.page.locator("#termBtn:not(.init-hidden)").count(), 0)
 
 
 if __name__ == "__main__":

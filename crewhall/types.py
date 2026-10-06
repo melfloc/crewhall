@@ -37,6 +37,11 @@ class SessionSpec:
     shell_path: str = "/bin/bash"
     # Name of a configured SSH host (see ``settings.hosts``); None means local.
     host: str | None = None
+    # "session" (default, managed raw session) or "terminal" (web/CLI terminal).
+    kind: str = "session"
+    readonly: bool = False
+    title: str | None = None
+    owner: str | None = None
 
     def argv(self) -> list[str]:
         if isinstance(self.command, str):
@@ -60,6 +65,10 @@ class SessionSpec:
             "shell": self.shell,
             "name": self.name,
             "host": self.host,
+            "kind": self.kind,
+            "readonly": self.readonly,
+            "title": self.title,
+            "owner": self.owner,
         }
 
 
@@ -97,6 +106,10 @@ class SessionInfo:
     exited_at: float | None = None
     host: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
+    kind: str = "session"
+    readonly: bool = False
+    title: str | None = None
+    owner: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -116,6 +129,10 @@ class SessionInfo:
             "exited_at": self.exited_at,
             "host": self.host,
             "meta": self.meta,
+            "kind": self.kind,
+            "readonly": self.readonly,
+            "title": self.title,
+            "owner": self.owner,
         }
 
 MAX_AGENT_ARGS = 64
