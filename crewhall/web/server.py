@@ -1073,9 +1073,18 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(0.5)
                     continue
                 agent_ids = [a["agent_id"] for a in snap["agents"]]
+                # Include hosts and terminals so creating/unlocking a terminal
+                # (or a host change) is pushed without a manual reload. Only the
+                # stable terminal fields count, so live output does not push the
+                # whole snapshot every tick.
                 state = json.dumps(
                     {"agents": snap["agents"], "teams": snap["teams"],
-                     "messages": snap["messages"]},
+                     "messages": snap["messages"], "hosts": snap["hosts"],
+                     "terminals": [
+                         {k: t.get(k) for k in (
+                             "session_id", "kind", "status", "title", "host",
+                             "readonly", "cols", "rows", "cwd")}
+                         for t in snap["terminals"]]},
                     sort_keys=True,
                 )
                 if state != last_state:

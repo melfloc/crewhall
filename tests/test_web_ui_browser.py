@@ -1707,6 +1707,15 @@ class TerminalPane(_Browser):
                                             "closed": False, "host": None}).encode())
         ws.send(bytes([0x02]) + b"hello from the shell\r\n")
 
+    def test_terminals_appear_on_state_push_without_reload(self):
+        self.terminals = []
+        self._push()
+        self.page.wait_for_timeout(200)
+        self.assertEqual(self.page.locator("#nav .agent-row.terminal").count(), 0)
+        self.terminals = [TERMINAL]
+        self._push()
+        self.page.locator("#nav .agent-row.terminal").first.wait_for(timeout=5000)
+
     def test_terminal_row_mounts_xterm_in_the_main_pane(self):
         row = self.page.locator("#nav .agent-row.terminal").first
         row.wait_for()
