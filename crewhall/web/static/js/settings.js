@@ -285,7 +285,8 @@ async function terminalTokensSection(){
   let data = {tokens: []};
   try { data = await op("terminal_token_list"); } catch(e){}
   const scope = el("select", {className:"select", id:"tt-scope"},
-    el("option", {value:"read"}, "read"), el("option", {value:"write"}, "write"));
+    el("option", {value:"write"}, "write (create & type)"),
+    el("option", {value:"read"}, "read (view only)"));
   const hosts = el("input", {className:"input mono", id:"tt-hosts", placeholder:"all, or local,prod1"});
   const ttl = el("input", {className:"input", id:"tt-ttl", value:"8h", style:"max-width:90px"});
   const label = el("input", {className:"input", id:"tt-label", placeholder:"label"});
@@ -313,7 +314,7 @@ async function terminalTokensSection(){
   if(!(data.tokens || []).length) wrap.append(el("div", {className:"hint"}, "No terminal tokens yet."));
   wrap.append(el("div", {className:"field"}, el("label", {}, "New terminal token"),
     el("div", {className:"row"}, scope, hosts, ttl, label, issue)),
-    el("div", {className:"hint"}, "A terminal token grants terminal:read or terminal:write, limited to the hosts you list. Unlock the browser with it (the terminal tab does this automatically) before opening a terminal."));
+    el("div", {className:"hint"}, "Creating or typing in a terminal needs a token with scope write; read only allows viewing. The token is limited to the hosts you list. Open the Terminals tab and unlock with it (the tab offers to create one if you have none)."));
   return wrap;
 }
 async function rotateToken(){

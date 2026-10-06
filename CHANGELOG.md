@@ -5,6 +5,24 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.70.0] — 2026-10-06
+
+_Terminales como agentes en el panel lateral y arrastrar-y-soltar paneles._
+
+- Las terminales aparecen como **filas en el panel lateral** (con estado, host y
+  `read-only`), igual que los agentes. Al seleccionarlas, el **panel principal muestra
+  la terminal real (xterm.js)**: se escribe directamente en ella (sin caja de texto) y
+  funcionan las combinaciones de teclas. El panel «Terminals» se mantiene como sitio para
+  gestionar/abrir todas las terminales. El estado se incluye en el snapshot solo si la
+  sesión tiene alcance `terminal:read`.
+- El flujo de creación/uso es autoservicio: si falta el desbloqueo, la UI lo pide (y
+  ofrece emitir un token `write` si no hay ninguno); el scope por defecto en Ajustes es
+  `write`.
+- **Arrastrar y soltar** en el panel lateral: reordena los equipos (persistido) y mueve un
+  agente a otro equipo o a «Ungrouped» (con `team_add_member`/`team_remove_member`).
+- CSP: `style-src` pasa a `'self' 'unsafe-inline'` porque xterm.js inyecta una hoja de
+  estilos para su dimensionado dinámico (los scripts siguen sin inline ni eval).
+
 ## [0.69.0] — 2026-10-06
 
 _Seguridad de terminales web (Fase 3): tokens con alcances, tickets WS y límites._

@@ -106,3 +106,11 @@ Usa terminales solo en **loopback o Tailscale**; **nunca** expongas el Web UI a
 Internet. Si activas el modo local sin token, ten en cuenta que las terminales exigen
 una sesión autenticada: activa `security.local_requires_token` para que el navegador
 inicie sesión antes de desbloquear.
+
+### Nota de CSP (0.70.0)
+
+Para mostrar xterm.js dentro del panel principal (y no en una página aparte), el CSP
+global relaja `style-src` a `'self' 'unsafe-inline'` (xterm inyecta una hoja de estilos
+para su dimensionado). `script-src` sigue siendo `'self'` **sin** `unsafe-inline` ni
+`unsafe-eval`, así que no se permite script en línea; el riesgo añadido se limita a
+estilos. La página `/terminal.html` mantiene su propio CSP.

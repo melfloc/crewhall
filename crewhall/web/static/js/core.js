@@ -1,5 +1,6 @@
 "use strict";
-const S = { state:null, selected:null, follow:true, output:{}, meta:null, view:"live", hist:{},
+const S = { state:null, selected:null, selectedTerm:null, terminals:[], termView:null,
+            follow:true, output:{}, meta:null, view:"live", hist:{},
             q:"", filter:"all", since:{}, prev:{}, doneAt:{}, collapsed:new Set(), proc:{sel:null} };
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";

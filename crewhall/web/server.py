@@ -50,8 +50,10 @@ _LOGIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <div class="err" id="e"></div><button>Sign in</button></form>
 <script src="/static/login.js"></script></body></html>"""
 
-# Strict Content-Security-Policy: no inline script, no inline style, no eval.
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+# Content-Security-Policy: no inline script, no eval. Inline *styles* are
+# allowed because xterm.js injects a stylesheet for its dynamic sizing; that is
+# the only relaxation (see SECURITY.md).
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'")
 
@@ -137,7 +139,7 @@ ALLOWED_OPS = {
 }
 
 
-def _snapshot(client: Client) -> dict[str, Any]:
+def _snapshot(client: Client, *, include_terminals: bool = False) -> dict[str, Any]:
     """A consistent view for the WebSocket push (server-side adaptation)."""
     agents = client.call("agent_list", viewer=True)["agents"]
     teams = client.call("team_list")["teams"]
@@ -153,8 +155,15 @@ def _snapshot(client: Client) -> dict[str, Any]:
         hosts = client.call("host_list")["hosts"]
     except RpcError:
         hosts = []
+    terminals: list[dict[str, Any]] = []
+    if include_terminals:
+        try:
+            terminals = client.call("terminal_list")["terminals"]
+        except RpcError:
+            terminals = []
     return {"agents": agents, "teams": teams, "messages": messages,
-            "requests": requests, "hosts": hosts, "version": __version__}
+            "requests": requests, "hosts": hosts, "terminals": terminals,
+            "version": __version__}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -277,7 +286,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/state":
             try:
-                return self._json({"ok": True, **_snapshot(self.control)})
+                return self._json({"ok": True, **_snapshot(
+                    self.control, include_terminals=self._terminals_readable())})
             except RpcError as exc:
                 return self._error(str(exc), 502)
         if path == "/ws":
@@ -633,6 +643,15 @@ class Handler(BaseHTTPRequestHandler):
                 t for t in (result.get("terminals") or []) if (t.get("host") or "local") in allowed
             ]
         return self._json({"ok": True, **result})
+
+    def _terminals_readable(self) -> bool:
+        from .. import settings
+
+        if not settings.get("terminals.enabled"):
+            return False
+        grant = auth.terminal_grant(auth.session_value(self.headers))
+        return bool(grant) and terminal_tokens.scopes_imply(
+            grant.get("scopes"), terminal_tokens.SCOPE_READ)
 
     def _authorize_terminal_op(self, op: str, params: dict[str, Any]) -> dict[str, Any] | None:
         """Return the session's terminal grant when the op is allowed, else None."""
@@ -1048,7 +1067,8 @@ class Handler(BaseHTTPRequestHandler):
             if now >= next_snapshot:
                 next_snapshot = now + self.WS_SNAPSHOT_EVERY
                 try:
-                    snap = _snapshot(self.control)
+                    snap = _snapshot(self.control,
+                                     include_terminals=self._terminals_readable())
                 except RpcError:
                     time.sleep(0.5)
                     continue

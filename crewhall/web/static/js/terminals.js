@@ -4,6 +4,7 @@
    terminals_enabled, and every op is also gated server-side. */
 (function(){
   let dlg = null, listEl = null, viewEl = null, inputEl = null, titleEl = null;
+  let statusEl = null, unlockBtn = null;
   let current = null, poll = null, hosts = [];
 
   function keyRow(){
@@ -27,9 +28,38 @@
     return {status: r.status, body: await r.json().catch(() => ({}))};
   }
 
+  function setLocked(v){
+    if(statusEl) statusEl.textContent = v ? "locked" : "unlocked";
+    if(unlockBtn) unlockBtn.classList.toggle("init-hidden", !v);
+  }
+
+  async function hasAnyToken(){
+    try{ const r = await op("terminal_token_list"); return (r.tokens || []).length > 0; }
+    catch(e){ return true; }  // can't tell: let the user paste one
+  }
+
+  async function issueAndUnlock(){
+    try{
+      const r = await op("terminal_token_issue",
+        {scope:"write", hosts:null, ttl:8*3600, label:"web"});
+      if(typeof showIssuedToken === "function") showIssuedToken(r.token, r.record);
+      const u = await fetch("/api/terminal-unlock", {method:"POST", credentials:"same-origin",
+        headers:{"Content-Type":"application/json"}, body: JSON.stringify({token:r.token})});
+      if(u.ok){ setLocked(false); toast("Terminals unlocked", "ok"); return true; }
+      toast("Created the token; paste it with Unlock", "info");
+      return false;
+    }catch(e){ toast(String(e), "error"); return false; }
+  }
+
   async function unlockTerminal(){
+    if(!await hasAnyToken()){
+      if(!await confirmDlg({title:"No terminal tokens yet",
+        message:"Create a write-scoped terminal token now? It will be shown once, then used to unlock this browser.",
+        ok:"Create token"})) return false;
+      return issueAndUnlock();
+    }
     const token = await promptDlg({title:"Unlock terminals", ok:"Unlock",
-      sub:"Paste a terminal token (Settings → Access & network → Terminal tokens).",
+      sub:"Paste a terminal token with scope write (Settings → Access & network → Terminal tokens).",
       fields:[{key:"token", label:"Terminal token", mono:true, required:true}]});
     if(!token) return false;
     const r = await fetch("/api/terminal-unlock", {
@@ -37,8 +67,8 @@
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({token: token.token}),
     });
-    if(!r.ok){ toast("Invalid terminal token", "error"); return false; }
-    return true;
+    if(!r.ok){ toast("Invalid or read-only terminal token", "error"); return false; }
+    setLocked(false); toast("Terminals unlocked", "ok"); return true;
   }
 
   async function openTerminalPage(id, mode){
@@ -65,8 +95,18 @@
   async function refreshList(){
     try{
       const r = await op("terminal_list", {});
+      setLocked(false);
       renderList(r.terminals || []);
-    }catch(e){ /* disabled or gone */ }
+    }catch(e){
+      if(String(e).includes("forbidden")){
+        setLocked(true);
+        if(listEl) setKids(listEl, el("div", {className:"term-locked"},
+          el("p", {className:"muted"}, "Terminals are locked for this session."),
+          el("button", {className:"btn primary", type:"button", onclick: async () => {
+            if(await unlockTerminal()) refreshList();
+          }}, "Unlock terminals")));
+      }
+    }
   }
 
   function renderList(terms){
@@ -132,15 +172,28 @@
       shellField,
       el("label", {className:"field"}, ro, " Read-only"),
       el("button", {className:"btn primary", type:"button", onclick: async () => {
-        try{
-          const payload = {host: hostSel.value || null, cwd: cwd.value || null,
-                           title: title.value || null, readonly: ro.checked};
-          if(!hostSel.value && shell.value) payload.shell = shell.value;
+        const payload = {host: hostSel.value || null, cwd: cwd.value || null,
+                         title: title.value || null, readonly: ro.checked};
+        if(!hostSel.value && shell.value) payload.shell = shell.value;
+        const create = async () => {
           const r = await op("terminal_create", payload);
           toast("Terminal created", "ok", 2000);
           await refreshList();
           select(r.terminal);
-        }catch(e){ toast(String(e), "error"); }
+        };
+        try{
+          await create();
+        }catch(e){
+          if(String(e).includes("forbidden")){
+            if(await unlockTerminal()){
+              try{ await create(); }catch(e2){ toast(String(e2), "error"); }
+            } else {
+              toast("Terminals need a write-scoped token (Unlock)", "error");
+            }
+          } else {
+            toast(String(e), "error");
+          }
+        }
       }}, "Create terminal"));
     return form;
   }
@@ -159,8 +212,12 @@
     listEl = el("div", {className:"term-list", id:"term-list"});
     inputEl = el("input", {className:"input mono", id:"term-input", autocomplete:"off",
       onkeydown: (ev) => { if(ev.key === "Enter"){ ev.preventDefault(); sendLine(); } }});
+    statusEl = el("span", {className:"muted", id:"term-lock-state"}, "");
+    unlockBtn = el("button", {className:"btn sm init-hidden", type:"button", id:"term-unlock",
+      onclick: async () => { if(await unlockTerminal()) refreshList(); }}, "Unlock");
     const top = el("div", {className:"inbox-top"},
-      el("h3", {}, "Terminals"), el("span", {className:"spacer"}), titleEl, newBtn, closeBtn);
+      el("h3", {}, "Terminals"), statusEl, unlockBtn,
+      el("span", {className:"spacer"}), titleEl, newBtn, closeBtn);
     const body = el("div", {className:"term-body"},
       listEl,
       el("div", {className:"term-main"},
@@ -214,7 +271,7 @@
     }catch(e){}
   }
 
-  window.Terminals = {open};
+  window.Terminals = {open, unlock: unlockTerminal, openPage: openTerminalPage, refresh: refreshList};
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 })();

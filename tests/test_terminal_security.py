@@ -494,6 +494,18 @@ class TerminalSecurity(_Harness):
         self.assertNotIn(token, stored)
         self.assertIn("hash", stored)
 
+    def test_state_snapshot_gates_terminals_by_scope(self):
+        token, _ = self._issue(scope="write")
+        cookie = self._cookie()
+        _s, before, _ = self._request("GET", "/api/state", cookie=cookie)
+        self.assertEqual(before.get("terminals"), [])
+        self._unlock(cookie, token)
+        term = self._new_terminal(cookie, cwd="/tmp")
+        _s, after, _ = self._request("GET", "/api/state", cookie=cookie)
+        self.assertTrue(any(t["session_id"] == term["session_id"]
+                            for t in after.get("terminals", [])))
+        self._op(cookie, "terminal_close", id=term["session_id"])
+
     def test_ticket_origin_binding(self):
         token, _ = self._issue(scope="write")
         cookie = self._cookie()

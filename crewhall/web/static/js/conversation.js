@@ -1,5 +1,7 @@
 "use strict";
-function select(id){ S.selected = id; S.follow = true;
+function select(id){ S.selected = id; S.selectedTerm = null;
+  if(S.termView){ S.termView.dispose(); S.termView = null; }
+  S.follow = true;
   $("follow").className="follow on"; $("follow").textContent="● follow";
   sendFocus(id);               // server pushes this agent's transcript right away
   const sel = agentById(id);

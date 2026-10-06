@@ -1,6 +1,67 @@
 "use strict";
 function agentById(id){ return (S.state?.agents||[]).find(a=>a.agent_id===id); }
 function teamById(id){ return (S.state?.teams||[]).find(t=>t.team_id===id); }
+function terminalById(id){ return (S.terminals||[]).find(t=>t.session_id===id); }
+
+/* ---------- drag & drop: reorder teams, move agents between them ---------- */
+let DRAG = null;
+function teamOrderIds(){ try{ return JSON.parse(store.get("at.teamOrder")||"[]"); }catch(e){ return []; } }
+function orderTeams(teams){
+  const idx = new Map(teamOrderIds().map((id,i)=>[id,i]));
+  const rank = t => idx.has(t.team_id) ? idx.get(t.team_id) : 1e9;
+  return [...teams].sort((a,b)=> rank(a) - rank(b));
+}
+function agentOrderIds(){ try{ return JSON.parse(store.get("at.agentOrder")||"[]"); }catch(e){ return []; } }
+function dragStart(e, kind, id){
+  DRAG = {kind, id};
+  try{ e.dataTransfer.setData("text/plain", kind + ":" + id); e.dataTransfer.effectAllowed = "move"; }catch(_){}
+  e.currentTarget.classList.add("dragging");
+}
+function dragEnd(e){
+  e.currentTarget.classList.remove("dragging");
+  document.querySelectorAll(".drop-target").forEach(n=>n.classList.remove("drop-target"));
+  DRAG = null;
+}
+function dragOver(e, node){ if(DRAG){ e.preventDefault(); node.classList.add("drop-target"); } }
+function dropTeam(e, teamId, node){
+  e.preventDefault(); node.classList.remove("drop-target");
+  if(!DRAG) return;
+  if(DRAG.kind === "team") reorderTeam(DRAG.id, teamId);
+  else if(DRAG.kind === "agent") moveAgentToTeam(DRAG.id, teamId);
+}
+function dropUngrouped(e, node){
+  e.preventDefault(); node.classList.remove("drop-target");
+  if(DRAG && DRAG.kind === "agent") moveAgentToTeam(DRAG.id, null);
+}
+function dropAgent(e, beforeId, node){
+  e.preventDefault(); node.classList.remove("drop-target");
+  if(DRAG && DRAG.kind === "agent" && DRAG.id !== beforeId){
+    const ids = agentOrderIds().filter(x => x !== DRAG.id);
+    let to = ids.indexOf(beforeId); if(to < 0) to = ids.length;
+    ids.splice(to, 0, DRAG.id);
+    store.set("at.agentOrder", JSON.stringify(ids)); render();
+  }
+}
+function reorderTeam(src, before){
+  const ids = orderTeams(S.state.teams||[]).map(t => t.team_id).filter(id => id !== src);
+  let to = ids.indexOf(before); if(to < 0) to = ids.length;
+  ids.splice(to, 0, src);
+  store.set("at.teamOrder", JSON.stringify(ids)); render();
+}
+async function moveAgentToTeam(agentId, teamId){
+  const current = (S.state.teams||[]).filter(t => (t.members||[]).some(m => m.agent_id === agentId));
+  for(const t of current){
+    if(t.team_id !== teamId){
+      try{ await op("team_remove_member", {target:t.team_id, agent:agentId}); }
+      catch(e){ flash(e.message); }
+    }
+  }
+  if(teamId && !current.some(t => t.team_id === teamId)){
+    try{ await op("team_add_member", {target:teamId, agent:agentId}); toast("Moved to team", "ok", 1800); }
+    catch(e){ flash(e.message); }
+  }
+  render();
+}
 const needsYou = a => a.state === "waiting_input" || (a.interactions||[]).length > 0;
 
 /* ---------- sidebar ---------- */
@@ -20,13 +81,15 @@ function renderFilters(agents){
 // not when only a timer ticks. When it matches, the existing rows are reused.
 function navSignature(agents, teams, filtering){
   const a = agents.map(x => `${x.agent_id}:${x.state}:${(x.interactions||[]).length}`).sort();
-  const t = teams.map(x => `${x.team_id}:${(x.members||[]).map(m=>m.agent_id).join(",")}:${S.collapsed.has(x.team_id)}`).sort();
-  return JSON.stringify({ a, t, f: S.filter, q: S.q.trim().toLowerCase(), filtering: !!filtering,
+  // Not sorted: the array order is the user's drag order, so reordering rebuilds.
+  const t = teams.map(x => `${x.team_id}:${(x.members||[]).map(m=>m.agent_id).join(",")}:${S.collapsed.has(x.team_id)}`);
+  const tm = (S.terminals||[]).map(x => `${x.session_id}:${x.status}:${x.readonly}:${x.title||""}:${x.host||""}`).sort();
+  return JSON.stringify({ a, t, tm, f: S.filter, q: S.q.trim().toLowerCase(), filtering: !!filtering,
                           inbox: inboxItems().length });
 }
 function render(){
   if(!S.state) { if(!$("nav").children.length) $("nav").replaceChildren(el("div",{className:"skel"}),el("div",{className:"skel"}),el("div",{className:"skel"})); return; }
-  const agents = S.state.agents || [], teams = S.state.teams || [];
+  const agents = S.state.agents || [], teams = orderTeams(S.state.teams || []);
   updateChrome(); renderFilters(agents); updateInboxBadge(); renderMissionIfOpen(); renderTimelineIfOpen(); renderUsageIfOpen();
   const grouped = new Set();
   teams.forEach(t => (t.members||[]).forEach(m => grouped.add(m.agent_id)));
@@ -37,6 +100,7 @@ function render(){
     // Structure unchanged: refresh only the dynamic row bits (state class,
     // selection, "needs answer" badge) instead of rebuilding every row.
     refreshRows(agents);
+    syncTerminalSelection();
     renderHead(); renderAsks(); renderActivity(); layout();
     if(S.view==="hist" && S.hist[S.selected]) paintStatus(S.hist[S.selected]);
     return;
@@ -54,7 +118,7 @@ function render(){
     const body = el("div", {className:"team-body"},
       t.workspace || t.host ? el("div", {className:"team-ws", style:"padding:6px 8px 4px", title:t.host ? `${t.host}:${t.workspace||""}` : t.workspace},
         ic("folder","sm"), " ", t.host ? `${t.host}:${t.workspace||"~"}` : t.workspace) : null,
-      shown.map(agentRow), !members.length ? el("div", {className:"empty-side"}, "No members yet") : null,
+      shown.map(a => dndAgentRow(a, false)), !members.length ? el("div", {className:"empty-side"}, "No members yet") : null,
       t.missing?.length ? el("div", {className:"team-missing"}, `× ${t.missing.join(", ")} (missing)`) : null);
     const more = el("button", {className:"btn icon sm ghost", type:"button", "aria-label":`Actions for team ${t.name}`, title:"Team actions",
       onclick:(e)=>{ e.stopPropagation(); openMenu(more, [
@@ -64,23 +128,39 @@ function render(){
         {label:"Remove members…", icon:"x", run:()=>teamAction("rm-members", t.team_id)},
         {label:"Set workspace…", icon:"folder", run:()=>teamAction("set-ws", t.team_id)}, "-",
         {label:"Delete team", icon:"trash", danger:true, run:()=>teamAction("rm-team", t.team_id)}]); }}, ic("more","sm"));
-    kids.push(el("div", {className:"team" + (collapsed ? " collapsed" : ""), dataset:{team:t.team_id}},
-      el("div", {className:"team-head", role:"button", tabIndex:0, "aria-expanded":!collapsed,
-          onclick:()=>{ S.collapsed.has(t.team_id) ? S.collapsed.delete(t.team_id) : S.collapsed.add(t.team_id);
-                        store.set("at.collapsed", JSON.stringify([...S.collapsed])); render(); },
-          onkeydown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); e.currentTarget.click(); } }},
-        ic("chev","sm chev"),
-        el("div", {className:"team-title"}, el("div", {className:"team-name"}, el("span", {className:"nm"}, t.name),
-          el("span", {className:"chip"}, members.length),
-          working ? el("span", {className:"chip", style:"color:var(--work)", title:`${working} working`}, dot("working"), working) : null)),
-        more), body));
+    const head = el("div", {className:"team-head", role:"button", tabIndex:0, "aria-expanded":!collapsed,
+        draggable:true,
+        ondragstart:(e)=>dragStart(e, "team", t.team_id),
+        ondragend:dragEnd,
+        onclick:()=>{ S.collapsed.has(t.team_id) ? S.collapsed.delete(t.team_id) : S.collapsed.add(t.team_id);
+                      store.set("at.collapsed", JSON.stringify([...S.collapsed])); render(); },
+        onkeydown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); e.currentTarget.click(); } }},
+      ic("chev","sm chev"),
+      el("div", {className:"team-title"}, el("div", {className:"team-name"}, el("span", {className:"nm"}, t.name),
+        el("span", {className:"chip"}, members.length),
+        working ? el("span", {className:"chip", style:"color:var(--work)", title:`${working} working`}, dot("working"), working) : null)),
+      more);
+    const teamEl = el("div", {className:"team" + (collapsed ? " collapsed" : ""), dataset:{team:t.team_id},
+        ondragover:(e)=>dragOver(e, teamEl), ondragleave:()=>teamEl.classList.remove("drop-target"),
+        ondrop:(e)=>dropTeam(e, t.team_id, teamEl)},
+      head, body);
+    kids.push(teamEl);
   });
-  const ungrouped = agents.filter(a => !grouped.has(a.agent_id) && matches(a));
-  if(ungrouped.length){ kids.push(el("div", {className:"group-label"}, "Ungrouped")); ungrouped.forEach(a => kids.push(agentRow(a))); }
+  const terms = (S.terminals||[]).filter(termMatches);
+  if(terms.length){ kids.push(el("div", {className:"group-label"}, "Terminals")); terms.forEach(t => kids.push(terminalRow(t))); }
+  const order = agentOrderIds(), rank = a => { const i = order.indexOf(a.agent_id); return i < 0 ? 1e9 : i; };
+  const ungrouped = agents.filter(a => !grouped.has(a.agent_id) && matches(a)).sort((a,b)=> rank(a) - rank(b));
+  if(ungrouped.length){
+    const label = el("div", {className:"group-label", ondragover:(e)=>dragOver(e, label),
+        ondragleave:()=>label.classList.remove("drop-target"), ondrop:(e)=>dropUngrouped(e, label)}, "Ungrouped");
+    kids.push(label);
+    ungrouped.forEach(a => kids.push(dndAgentRow(a, true)));
+  }
   if(!agents.length) kids.push(el("div", {className:"empty-side"}, el("div", {style:"font-weight:600;color:var(--fg);margin-bottom:4px"}, "No agents yet"), "Create your first agent to get started."));
   else if(!kids.length) kids.push(el("div", {className:"empty-side"}, "No agents match", filtering ? el("div", {}, el("button", {className:"btn sm", style:"margin-top:10px", onclick:()=>{ S.q=""; S.filter="all"; $("q").value=""; syncSearch(); render(); }}, "Clear filters")) : null));
   nav.replaceChildren(...kids); nav.scrollTop = top;
   nav.dataset.sig = sig;
+  syncTerminalSelection();
   renderHead(); renderAsks(); renderActivity(); layout();
   if(S.view==="hist" && S.hist[S.selected]) paintStatus(S.hist[S.selected]);
 }
@@ -131,6 +211,16 @@ function agentRow(a){
     n ? el("span", {className:"badge pulse", title:"waiting for your answer"}, n) : null, more);
   return row;
 }
+function dndAgentRow(a, allowReorder){
+  const row = agentRow(a);
+  row.draggable = true;
+  row.addEventListener("dragstart", (e)=>dragStart(e, "agent", a.agent_id));
+  row.addEventListener("dragend", dragEnd);
+  row.addEventListener("dragover", (e)=>dragOver(e, row));
+  row.addEventListener("dragleave", ()=>row.classList.remove("drop-target"));
+  if(allowReorder) row.addEventListener("drop", (e)=>dropAgent(e, a.agent_id, row));
+  return row;
+}
 function agentMenu(a){
   const items = [{label:"Open", icon:"msg", run:()=>select(a.agent_id)},
     {label:"Copy name", icon:"copy", run:()=>copyText(a.name||a.agent_id, "Name copied")}];
@@ -141,6 +231,79 @@ function agentMenu(a){
   items.push("-", {label:"Delete agent", icon:"trash", danger:true, run:()=>deleteAgent(a.agent_id)});
   return items;
 }
+/* ---------- terminals as first-class rows in the sidebar ---------- */
+function termMatches(t){
+  const q = S.q.trim().toLowerCase();
+  return !q || [t.title, t.session_id, t.host, t.cwd, t.status].some(v => String(v||"").toLowerCase().includes(q));
+}
+function terminalRow(t){
+  const sel = S.selectedTerm === t.session_id;
+  const st = t.status || "unknown";
+  return el("div", {className:`agent-row terminal ${st}${sel ? " sel" : ""}`,
+      dataset:{terminal:t.session_id}, role:"button", tabIndex:0, "aria-current":sel ? "true" : null,
+      onclick:()=>{ selectTerminal(t.session_id); closeDrawer(); },
+      onkeydown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); selectTerminal(t.session_id); closeDrawer(); } }},
+    el("span", {className:`avatar ${st}`}, ic("terminal","sm")),
+    el("span", {className:"info"},
+      el("span", {className:"nm", title:t.title||t.session_id}, t.title || t.session_id),
+      el("span", {className:"sub"},
+        el("span", {className:"mono", style:"opacity:.8"}, t.host || "local"),
+        el("span", {style:"opacity:.5"}, "·"),
+        el("span", {className:"act"}, st, t.readonly ? " · read-only" : ""))));
+}
+function selectTerminal(id){
+  S.selected = null; S.selectedTerm = id;
+  if(S.termView){ S.termView.dispose(); S.termView = null; }
+  render();
+}
+function mountSelectedTerminal(){
+  const t = terminalById(S.selectedTerm);
+  if(!t) return;
+  const mount = $("termx-mount");
+  if(!mount) return;
+  S.termView = mountTerminalView(mount, t.session_id, {readonly: !!t.readonly, focus: true});
+  S.termView.id = t.session_id;
+}
+function syncTerminalSelection(){
+  if(S.selectedTerm && !terminalById(S.selectedTerm)){
+    S.selectedTerm = null;
+    if(S.termView){ S.termView.dispose(); S.termView = null; }
+  }
+  if(S.selectedTerm && !S.termView) mountSelectedTerminal();
+}
+async function closeSelectedTerminal(){
+  if(!S.selectedTerm) return;
+  if(!await confirmDlg({title:"Close terminal?", message:"The shell and anything running in it end.", ok:"Close", danger:true})) return;
+  try{ await op("terminal_close", {id:S.selectedTerm}); }
+  catch(e){ flash(e.message); return; }
+  S.selectedTerm = null;
+  if(S.termView){ S.termView.dispose(); S.termView = null; }
+  render();
+}
+function renderTerminalHead(){
+  const t = terminalById(S.selectedTerm);
+  if(!t){ $("head").replaceChildren(); return; }
+  const st = t.status || "unknown";
+  setKids($("head"),
+    el("div", {className:"head-row"},
+      el("span", {className:"avatar lg"}, ic("terminal","sm")),
+      el("div", {style:"min-width:0;flex:1"},
+        el("div", {className:"title"},
+          el("span", {className:"nm"}, t.title || t.session_id),
+          el("span", {className:"chip mono"}, "terminal"),
+          el("span", {className:`pill s-${st}`}, dot(st), st),
+          t.readonly ? el("span", {className:"chip"}, ic("lock","sm"), "read-only") : null)),
+      el("div", {className:"actions"},
+        el("button", {className:"btn", type:"button", title:"Open this terminal in a new tab",
+          onclick:()=>{ if(window.Terminals) window.Terminals.openPage(t.session_id); }}, ic("terminal","sm"), el("span", {className:"lbl"}, "Open in tab")),
+        el("button", {className:"btn danger", type:"button", id:"terminal-close", title:"Close this terminal",
+          onclick:()=>closeSelectedTerminal()}, ic("trash","sm"), el("span", {className:"lbl"}, "Close")))),
+    el("div", {className:"meta"},
+      el("span", {className:"chip mono"}, ic("terminal","sm"), t.host || "local"),
+      t.cwd ? el("span", {className:"chip mono", title:"Working directory"}, ic("folder","sm"), t.cwd) : null,
+      t.owner ? el("span", {className:"chip mono", title:"Terminal token"}, ic("lock","sm"), t.owner) : null));
+}
+
 function syncSearch(){ $("searchBox").classList.toggle("has", !!S.q); }
 $("q").addEventListener("input", ()=>{ S.q = $("q").value; syncSearch(); render(); });
 $("q").addEventListener("keydown", e=>{ if(e.key==="Escape"){ $("q").value=""; S.q=""; syncSearch(); render(); $("q").blur(); } });
@@ -165,22 +328,27 @@ try { JSON.parse(store.get("at.collapsed") || "[]").forEach(x => S.collapsed.add
 
 /* ---------- header / layout ---------- */
 function layout(){
-  const has = !!S.selected, a = agentById(S.selected);
-  $("welcome").classList.toggle("show", !has);
-  $("head").style.display = a ? "" : "none";
-  $("tabs").style.display = has ? "flex" : "none";
-  $("term").style.display = has && S.view==="live" ? "" : "none";
-  $("hist").style.display = has && S.view==="hist" ? "block" : "none";
-  $("procs").style.display = has && S.view==="proc" ? "block" : "none";
-  $("termbar").style.display = has && S.view==="live" ? "flex" : "none";
-  $("hist-note").style.display = S.view==="hist" ? "" : "none";
-  $("composer-wrap").style.display = has ? "block" : "none";
-  const keys = has && S.view !== "hist";
+  const a = agentById(S.selected);
+  const hasAgent = !!a;
+  const hasTerm = !!terminalById(S.selectedTerm);
+  $("welcome").classList.toggle("show", !hasAgent && !hasTerm);
+  $("head").style.display = (hasAgent || hasTerm) ? "" : "none";
+  $("tabs").style.display = hasAgent ? "flex" : "none";
+  $("term").style.display = hasAgent && S.view==="live" ? "" : "none";
+  $("hist").style.display = hasAgent && S.view==="hist" ? "block" : "none";
+  $("procs").style.display = hasAgent && S.view==="proc" ? "block" : "none";
+  const tx = $("termx");
+  if(tx){ tx.classList.toggle("init-hidden", !hasTerm); tx.style.display = hasTerm ? "flex" : "none"; }
+  $("termbar").style.display = hasAgent && S.view==="live" ? "flex" : "none";
+  $("hist-note").style.display = hasAgent && S.view==="hist" ? "" : "none";
+  $("composer-wrap").style.display = hasAgent ? "block" : "none";
+  const keys = hasAgent && S.view !== "hist";
   $("keys-wrap").style.display = keys ? "block" : "none"; $("keys").style.display = keys ? "flex" : "none";
   $("progress").className = "progress" + (a && a.state === "working" ? " on" : "");
   updateJump();
 }
 function renderHead(){
+  if(S.selectedTerm){ return renderTerminalHead(); }
   const a = agentById(S.selected);
   if(!a){ $("head").replaceChildren(); return; }
   const teams = (S.state.teams||[]).filter(t=>(t.members||[]).some(m=>m.agent_id===a.agent_id)).map(t=>t.name);
@@ -235,3 +403,14 @@ function renderHead(){
   else if (st === "starting") box.placeholder = "Agent starting…";
   else box.placeholder = "Type and press Enter to send to the agent…";
 }
+
+/* ---------- main-pane terminal controls ---------- */
+if($("termx-claim")) $("termx-claim").onclick = ()=>{ if(S.termView) S.termView.claim(); };
+if($("termx-open")) $("termx-open").onclick = ()=>{ if(S.selectedTerm && window.Terminals) window.Terminals.openPage(S.selectedTerm); };
+if($("termx-close")) $("termx-close").onclick = ()=>closeSelectedTerminal();
+document.addEventListener("keydown", (e)=>{
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f" && S.selectedTerm){
+    e.preventDefault();
+    const s = $("termx-search"); if(s){ s.focus(); s.select(); }
+  }
+});

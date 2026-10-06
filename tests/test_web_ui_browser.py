@@ -40,6 +40,8 @@ READY = {"agent_id": "sess_r", "name": "beta", "kind": "claude", "state": "ready
 ATTN = {"agent_id": "sess_attn", "name": "gamma", "kind": "claude", "state": "waiting_input",
         "backend": "tmux", "cwd": "/g", "pid": 4, "evidence": "", "history": True,
         "interactions": [PERMISSION, QUESTION]}
+TERMINAL = {"session_id": "term_deadbeef", "kind": "terminal", "title": "shell",
+            "host": None, "status": "running", "readonly": False, "cwd": "/tmp", "owner": "tt_x"}
 TEAM = {"team_id": "t1", "name": "Team One", "workspace": "/home/me/proj",
         "members": [{"agent_id": "sess_w", "name": "alpha", "kind": "opencode"}], "missing": []}
 
@@ -165,6 +167,10 @@ class _Browser(unittest.TestCase):
             body = json.loads(route.request.post_data or "{}")
         self.calls.append(body.get("op"))
         self.payloads.append(body)
+        if body.get("op") in getattr(self, "forbidden_ops", set()):
+            route.fulfill(status=403, content_type="application/json",
+                          body=json.dumps({"ok": False, "error": "forbidden"}))
+            return
         route.fulfill(status=200, content_type="application/json",
                       body=json.dumps(self._reply(body)))
 
@@ -302,7 +308,8 @@ class ConversationView(_Browser):
     def test_page_loads_every_module_from_static_without_errors(self):
         srcs = self.page.eval_on_selector_all("script[src]", "els => els.map(e => e.getAttribute('src'))")
         self.assertEqual(srcs, [
-            "/static/js/core.js", "/static/js/transport.js", "/static/js/terminals.js", "/static/js/sidebar.js",
+            "/static/js/core.js", "/static/js/transport.js", "/static/js/terminals.js",
+            "/static/js/terminal_view.js", "/static/js/sidebar.js",
             "/static/js/agent.js", "/static/js/timeline.js", "/static/js/usage.js", "/static/js/cleaning.js",
             "/static/js/version.js", "/static/js/inbox.js", "/static/js/access.js", "/static/js/bundle.js", "/static/js/settings.js",
             "/static/js/archived.js", "/static/js/onboarding.js", "/static/js/mission.js", "/static/js/notify.js",
@@ -411,6 +418,15 @@ class Sidebar(_Browser):
         payload = next(p for p in self.payloads if p.get("op") == "team_set_workspace")
         self.assertEqual(payload.get("workspace"), "/tmp/ws")
 
+    def test_dragging_an_ungrouped_agent_onto_a_team_adds_it(self):
+        src = self.page.locator('.agent-row:has-text("beta")').first
+        dst = self.page.locator('.team[data-team="t1"] .team-head').first
+        src.drag_to(dst)
+        self.page.wait_for_timeout(400)
+        payload = next((p for p in self.payloads if p.get("op") == "team_add_member"), None)
+        self.assertIsNotNone(payload)
+        self.assertEqual((payload.get("target"), payload.get("agent")), ("t1", "sess_r"))
+
     def test_agent_actions_menu_lists_and_deletes(self):
         row = self.page.locator('.agent-row:has-text("alpha")').first
         row.hover()
@@ -425,6 +441,29 @@ class Sidebar(_Browser):
         self.page.wait_for_selector("#dlg[open]")
         self.page.locator("#dlg .btn.danger").click()
         self.assertIn("agent_stop", self.calls)
+
+
+class SidebarReorder(_Browser):
+    agents = [WORKING, READY]
+    teams = [
+        {"team_id": "t1", "name": "Alpha", "workspace": None,
+         "members": [{"agent_id": "sess_w", "name": "alpha", "kind": "opencode"}], "missing": []},
+        {"team_id": "t2", "name": "Beta", "workspace": None,
+         "members": [{"agent_id": "sess_r", "name": "beta", "kind": "claude"}], "missing": []},
+    ]
+
+    def _names(self):
+        return self.page.eval_on_selector_all(
+            "#nav .team .team-name .nm", "els => els.map(e => e.textContent)")
+
+    def test_dragging_a_team_reorders_the_panels(self):
+        self.assertEqual(self._names(), ["Alpha", "Beta"])
+        self.page.locator('.team[data-team="t2"] .team-head').first.drag_to(
+            self.page.locator('.team[data-team="t1"] .team-head').first)
+        self.page.wait_for_timeout(400)
+        self.assertEqual(self._names(), ["Beta", "Alpha"])
+        order = self.page.evaluate("JSON.parse(localStorage.getItem('at.teamOrder')||'[]')")
+        self.assertEqual(order[:2], ["t2", "t1"])
 
 
 class Dialogs(_Browser):
@@ -1617,12 +1656,71 @@ class Terminals(_Browser):
         self.assertTrue(self.page.locator("#term-input").is_disabled())
 
 
+class TerminalsLocked(_Browser):
+    agents = [READY]
+    forbidden_ops = {"terminal_list", "terminal_create"}
+
+    def _reply(self, body):
+        if body.get("op") == "meta_info":
+            return {"ok": True, "harnesses": [{"kind": "claude"}], "backends": ["tmux"],
+                    "hosts": [], "terminals_enabled": True}
+        return super()._reply(body)
+
+    def test_locked_session_shows_an_unlock_affordance(self):
+        self.page.click("#termBtn")
+        self.page.wait_for_selector("#termDlg[open]")
+        self.page.wait_for_function(
+            "() => document.getElementById('term-lock-state').textContent === 'locked'")
+        self.assertTrue(self.page.locator("#term-unlock").is_visible())
+        self.assertIn("locked", self.page.inner_text("#term-list"))
+
+
 class TerminalsDisabled(_Browser):
     agents = [READY]
 
     def test_button_is_hidden_when_disabled(self):
         self.page.wait_for_timeout(500)
         self.assertEqual(self.page.locator("#termBtn:not(.init-hidden)").count(), 0)
+
+
+class TerminalPane(_Browser):
+    """A terminal behaves like an agent: sidebar row + xterm in the main pane."""
+
+    agents = [READY]
+    terminals = [TERMINAL]
+
+    def _push(self):
+        self.ws.send(json.dumps({"type": "state", "agents": self.agents, "teams": self.teams,
+                                 "messages": self.messages, "hosts": self.hosts,
+                                 "terminals": self.terminals}))
+
+    def setUp(self):
+        super().setUp()
+        self.page.route("http://localhost/api/terminal-ticket", lambda r: r.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok": true, "ticket": "t1", "mode": "write"}'))
+        self.page.route_web_socket("**/ws/terminal/*", self._term_ws)
+
+    def _term_ws(self, ws):
+        ws.send(bytes([0x06]) + json.dumps({"mode": "write", "cols": 80, "rows": 24,
+                                            "stream": "pipe", "readonly": False,
+                                            "closed": False, "host": None}).encode())
+        ws.send(bytes([0x02]) + b"hello from the shell\r\n")
+
+    def test_terminal_row_mounts_xterm_in_the_main_pane(self):
+        row = self.page.locator("#nav .agent-row.terminal").first
+        row.wait_for()
+        self.assertIn("shell", row.inner_text())
+        row.click()
+        self.page.wait_for_selector("#termx:not(.init-hidden)")
+        self.page.wait_for_selector(".xterm")
+        self.page.wait_for_function(
+            "() => (document.querySelector('.xterm-rows') || {}).textContent?.includes('hello')",
+            timeout=10000)
+        self.assertIn("terminal", self.page.inner_text("#head"))
+
+
+
 
 
 if __name__ == "__main__":

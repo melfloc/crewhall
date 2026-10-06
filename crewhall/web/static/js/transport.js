@@ -29,6 +29,7 @@ function connect() {
       if (m.version && S.version && m.version !== S.version) { location.reload(); return; }
       if (m.version) { S.version = m.version; $("version").textContent = "v" + m.version; }
       S.state = { agents:m.agents, teams:m.teams, messages:m.messages||[], hosts:m.hosts||[] };
+      S.terminals = m.terminals || [];
       trackStates(S.state.agents);
       // Auto-select the first agent on first load so the transcript is visible.
       if (!S.selected && S.state.agents.length && !S.autoSelected) { S.autoSelected = true; select(S.state.agents[0].agent_id); }

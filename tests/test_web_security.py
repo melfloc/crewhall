@@ -303,8 +303,11 @@ class SecureWebServerTest(unittest.TestCase):
                 h = {k.lower(): v for k, v in r.headers.items()}
             csp = h.get("content-security-policy", "")
             self.assertIn("frame-ancestors 'none'", csp)
-            self.assertNotIn("unsafe-inline", csp)
+            # Inline *styles* are allowed only for xterm.js; scripts/evals never.
+            self.assertIn("script-src 'self'", csp)
             self.assertNotIn("unsafe-eval", csp)
+            script_src = csp.split("script-src", 1)[1].split(";", 1)[0]
+            self.assertNotIn("unsafe-inline", script_src)
             self.assertEqual(h.get("x-content-type-options"), "nosniff")
             self.assertEqual(h.get("x-frame-options"), "DENY")
             self.assertEqual(h.get("referrer-policy"), "no-referrer")

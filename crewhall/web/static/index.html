@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <title>crewhall</title>
 <link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
 </head>
 <body>
 <svg width="0" height="0" class="svg-defs" aria-hidden="true">
@@ -96,6 +97,18 @@
           <button class="btn primary" id="welcomeNew"><svg class="ic"><use href="#i-plus"/></svg>Create an agent</button>
         </div>
         <pre class="term" id="term" tabindex="0"></pre>
+        <div class="termx init-hidden" id="termx">
+          <div class="termx-bar">
+            <span class="chip mono" id="termx-host" title="Host">local</span>
+            <span class="chip" id="termx-conn" role="status">connecting…</span>
+            <span class="spacer"></span>
+            <input class="input sm" id="termx-search" placeholder="Find… (Ctrl+F)" autocomplete="off" spellcheck="false" aria-label="Find in terminal">
+            <button class="btn sm" id="termx-claim" type="button" title="Take the keyboard">Take keyboard</button>
+            <button class="btn sm" id="termx-open" type="button" title="Open in a new tab">Open in tab</button>
+            <button class="btn sm danger" id="termx-close" type="button" title="Close this terminal">Close</button>
+          </div>
+          <div class="termx-mount" id="termx-mount"></div>
+        </div>
         <div class="procs" id="procs"><div class="inner" id="procs-in"></div></div>
         <div class="hist" id="hist">
           <div class="hist-inner"><div id="hist-top"></div><div id="hist-list" aria-live="polite"></div><div id="hist-status" aria-live="polite"></div></div>
@@ -212,6 +225,7 @@
 <script src="/static/js/core.js"></script>
 <script src="/static/js/transport.js"></script>
 <script src="/static/js/terminals.js"></script>
+<script src="/static/js/terminal_view.js"></script>
 <script src="/static/js/sidebar.js"></script>
 <script src="/static/js/agent.js"></script>
 <script src="/static/js/timeline.js"></script>
