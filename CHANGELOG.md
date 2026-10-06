@@ -5,6 +5,12 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.70.1] — 2026-10-06
+
+- El panel se actualiza en vivo al **crear o desbloquear terminales**: el WebSocket de
+  estado ahora incluye hosts y terminales en la detección de cambios (solo campos
+  estables, para no empujar el snapshot en cada salida). Antes había que recargar (F5).
+
 ## [0.70.0] — 2026-10-06
 
 _Terminales como agentes en el panel lateral y arrastrar-y-soltar paneles._
