@@ -266,9 +266,11 @@ Las terminales están **desactivadas por defecto**. Para activarlas:
    (o Web UI → **Ajustes → Access & network → Terminal tokens → Issue token**).
    `--scope read` solo permite ver; `--scope write` permite crear y escribir. `--host`
    limita a hosts concretos (`local`, nombres de host configurados, o `*`).
-3. En el Web UI, abre la pestaña **Terminals** y pulsa **Open** en una terminal (o crea
-   una nueva). La primera vez pedirá **desbloquear** con el token de terminal; se
-   recuerda durante la sesión del navegador.
+3. En el Web UI, abre la pestaña **Terminals**. La primera vez aparecerá como
+   **locked**: pulsa **Unlock** (o directamente **Create terminal**) y te pedirá el token;
+   si no tienes ninguno, el propio diálogo ofrece **crear un token `write`** al momento
+   (se muestra una vez). El desbloqueo se recuerda durante la sesión del navegador.
+   Crear/escribir exige alcance **`write`**; `read` solo permite ver.
 
 Para revocar: `crewhall web terminal-token revoke <id>` o el botón *Revoke* en Ajustes.
 La CLI local (`crewhall terminal …`) no necesita token: el socket UNIX ya es de tu
