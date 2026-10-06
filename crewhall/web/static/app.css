@@ -598,8 +598,9 @@ dialog.settings { width:min(980px,96vw); max-height:90vh; }
 .termx-bar{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);flex:none}
 .termx-bar .input{max-width:220px}
 .termx-bar .spacer{flex:1}
-.termx-mount{flex:1;min-height:0;padding:6px;overflow:hidden}
-.termx .xterm{height:100%}
+.termx-mount{flex:1;min-height:0;padding:6px;overflow:hidden;display:flex}
+.termx-mount .xterm{flex:1;min-height:0;height:100%;width:100%}
+.termx .xterm-viewport{background:transparent!important}
 .agent-row.terminal .avatar{background:var(--surface-3)}
 .agent-row.terminal .sub .mono{opacity:.8}
 

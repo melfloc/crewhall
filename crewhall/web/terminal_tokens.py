@@ -106,6 +106,7 @@ def issue(label: str, *, scope: str = "read", hosts: Any = None,
         "expires_at": (now + int(ttl)) if ttl else None,
         "last_used": None,
     }
+    purge_expired()
     with _LOCK:
         records = _load()
         records.append(record)
@@ -132,8 +133,22 @@ def verify(token: str | None) -> dict[str, Any] | None:
     return None
 
 
+def purge_expired() -> int:
+    """Drop expired records so they do not accumulate. Returns how many were removed."""
+    now = time.time()
+    with _LOCK:
+        records = _load()
+        kept = [r for r in records
+                if not (r.get("expires_at") and float(r["expires_at"]) <= now)]
+        removed = len(records) - len(kept)
+        if removed:
+            _save(kept)
+        return removed
+
+
 def list_tokens() -> list[dict[str, Any]]:
     """Metadata only: never the token or its hash."""
+    purge_expired()
     now = time.time()
     out = []
     with _LOCK:

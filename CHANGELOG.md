@@ -5,6 +5,22 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.71.0] — 2026-10-06
+
+- **`terminals.master_grants`** (def. `false`, requiere `CONFIRM`): la **sesión maestra**
+  del Web UI obtiene acceso a terminales **sin token aparte**. Los tokens con alcance
+  siguen disponibles para acceso limitado (solo lectura / un host). Con la opción activa,
+  un token maestro filtrado abriría shells (documentado en `SECURITY.md`).
+- **Terminales muertas no se acumulan**: `terminals.keep_exited_seconds` (def. 300;
+  0 = conservar) y un janitor en el daemon cierran las terminales cuyo shell salió. Dejan
+  de contar para los límites. Solo afecta a `kind="terminal"`.
+- **Tokens caducados** se purgan automáticamente (`list`/`issue`/`verify`).
+- **UI**: la terminal en el panel principal ahora llena el área (`ResizeObserver` + CSS),
+  antes podía quedar con espacio vacío.
+- **Gate de release más rápido**: `scripts/test_parallel.py` reparte las clases de test
+  entre procesos (aislamiento por proceso; el padre limpia al final). `release.sh` lo usa;
+  `AT_TEST_WORKERS=1` fuerza el modo secuencial. ~6.5 min → ~2.3 min.
+
 ## [0.70.3] — 2026-10-06
 
 - Icono de **Ajustes** cambiado por uno de "sliders": el anterior (círculo con rayos)

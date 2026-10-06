@@ -30,9 +30,16 @@ COMMIT="$(git rev-parse --short HEAD)"
 say "releasing v$VERSION from $COMMIT"
 
 say "running the full test suite"
-python3 -m unittest discover -s tests -t . >/tmp/at-release-tests.log 2>&1 \
-  || { tail -25 /tmp/at-release-tests.log; echo "RELEASE GATE FAILED: tests" >&2; exit 1; }
-tail -3 /tmp/at-release-tests.log | grep -E "^(Ran|OK)" || true
+if [ "${AT_TEST_WORKERS:-0}" = "1" ]; then
+  python3 -m unittest discover -s tests -t . >/tmp/at-release-tests.log 2>&1 \
+    || { tail -25 /tmp/at-release-tests.log; echo "RELEASE GATE FAILED: tests" >&2; exit 1; }
+else
+  # Parallel shards (stdlib): each worker keeps its own test isolation; the
+  # parent does a single cleanup. AT_TEST_WORKERS=1 forces the sequential path.
+  python3 scripts/test_parallel.py >/tmp/at-release-tests.log 2>&1 \
+    || { tail -40 /tmp/at-release-tests.log; echo "RELEASE GATE FAILED: tests" >&2; exit 1; }
+fi
+tail -4 /tmp/at-release-tests.log | grep -E "^(Ran|OK)" || true
 
 OUT="$ROOT/releases/v$VERSION"
 rm -rf "$OUT"; mkdir -p "$OUT"

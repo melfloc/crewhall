@@ -914,6 +914,23 @@ def _start_tmpdir_janitor(interval: float | None = None) -> None:
     threading.Thread(target=loop, name="tmpdir-janitor", daemon=True).start()
 
 
+def _start_terminals_janitor(controller: Controller, interval: float = 60.0) -> None:
+    """Periodically drop terminals whose shell exited (so they do not accumulate)."""
+
+    def loop() -> None:
+        while True:
+            time.sleep(interval)
+            try:
+                removed = controller.prune_terminals(
+                    int(settings.get("terminals.keep_exited_seconds")))
+                if removed:
+                    log.info("terminals janitor removed %d exited terminal(s)", removed)
+            except Exception:
+                log.exception("terminals janitor failed")
+
+    threading.Thread(target=loop, name="terminals-janitor", daemon=True).start()
+
+
 def _setup_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -933,6 +950,7 @@ def main(argv: list[str] | None = None) -> int:
     _start_tmpdir_janitor()
     controller = Controller(adopt=True, persist=True)
     controller.restore()
+    _start_terminals_janitor(controller)
     server = Server(controller, args.socket or paths.socket_path())
 
     def handle_signal(signum: int, _frame: Any) -> None:

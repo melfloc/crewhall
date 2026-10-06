@@ -102,15 +102,18 @@ function mountTerminalView(container, termId, opts){
     st.timer = setTimeout(connect, base + jitter);
   }
 
+  let ro = null;
   const api = {
     send,
     claim(){ send(0x07, null); },
     focus(){ if(term) term.focus(); },
+    fit(){ if(fit){ try{ fit.fit(); }catch(e){} } },
     search(q, next){ if(search && q){ next ? search.findNext(q) : search.findPrevious(q); } },
     dispose(){
       st.disposed = true; st.closed = true;
       if(st.timer) clearTimeout(st.timer);
       if(st.ping) clearInterval(st.ping);
+      if(ro){ try{ ro.disconnect(); }catch(e){} }
       if(st.ws){ try{ st.ws.close(); }catch(e){} }
       if(term){ try{ term.dispose(); }catch(e){} }
       term = null;
@@ -128,6 +131,13 @@ function mountTerminalView(container, termId, opts){
     term.loadAddon(fit); term.loadAddon(search);
     term.open(container);
     try{ fit.fit(); }catch(e){}
+    // Refit whenever the container's size changes (e.g. the pane becomes
+    // visible or the window is resized) so the terminal fills the panel.
+    if(window.ResizeObserver){
+      ro = new ResizeObserver(() => { if(!st.disposed) api.fit(); });
+      ro.observe(container);
+    }
+    requestAnimationFrame(() => { if(!st.disposed) api.fit(); });
     term.onData(d => { if(st.mode === "write" && !st.readonly && !st.closed) send(0x01, new TextEncoder().encode(d)); });
     term.onResize(({cols, rows}) => { if(st.mode === "write" && !st.readonly) send(0x03, new Uint8Array([...u16(cols), ...u16(rows)])); });
     const searchInput = document.getElementById("termx-search");

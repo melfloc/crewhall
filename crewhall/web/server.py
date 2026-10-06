@@ -575,7 +575,7 @@ class Handler(BaseHTTPRequestHandler):
         terminal_id = payload.get("id")
         mode = "write" if payload.get("mode") == "write" else "read"
         session, extra = self._session_or_new()
-        grant = auth.terminal_grant(session)
+        grant = self._effective_grant()
         if not grant:
             return self._error("forbidden", 403)
         needed = (terminal_tokens.SCOPE_WRITE if mode == "write"
@@ -644,19 +644,33 @@ class Handler(BaseHTTPRequestHandler):
             ]
         return self._json({"ok": True, **result})
 
+    def _effective_grant(self) -> dict[str, Any] | None:
+        """The session's terminal grant, or a synthetic one for the master session
+        when ``terminals.master_grants`` is on."""
+        from .. import settings
+
+        session = auth.session_value(self.headers)
+        grant = auth.terminal_grant(session)
+        if grant:
+            return grant
+        # Token-free localhost is already trusted; a master session needs a cookie.
+        if settings.get("terminals.master_grants") and (session or not self.security.require_auth):
+            return {"scopes": [terminal_tokens.SCOPE_READ, terminal_tokens.SCOPE_WRITE],
+                    "hosts": ["*"], "token_id": None, "master": True}
+        return None
+
     def _terminals_readable(self) -> bool:
         from .. import settings
 
         if not settings.get("terminals.enabled"):
             return False
-        grant = auth.terminal_grant(auth.session_value(self.headers))
+        grant = self._effective_grant()
         return bool(grant) and terminal_tokens.scopes_imply(
             grant.get("scopes"), terminal_tokens.SCOPE_READ)
 
     def _authorize_terminal_op(self, op: str, params: dict[str, Any]) -> dict[str, Any] | None:
         """Return the session's terminal grant when the op is allowed, else None."""
-        session = auth.session_value(self.headers)
-        grant = auth.terminal_grant(session)
+        grant = self._effective_grant()
         if not grant:
             return None
         needed = (terminal_tokens.SCOPE_WRITE if op in TERMINAL_WRITE_OPS
@@ -756,7 +770,7 @@ class Handler(BaseHTTPRequestHandler):
         session = auth.session_value(self.headers)
         if self.security.require_auth and not session:
             return self._error("unauthorized", 401)
-        grant = auth.terminal_grant(session)
+        grant = self._effective_grant()
         if not grant:
             return self._error("forbidden", 403)
         query = parse_qs(parsed.query)

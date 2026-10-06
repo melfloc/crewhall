@@ -114,3 +114,16 @@ global relaja `style-src` a `'self' 'unsafe-inline'` (xterm inyecta una hoja de 
 para su dimensionado). `script-src` sigue siendo `'self'` **sin** `unsafe-inline` ni
 `unsafe-eval`, así que no se permite script en línea; el riesgo añadido se limita a
 estilos. La página `/terminal.html` mantiene su propio CSP.
+
+### `terminals.master_grants` (0.71.0)
+
+Si se activa (requiere `CONFIRM`), la **sesión maestra** del Web UI recibe
+`terminal:read`/`terminal:write` automáticamente, sin un token de terminal aparte. Es
+cómodo para un equipo de un solo usuario, pero **debilita** la separación: un token
+maestro filtrado pasaría a abrir shells. Por eso sigue **desactivado por defecto** y la
+recomendación es usarlo solo en loopback/Tailscale. Los tokens de terminal con alcance
+siguen existiendo para acceso limitado (solo lectura o restringido a hosts).
+
+Las terminales cuyo shell ha salido se cierran y eliminan solas tras
+`terminals.keep_exited_seconds` (def. 300 s), y los tokens caducados se purgan; así no
+se acumulan recursos.

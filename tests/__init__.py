@@ -164,6 +164,10 @@ def _cleanup() -> None:
         os.unlink(os.path.join(base, f"tmux-{os.getuid()}", _TEST_SOCKET))
     except OSError:
         pass
+    # In a parallel run each worker must not touch other workers' processes or
+    # temp dirs; the parent runner does a single global cleanup at the end.
+    if os.environ.get("AT_TEST_PARALLEL") == "1":
+        return
     _kill_orphan_test_processes()
     time.sleep(0.3)
     _sweep_new_temp_dirs()

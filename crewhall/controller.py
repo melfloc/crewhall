@@ -1000,6 +1000,38 @@ class Controller:
         self.registry.remove(session.session_id)
         return session.session_id
 
+    def prune_terminals(self, keep_exited_seconds: int) -> int:
+        """Close and remove terminals whose shell exited more than ``keep`` seconds ago.
+
+        Only touches ``kind="terminal"``: never agents or raw sessions. ``keep <= 0``
+        keeps them forever.
+        """
+        if keep_exited_seconds <= 0 or not self.terminals_enabled():
+            return 0
+        now = time.time()
+        removed = 0
+        for session in list(self.registry.all()):
+            if not is_terminal(session):
+                continue
+            try:
+                session.poll()
+            except Exception:
+                pass
+            if session.status.alive:
+                continue
+            exited = getattr(session, "_exited_at", None)
+            if exited is None:
+                exited = session.created_at
+            if now - exited < keep_exited_seconds:
+                continue
+            try:
+                session.close()
+            except Exception:
+                pass
+            self.registry.remove(session.session_id)
+            removed += 1
+        return removed
+
     def guard_terminal_input(self, session: InteractiveSession) -> None:
         """Single choke point for read-only terminals across raw + terminal ops."""
         if is_terminal(session) and bool(getattr(session.spec, "readonly", False)):

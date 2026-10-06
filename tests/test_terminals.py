@@ -212,6 +212,48 @@ class ControllerTerminalTest(unittest.TestCase):
         self.assertEqual(closed, t.session_id)
         self.assertEqual(self.ctrl.list_terminals(), [])
 
+    def test_prune_exited_terminals(self):
+        import time as _t
+
+        t = self.ctrl.create_terminal()
+        session = self.ctrl.get(t.session_id)
+        session._status = Status.EXITED
+        session._exited_at = _t.time() - 100
+        # keep=0 keeps forever; a positive window past the exit removes it.
+        self.assertEqual(self.ctrl.prune_terminals(0), 0)
+        self.assertEqual(self.ctrl.prune_terminals(10), 1)
+        self.assertEqual(self.ctrl.list_terminals(), [])
+
+    def test_prune_ignores_live_and_agents(self):
+        self.ctrl.create_terminal()
+        spec = SessionSpec(command="sleep 5")
+        raw = InteractiveSession(FakeBackend(), spec, session_id="sess_abcdef")
+        self.ctrl.registry.add(raw)
+        self.assertEqual(self.ctrl.prune_terminals(1), 0)  # terminal alive, agent untouched
+        self.assertIsNotNone(self.ctrl.registry.resolve("sess_abcdef"))
+
+
+class TokenStoreTest(unittest.TestCase):
+    def setUp(self):
+        settings.patch({"terminals.enabled": True}, confirm=True)
+
+    def tearDown(self):
+        settings.patch({"terminals.enabled": False})
+
+    def test_expired_tokens_are_purged(self):
+        from crewhall.web import terminal_tokens
+
+        live, _live_rec = terminal_tokens.issue("live", scope="read", ttl=3600)
+        stale, stale_rec = terminal_tokens.issue("stale", scope="read", ttl=-1)
+        ids = {t["id"] for t in terminal_tokens.list_tokens()}
+        self.assertIn(_live_rec["id"], ids)
+        self.assertNotIn(stale_rec["id"], ids)          # expired: purged from the list
+        self.assertTrue(terminal_tokens.verify(live))
+        self.assertIsNone(terminal_tokens.verify(stale))
+        stored = open(terminal_tokens.store_path(), encoding="utf-8").read()
+        self.assertNotIn(stale_rec["id"], stored)        # and from the file
+        terminal_tokens.revoke(_live_rec["id"])
+
 
 class BackendLabelTest(unittest.TestCase):
     def test_tmux_writes_labels(self):

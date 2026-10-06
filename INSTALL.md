@@ -275,3 +275,16 @@ Las terminales están **desactivadas por defecto**. Para activarlas:
 Para revocar: `crewhall web terminal-token revoke <id>` o el botón *Revoke* en Ajustes.
 La CLI local (`crewhall terminal …`) no necesita token: el socket UNIX ya es de tu
 usuario.
+
+### Terminales sin token aparte (opcional)
+
+Si prefieres que el Web UI no pida un token de terminal, activa
+`terminals.master_grants` (requiere `CONFIRM`):
+
+```bash
+crewhall settings set terminals.master_grants true --confirm
+```
+
+Así la sesión maestra obtiene acceso a terminales directamente. Mantén los tokens de
+terminal solo si quieres dar acceso **limitado** (solo lectura, o restringido a hosts).
+Tradeoff en [SECURITY.md](SECURITY.md).

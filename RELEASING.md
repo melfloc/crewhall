@@ -63,7 +63,8 @@ ssh HOST 'crewhall selftest --cwd <carpeta de confianza>'
 1. rama `main` y árbol **limpio**;
 2. `pyproject.toml` = `__init__.py` = sección superior de `CHANGELOG.md`, con notas no vacías;
 3. el tag `vX.Y.Z` **no existe** y la versión es mayor que la última etiquetada (las versiones no se reescriben);
-4. la suite completa pasa;
+4. la suite completa pasa (con `scripts/test_parallel.py`, que reparte las clases de test
+   entre procesos y hace una limpieza final; `AT_TEST_WORKERS=1` fuerza el modo secuencial);
 5. la release se construye desde `git archive` del commit, se firma y la firma se verifica antes de etiquetar.
 
 Salida: `releases/vX.Y.Z/` → `release.json`, `crewhall-X.Y.Z-installer.tar.gz` (+ `.sha256`, `.sig`), `NOTES.md`.
@@ -94,6 +95,18 @@ firmante o sin firma se rechaza. Si rotas tu clave: `deploy.sh HOST --rotate-sig
 
 No se parchea allí. Se corrige en `main`, se sube PATCH, `release.sh`, `deploy.sh`. Si hay que volver
 atrás ya: `ssh HOST 'crewhall update --rollback --restart'`.
+
+### Re-desplegar una versión ya etiquetada (sin correr la suite)
+
+Cortar una versión nueva paga el gate de tests (~2–3 min con el runner paralelo). Para
+volver a desplegar una release **ya construida y etiquetada** no hace falta repetirlo:
+
+```bash
+scripts/deploy.sh HOST --version X.Y.Z [--restart|--force-restart]
+```
+
+Ese camino no ejecuta `release.sh`; el destino solo verifica firma/sha256 y reconstruye su
+venv (segundos). El coste del gate aparece únicamente al cortar una versión nueva.
 
 ## Qué NO hacer
 

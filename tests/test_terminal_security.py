@@ -292,6 +292,26 @@ class TerminalSecurity(_Harness):
         status, _, _ = self._ticket(cookie, "term_deadbeef")
         self.assertEqual(status, 403)
 
+    def test_master_grants_needs_confirm(self):
+        from crewhall import settings
+
+        with self.assertRaises(settings.SettingsError):
+            settings.patch({"terminals.master_grants": True})
+
+    def test_master_grants_allow_terminals_without_unlock(self):
+        from crewhall import settings
+
+        settings.patch({"terminals.master_grants": True}, confirm=True)
+        try:
+            cookie = self._cookie()  # master session, never unlocked
+            term = self._new_terminal(cookie, cwd="/tmp")
+            self.assertEqual(term["kind"], "terminal")
+            self.assertEqual(self._op(cookie, "terminal_list")[0], 200)
+            self.assertEqual(self._ticket(cookie, term["session_id"])[0], 200)
+            self._op(cookie, "terminal_close", id=term["session_id"])
+        finally:
+            settings.patch({"terminals.master_grants": False})
+
     def test_read_scope_cannot_write(self):
         token, _ = self._issue(scope="read")
         cookie = self._cookie()

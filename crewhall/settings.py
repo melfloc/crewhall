@@ -125,6 +125,12 @@ def _static_schema() -> list[dict[str, Any]]:
           "Cap per host; local counts as one host.", min=1, max=16),
         s("terminals.max_per_token", "terminals", "int", 4, "Max terminals per token",
           "Cap for terminals created with the same terminal token.", min=1, max=16),
+        s("terminals.master_grants", "terminals", "bool", False, "Master session can use terminals",
+          "On: the master Web UI session gets terminal access without a separate terminal token "
+          "(a leaked master token would then open shells). Enabling is privileged."),
+        s("terminals.keep_exited_seconds", "terminals", "int", 300, "Keep exited terminals (s)",
+          "Terminals whose shell has exited are closed and removed after this (0 = keep forever).",
+          min=0, max=86400),
         s("terminals.allow_no_origin", "terminals", "bool", False, "Allow missing Origin",
           "Off: a terminal WebSocket without an Origin header is rejected (anti-CSWSH)."),
         s("terminals.idle_timeout", "terminals", "int", 900, "Idle timeout (s)",
@@ -634,6 +640,8 @@ def patch(changes: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
         )
     if changes.get("terminals.enabled") is True and not confirm:
         raise SettingsError("enabling terminals needs typed confirmation")
+    if changes.get("terminals.master_grants") is True and not confirm:
+        raise SettingsError("letting the master session use terminals needs typed confirmation")
     with _LOCK:
         data = json.loads(json.dumps(load()))
         for key, value in changes.items():
