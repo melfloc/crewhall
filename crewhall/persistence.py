@@ -29,13 +29,14 @@ class StateStore:
             with open(self.path, encoding="utf-8") as fh:
                 data = json.load(fh)
         except FileNotFoundError:
-            return {"schema": SCHEMA_VERSION, "teams": [], "agents": []}
+            return {"schema": SCHEMA_VERSION, "teams": [], "agents": [], "terminals": []}
         except (OSError, json.JSONDecodeError) as exc:
             log.warning("could not read state %s: %s", self.path, exc)
-            return {"schema": SCHEMA_VERSION, "teams": [], "agents": []}
+            return {"schema": SCHEMA_VERSION, "teams": [], "agents": [], "terminals": []}
         data.setdefault("teams", [])
         data.setdefault("agents", [])
         data.setdefault("requests", [])
+        data.setdefault("terminals", [])
         return data
 
     def save(self, data: dict[str, Any]) -> None:
@@ -90,5 +91,27 @@ class StateStore:
         board = getattr(controller, "requests", None)
         if board is not None:
             requests = board.snapshot()
+        terminals = []
+        from .terminals import is_terminal
+
+        for session in controller.registry.all():
+            if not is_terminal(session):
+                continue
+            spec = session.spec
+            shell = None
+            if isinstance(spec.command, list) and len(spec.command) == 1:
+                shell = spec.command[0]
+            terminals.append({
+                "session_id": session.session_id,
+                "host": spec.host,
+                "cwd": spec.cwd,
+                "shell": shell,
+                "title": spec.title,
+                "readonly": bool(spec.readonly),
+                "owner": spec.owner,
+                "cols": spec.cols,
+                "rows": spec.rows,
+                "created_at": session.created_at,
+            })
         return {"schema": SCHEMA_VERSION, "teams": teams, "agents": agents,
-                "requests": requests}
+                "requests": requests, "terminals": terminals}

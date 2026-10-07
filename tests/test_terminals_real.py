@@ -65,6 +65,27 @@ class TerminalLocalRealTests(unittest.TestCase):
         self.ctrl.close_terminal(t.session_id)
         self.assertEqual(self.ctrl.list_terminals(), [])
 
+    def test_persist_and_restore(self):
+        from crewhall.persistence import StateStore
+
+        store = StateStore(path=os.path.join(self.dir, "state.json"))
+        self.ctrl._store = store
+        t = self.ctrl.create_terminal(cwd=self.dir, title="keepme")
+        self.ctrl._persist()
+        self.ctrl.shutdown()  # like a graceful daemon stop: the tmux session goes
+        other = Controller(adopt=False, persist=False)
+        other._store = store
+        other.restore()
+        self.ctrl = other  # so tearDown cleans up the restored terminal
+        info = other.terminal_info(t.session_id)
+        self.assertEqual(info["title"], "keepme")
+        other.get(t.session_id).write("echo RESTORED_$((6*7))")
+        other.get(t.session_id).send_enter()
+        self.assertTrue(
+            _wait_for(lambda: "RESTORED_42" in other.get(t.session_id).capture()),
+            "restored terminal did not respond",
+        )
+
     def test_readopt_kind(self):
         t = self.ctrl.create_terminal(cwd=self.dir, title="keepme")
         raw = self.ctrl.create(SessionSpec(command="sleep 30", cwd=self.dir))

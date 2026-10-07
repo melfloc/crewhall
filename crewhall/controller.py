@@ -955,6 +955,7 @@ class Controller:
         )
         session.start()
         self.registry.add(session)
+        self._persist()
         if command_val:
             # Sent as literal text to the already-open shell, so the terminal
             # stays alive after the command finishes.
@@ -998,6 +999,7 @@ class Controller:
         session = self._resolve_terminal(target)
         session.close()
         self.registry.remove(session.session_id)
+        self._persist()
         return session.session_id
 
     def prune_terminals(self, keep_exited_seconds: int) -> int:
@@ -1030,6 +1032,8 @@ class Controller:
                 pass
             self.registry.remove(session.session_id)
             removed += 1
+        if removed:
+            self._persist()
         return removed
 
     def guard_terminal_input(self, session: InteractiveSession) -> None:
@@ -1206,6 +1210,13 @@ class Controller:
             self.requests.load(data.get("requests", []))
         except Exception:  # noqa: BLE001 - a bad row must not stop the daemon
             pass
+        # Terminals persist like agents: re-create any that is not already
+        # adopted (its tmux session may have survived a crash, or not).
+        for term in data.get("terminals", []):
+            try:
+                self._restore_terminal(term)
+            except Exception:
+                continue
         # Re-apply memberships after all agents exist.
         for team in data.get("teams", []):
             for agent_id in team.get("agent_ids", []):
@@ -1245,6 +1256,43 @@ class Controller:
         self.agents.add(harness)
         self._base_env[agent_id] = dict(agent.get("env") or {})
         self._agent_tokens.setdefault(agent_id, secrets.token_hex(16))
+
+    def _restore_terminal(self, term: dict[str, Any]) -> None:
+        """Re-create a persisted terminal (fresh shell) with the same id."""
+        sid = term.get("session_id")
+        if not isinstance(sid, str) or not termlib.TERMINAL_ID_RE.match(sid):
+            return
+        try:
+            self.registry.resolve(sid)
+            return  # already adopted from a surviving tmux session
+        except SessionNotFound:
+            pass
+        host = term.get("host")
+        if host and host not in settings.hosts():
+            return  # the host was removed
+        shell = term.get("shell")
+        if host:
+            shell = None  # remote terminals use the remote login shell
+        elif shell and not os.path.isfile(shell):
+            shell = None
+        cwd = term.get("cwd")
+        if host is None and cwd and not os.path.isdir(cwd):
+            cwd = None
+        spec = SessionSpec(
+            command=[shell] if shell else "",
+            cwd=cwd,
+            cols=int(term.get("cols") or 120),
+            rows=int(term.get("rows") or 32),
+            host=host,
+            kind=termlib.KIND_TERMINAL,
+            readonly=bool(term.get("readonly")),
+            title=term.get("title"),
+            owner=term.get("owner"),
+        )
+        session = InteractiveSession(self._backend_for(None, host), spec, session_id=sid)
+        session.created_at = float(term.get("created_at") or session.created_at)
+        session.start()
+        self.registry.add(session)
 
     # ------------------------------------------------- activation (on demand)
     def _revive_agent(self, harness: Harness) -> Harness:

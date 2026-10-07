@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -231,6 +232,49 @@ class ControllerTerminalTest(unittest.TestCase):
         self.ctrl.registry.add(raw)
         self.assertEqual(self.ctrl.prune_terminals(1), 0)  # terminal alive, agent untouched
         self.assertIsNotNone(self.ctrl.registry.resolve("sess_abcdef"))
+
+
+class TerminalPersistenceTest(unittest.TestCase):
+    def setUp(self):
+        settings.patch({"terminals.enabled": True}, confirm=True)
+        self.dir = tempfile.mkdtemp(prefix="at-term-persist-")
+
+    def tearDown(self):
+        settings.patch({"terminals.enabled": False})
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _store(self):
+        from crewhall.persistence import StateStore
+
+        return StateStore(path=os.path.join(self.dir, "state.json"))
+
+    def test_terminals_persist_and_restore(self):
+        store = self._store()
+        ctrl = _controller()
+        ctrl._store = store
+        t = ctrl.create_terminal(title="keepme", readonly=True)
+        ctrl._persist()
+        saved = store.load()["terminals"]
+        self.assertEqual([x["session_id"] for x in saved], [t.session_id])
+        self.assertEqual(saved[0]["title"], "keepme")
+        self.assertTrue(saved[0]["readonly"])
+
+        # A fresh controller restores it (same id, title, readonly).
+        ctrl2 = _controller()
+        ctrl2._store = store
+        ctrl2.restore()
+        restored = ctrl2.list_terminals()
+        self.assertEqual([x["session_id"] for x in restored], [t.session_id])
+        self.assertEqual(restored[0]["title"], "keepme")
+        self.assertTrue(restored[0]["readonly"])
+
+    def test_closing_removes_it_from_persistence(self):
+        store = self._store()
+        ctrl = _controller()
+        ctrl._store = store
+        t = ctrl.create_terminal()
+        ctrl.close_terminal(t.session_id)
+        self.assertEqual(store.load()["terminals"], [])
 
 
 class TokenStoreTest(unittest.TestCase):

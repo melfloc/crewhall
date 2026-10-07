@@ -5,6 +5,16 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.71.2] — 2026-10-06
+
+- **Corrección**: las **terminales persisten como los agentes**. Antes, al parar el
+  daemon se cerraban sus tmux y no se guardaban, así que tras reiniciar desaparecían
+  (y al "recuperarlas" no había nada a lo que reconectarse). Ahora se guardan en el
+  estado (id, host, cwd, shell, título, `readonly`, owner, tamaño) y se **re-crean con
+  el mismo id** al arrancar (shell nuevo, como un agente relanzado); si la sesión tmux
+  sobrevivió a un cierre abrupto, se **adopta** en su lugar. Cerrar una terminal la
+  elimina del estado.
+
 ## [0.71.1] — 2026-10-06
 
 - **Corrección**: la terminal ya llena el panel. El frame de control `0x06` traía
