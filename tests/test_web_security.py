@@ -248,6 +248,8 @@ class SecureWebServerTest(unittest.TestCase):
         self.assertIn("at_session=", cookie)
         self.assertIn("HttpOnly", cookie)
         self.assertIn("SameSite=Strict", cookie)
+        # Persistent: reopening the browser does not force a new login.
+        self.assertIn("Max-Age=", cookie)
 
     def test_session_cookie_authenticates(self):
         session = auth.issue_session()

@@ -1,4 +1,12 @@
 "use strict";
+const _wb64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const _wunb64u = s => {
+  s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(s), u = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+};
 /* ---------- Settings: providers, agents, access & network, maintenance, interface, emergency ---------- */
 const SET_TABS = [["providers", "Providers"], ["agents", "Agents"], ["hosts", "Remote hosts"], ["terminals", "Terminals"],
                   ["access", "Access & network"],
@@ -259,9 +267,65 @@ async function tabAccess(box){
         try { const r = await op("web_session_revoke"); toast(`${r.revoked} session(s) revoked`, "ok"); } catch(e){ flash(e.message); } }}, "Sign out all devices"),
       el("button", {className:"btn", type:"button", onclick:()=>{ closeSettings(); openAccess(); }}, "Connected devices…")),
     el("div", {className:"hint"}, "Rotating creates a new token (shown once), makes the old one stop working and signs out the other devices. This browser stays signed in."));
+  parts.push(el("h4", {className:"mc-h"}, "Passkeys"), await passkeysSection());
   parts.push(el("h4", {className:"mc-h"}, "Terminal tokens"), await terminalTokensSection());
   parts.push(el("h4", {className:"mc-h"}, "Security"), settingsGroup("security", "security"));
   box.replaceChildren(...parts);
+}
+
+async function addPasskey(){
+  if(!window.PublicKeyCredential){ toast("Passkeys need HTTPS or localhost", "error"); return; }
+  try{
+    const begin = await (await fetch("/api/webauthn/register/begin", {method:"POST",
+      headers:{"Content-Type":"application/json"}, credentials:"same-origin", body:"{}"})).json();
+    if(!begin.ok) throw new Error(begin.error || "cannot start");
+    const pk = begin.publicKey;
+    const cred = await navigator.credentials.create({publicKey:{
+      challenge:_wunb64u(pk.challenge), rp:pk.rp,
+      user:{id:_wunb64u(pk.user.id), name:pk.user.name, displayName:pk.user.displayName},
+      pubKeyCredParams:pk.pubKeyCredParams, timeout:pk.timeout, attestation:pk.attestation,
+      authenticatorSelection:pk.authenticatorSelection,
+      excludeCredentials:(pk.excludeCredentials||[]).map(c=>({type:"public-key", id:_wunb64u(c.id)})),
+    }});
+    const body = {ceremony:begin.ceremony, id:_wb64u(cred.rawId),
+      clientDataJSON:_wb64u(cred.response.clientDataJSON),
+      attestationObject:_wb64u(cred.response.attestationObject),
+      label:(document.getElementById("pk-label")||{}).value || "passkey"};
+    const fin = await fetch("/api/webauthn/register/finish", {method:"POST",
+      headers:{"Content-Type":"application/json"}, credentials:"same-origin", body:JSON.stringify(body)});
+    const j = await fin.json().catch(()=>({}));
+    if(fin.ok){ toast("Passkey added", "ok"); renderSettings(); }
+    else { toast(j.error || "could not add passkey", "error"); }
+  }catch(e){ toast(String(e.message || e), "error"); }
+}
+
+async function passkeysSection(){
+  const wrap = el("div", {className:"tt-sec"});
+  let data = {credentials: []};
+  try{
+    data = await (await fetch("/api/webauthn/credentials", {method:"POST",
+      headers:{"Content-Type":"application/json"}, credentials:"same-origin", body:"{}"})).json();
+  }catch(e){}
+  for(const c of (data.credentials || [])){
+    wrap.append(el("div", {className:"tt-row"},
+      el("span", {className:"mono"}, c.id), el("span", {}, c.label || ""),
+      el("span", {className:"muted"}, c.last_used ? "used" : "new"),
+      el("button", {className:"btn sm danger", type:"button", onclick:async()=>{
+        if(!await confirmDlg({title:"Remove passkey?", message:c.id, ok:"Remove", danger:true})) return;
+        try{ await fetch("/api/webauthn/revoke", {method:"POST",
+          headers:{"Content-Type":"application/json"}, credentials:"same-origin",
+          body:JSON.stringify({id:c.id})}); toast("Removed", "ok"); renderSettings(); }
+        catch(e){ flash(e.message); }
+      }}, "Remove")));
+  }
+  if(!(data.credentials || []).length) wrap.append(el("div", {className:"hint"}, "No passkeys yet."));
+  const label = el("input", {className:"input", id:"pk-label", placeholder:"name (e.g. phone)"});
+  wrap.append(el("div", {className:"field"}, el("label", {}, "Add a passkey"),
+      el("div", {className:"row"}, label,
+        el("button", {className:"btn primary", type:"button", onclick:addPasskey}, "Add passkey"))),
+    el("div", {className:"hint"}, "Passkeys need a secure context (HTTPS or localhost); "
+      + "over plain HTTP the browser does not offer them. The access token still works as a fallback."));
+  return wrap;
 }
 
 function parseTtlJs(value){

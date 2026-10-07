@@ -127,3 +127,28 @@ siguen existiendo para acceso limitado (solo lectura o restringido a hosts).
 Las terminales cuyo shell ha salido se cierran y eliminan solas tras
 `terminals.keep_exited_seconds` (def. 300 s), y los tokens caducados se purgan; así no
 se acumulan recursos.
+
+## Passkeys / WebAuthn (0.72.0)
+
+Además del token de acceso, se puede iniciar sesión con un **passkey** (huella, PIN o
+Face ID) generado por el teléfono o el equipo.
+
+- **Contexto seguro obligatorio**: WebAuthn solo existe en `https://` o `localhost`. Sobre
+  HTTP plano (p. ej. `http://<tailscale>:8765`) el navegador **no** ofrece passkeys; usa el
+  token, o sirve el Web UI por HTTPS (p. ej. `tailscale serve`). En localhost funciona.
+- **Crypto sin dependencias**: CBOR, COSE, ECDSA P-256 (ES256) y RSA PKCS#1 v1.5 (RS256)
+  implementados con la librería estándar. No se verifica la *atestación* (el RP pide
+  `attestation: "none"`), solo la **aserción** de login contra la clave pública guardada.
+- **Anti-replay**: cada aserción verifica el `signCount` (si no aumenta, se rechaza) y la
+  **ceremonia** (challenge aleatorio de 32 bytes, de un solo uso, 5 min, ligada a la sesión
+  y al `Origin`).
+- **Almacén** `web-credentials.json` (0600, escritura atómica): id, credential id, clave
+  pública COSE, algoritmo, contador y etiqueta. Nunca se guarda la clave privada (vive en
+  el autenticador). Se puede revocar por passkey desde Ajustes.
+- **El token de acceso sigue siendo el respaldo** (break-glass): si pierdes el passkey,
+  inicias con el token desde la máquina. Nunca dependas solo del passkey.
+
+### Cookie de sesión persistente
+
+El login emite la cookie `at_session` con `Max-Age` = `security.session_ttl_hours` (def.
+12 h): sobrevive a cerrar el navegador. La caducidad real la impone la firma del servidor.

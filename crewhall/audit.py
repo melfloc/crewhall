@@ -35,6 +35,7 @@ AUDITED = {
     "reset_plan", "reset_apply", "clean_plan", "clean_apply",
     "bundle_export", "bundle_import", "bundle_delete", "fs_complete",
     "web_token_rotate", "web_token_revoke", "web_session_revoke", "web_login",
+    "web_passkey_add", "web_passkey_revoke",
     "terminal_create", "terminal_close", "terminal_write", "terminal_key",
     "terminal_resize", "terminal_capture",
     "terminal_ws_open", "terminal_ws_close", "terminal_ws_mode",

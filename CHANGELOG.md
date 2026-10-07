@@ -5,6 +5,20 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.72.0] — 2026-10-06
+
+- **Passkeys / WebAuthn** (sin dependencias): alta y login con huella/PIN/Face ID desde el
+  teléfono o el equipo. Crypto en Python puro (CBOR, COSE, ECDSA P-256 y RSA PKCS#1 v1.5),
+  guardia anti-replay por contador de firma, ceremonia de un solo uso ligada a sesión y
+  `Origin`. El **token de acceso sigue funcionando** como respaldo. Alta desde Ajustes →
+  Access & network → Passkeys (`Add passkey`), botón «Sign in with a passkey» en el login.
+  Nota: los passkeys requieren **contexto seguro** (HTTPS o `localhost`); sobre HTTP plano
+  el navegador no los ofrece (usa el token, o sirve el Web UI por HTTPS, p. ej. Tailscale).
+- **Cookie de sesión persistente**: el login emite la cookie con `Max-Age` = vida de la
+  sesión (`security.session_ttl_hours`, def. 12 h), así que **cerrar y reabrir el navegador
+  ya no obliga a iniciar sesión** de nuevo hasta que la sesión caduque.
+- Auditoría: `web_passkey_add` / `web_passkey_revoke`.
+
 ## [0.71.3] — 2026-10-06
 
 - **Corrección**: los agentes **sobreviven a un reinicio del daemon**. Al restaurar, cada

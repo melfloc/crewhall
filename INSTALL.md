@@ -288,3 +288,10 @@ crewhall settings set terminals.master_grants true --confirm
 Así la sesión maestra obtiene acceso a terminales directamente. Mantén los tokens de
 terminal solo si quieres dar acceso **limitado** (solo lectura, o restringido a hosts).
 Tradeoff en [SECURITY.md](SECURITY.md).
+
+### Passkeys (opcional)
+
+En Ajustes → **Access & network → Passkeys** pulsa **Add passkey** (huella/PIN/Face ID).
+La próxima vez, la pantalla de login ofrece **Sign in with a passkey**. Requiere un
+**contexto seguro** (HTTPS o `localhost`); sobre HTTP plano usa el token. El token sigue
+siendo el respaldo si pierdes el passkey.

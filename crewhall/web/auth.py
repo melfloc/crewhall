@@ -327,10 +327,24 @@ def authorize(identity: str = "web") -> bool:
     return identity == "web"
 
 
-def cookie_header(value: str, *, secure: bool = False) -> str:
+def session_ttl() -> int:
+    """Configured session lifetime in seconds (``security.session_ttl_hours``)."""
+    try:
+        from .. import settings
+
+        return int(settings.get("security.session_ttl_hours")) * 3600
+    except Exception:  # noqa: BLE001 - never block a login over a settings problem
+        return SESSION_TTL
+
+
+def cookie_header(value: str, *, secure: bool = False, max_age: int | None = None) -> str:
     parts = [f"{COOKIE_NAME}={value}", "HttpOnly", "SameSite=Strict", "Path=/"]
     if secure:
         parts.append("Secure")
+    if max_age is not None:
+        # A persistent cookie, so reopening the browser does not force a login
+        # again before the session actually expires.
+        parts.append(f"Max-Age={int(max_age)}")
     return "; ".join(parts)
 
 

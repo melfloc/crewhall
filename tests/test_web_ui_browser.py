@@ -123,6 +123,8 @@ class _Browser(unittest.TestCase):
         self.page.on("pageerror", lambda e: self.errors.append(str(e)))
         self.page.on("console", lambda m: self.console_errors.append(m.text) if m.type == "error" else None)
         self.page.route(re.compile(r".*/api/op.*"), self._api)
+        self.page.route(re.compile(r".*/api/webauthn/.*"), lambda r: r.fulfill(
+            status=200, content_type="application/json", body='{"ok": true, "credentials": []}'))
         self.page.route("http://localhost/static/**", self._static)
         self.page.route("http://localhost/sw.js", self._swjs)
         self.page.route("http://localhost/", lambda r: r.fulfill(
