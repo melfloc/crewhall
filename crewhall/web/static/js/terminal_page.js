@@ -24,6 +24,12 @@
   term.loadAddon(fit);
   term.loadAddon(search);
   term.open(document.getElementById("xterm"));
+  const ta = document.querySelector(".xterm-helper-textarea");
+  if(ta){
+    ta.setAttribute("autocapitalize","off"); ta.setAttribute("autocorrect","off");
+    ta.setAttribute("autocomplete","off"); ta.setAttribute("spellcheck","false");
+    ta.setAttribute("inputmode","text");
+  }
   try { fit.fit(); } catch (e) {}
 
   function setConn(text, cls){

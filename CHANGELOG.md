@@ -14,6 +14,10 @@ to run without it and ships these notes with the release.
   el mismo id** al arrancar (shell nuevo, como un agente relanzado); si la sesión tmux
   sobrevivió a un cierre abrupto, se **adopta** en su lugar. Cerrar una terminal la
   elimina del estado.
+- **Web UI compatible con móvil**: topbar que se reparte en dos filas sin desbordar,
+  objetivos táctiles más grandes, inputs a 16 px (evita el zoom de iOS), `safe-area` para
+  notch, la barra de terminal se envuelve, y el teclado móvil sin autocorrección en xterm.
+  Añadida prueba de layout a 390×844.
 
 ## [0.71.1] — 2026-10-06
 

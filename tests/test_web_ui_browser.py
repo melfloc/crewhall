@@ -443,6 +443,34 @@ class Sidebar(_Browser):
         self.assertIn("agent_stop", self.calls)
 
 
+class MobileLayout(_Browser):
+    viewport = {"width": 390, "height": 844}   # iPhone-ish
+    auto_select = False
+    wait_for_messages = False
+    agents = [WORKING, READY]
+    teams = [TEAM]
+
+    def test_no_horizontal_overflow_and_drawer_toggles(self):
+        overflow = self.page.evaluate(
+            "() => document.documentElement.scrollWidth - window.innerWidth")
+        self.assertLessEqual(overflow, 2)
+        self.assertTrue(self.page.locator("#menuBtn").is_visible())
+        self.page.click("#menuBtn")
+        self.assertTrue(self.page.evaluate(
+            "document.getElementById('shell').classList.contains('drawer')"))
+        self.page.locator("#nav .agent-row").first.click()
+        self.assertFalse(self.page.evaluate(
+            "document.getElementById('shell').classList.contains('drawer')"))
+
+    def test_inputs_avoid_ios_zoom(self):
+        self.page.click("#menuBtn")
+        self.page.click("#newAgentLink")
+        self.page.wait_for_selector("#newAgent[open]")
+        size = self.page.evaluate(
+            "() => getComputedStyle(document.getElementById('na-name')).fontSize")
+        self.assertEqual(size, "16px")
+
+
 class SidebarReorder(_Browser):
     agents = [WORKING, READY]
     teams = [

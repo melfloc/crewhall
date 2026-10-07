@@ -132,6 +132,11 @@ function mountTerminalView(container, termId, opts){
     fit = new FitAddon.FitAddon(); search = new SearchAddon.SearchAddon();
     term.loadAddon(fit); term.loadAddon(search);
     term.open(container);
+    // Mobile keyboards: no autocorrect/capitalisation while typing in a shell.
+    const ta = container.querySelector(".xterm-helper-textarea");
+    if(ta){ ta.setAttribute("autocapitalize","off"); ta.setAttribute("autocorrect","off");
+            ta.setAttribute("autocomplete","off"); ta.setAttribute("spellcheck","false");
+            ta.setAttribute("inputmode","text"); }
     try{ fit.fit(); }catch(e){}
     // Refit whenever the container's size changes (e.g. the pane becomes
     // visible or the window is resized) so the terminal fills the panel.
