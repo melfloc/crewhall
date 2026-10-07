@@ -217,7 +217,11 @@ class OpenCodeHarness(Harness):
             return AgentState.STARTING, "opencode TUI not mounted yet"
         completed_turns = len(COMPLETION_RE.findall(text))
         if not self._prompt_sent:
-            if completed_turns > 0:
+            # A mounted session with context (the token/cost footer) has already
+            # run at least one turn: idle, not unknown. This survives a daemon
+            # restart, where the in-memory completion signals are gone and the
+            # per-turn ``· Ns`` line may have scrolled out of the captured text.
+            if completed_turns > 0 or TOKENS_RE.search(text):
                 return AgentState.WAITING_INPUT, "TUI idle (completed turn visible)"
             if READY_PLACEHOLDER in low:
                 return AgentState.READY, "input placeholder 'Ask anything' visible"

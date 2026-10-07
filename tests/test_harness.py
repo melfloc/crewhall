@@ -82,6 +82,19 @@ class OpenCodeHarnessFakeSession(unittest.TestCase):
         harness = self.make("  Build · model\n  ctrl+p commands")
         self.assertEqual(harness.state(), AgentState.UNKNOWN)
 
+    def test_tokens_footer_is_durable_idle_evidence(self) -> None:
+        # After a restart the in-memory completion signals are gone and the
+        # per-turn ``· Ns`` line can scroll out; the token/cost footer still
+        # proves the session has context, so it must read as idle, not unknown.
+        screen = "\n".join([
+            "  ┃",
+            "  ┃  Build · DeepSeek V4.1 Flash",
+            "  ~/Projects/x    12.6K (1%) · $0.00  ctrl+p commands",
+        ])
+        harness = self.make(screen)
+        self.assertEqual(harness.state(), AgentState.WAITING_INPUT)
+        self.assertTrue(harness.is_waiting())
+
     def test_start_waits_for_ready(self) -> None:
         harness = self.make(READY_SCREEN)
         self.assertEqual(harness.start(timeout=1.0), AgentState.READY)

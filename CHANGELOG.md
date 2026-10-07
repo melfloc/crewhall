@@ -5,6 +5,19 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.71.3] — 2026-10-06
+
+- **Corrección**: los agentes **sobreviven a un reinicio del daemon**. Al restaurar, cada
+  agente se reconstruía como EXITED con el mismo id y **reemplazaba** la sesión tmux viva
+  ya adoptada, así que el proceso en marcha se perdía (y la adopción posterior lo saltaba
+  por el id ocupado; en hosts remotos nunca se recuperaba). Ahora la restauración **reutiliza
+  la sesión adoptada** y la adopción (local y remota) **asciende** un placeholder muerto y
+  reengancha el harness, de modo que una sesión larga de trabajo no se pierde en el camino.
+- **Corrección**: un agente OpenCode que terminó su tarea ya no queda en `unknown` tras un
+  reinicio. La evidencia de fin de turno vivía solo en memoria; ahora el footer de
+  tokens/coste (p. ej. `12.6K (1%)`) cuenta como sesión con contexto → idle (`waiting_input`),
+  señal durable en pantalla.
+
 ## [0.71.2] — 2026-10-06
 
 - **Corrección**: las **terminales persisten como los agentes**. Antes, al parar el

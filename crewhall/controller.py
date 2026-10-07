@@ -781,11 +781,9 @@ class Controller:
             if meta.get("backend") != "tmux":
                 continue
             sid = meta["session_id"]
-            try:
-                self.registry.resolve(sid)
-                continue
-            except SessionNotFound:
-                pass
+            existing = self._session_by_id(sid)
+            if existing is not None and getattr(existing, "_adopted", False):
+                continue  # already adopted; never re-read the same pane twice
             created = meta.get("created_at")
             try:
                 created_f = float(created) if created else None
@@ -804,7 +802,7 @@ class Controller:
                 )
             except Exception:
                 continue
-            self.registry.add(session)
+            self._register_adopted(session)
 
     # -- remote hosts ------------------------------------------------------
     # Adoption runs off the startup path: a host that is down must never delay
@@ -847,11 +845,9 @@ class Controller:
             if meta.get("backend") != "tmux":
                 continue
             sid = meta["session_id"]
-            try:
-                self.registry.resolve(sid)
-                continue
-            except SessionNotFound:
-                pass
+            existing = self._session_by_id(sid)
+            if existing is not None and getattr(existing, "_adopted", False):
+                continue  # already adopted; never re-read the same pane twice
             created = meta.get("created_at")
             try:
                 created_f = float(created) if created else None
@@ -871,7 +867,7 @@ class Controller:
                 )
             except Exception:
                 continue
-            self.registry.add(session)
+            self._register_adopted(session)
 
     def _backend_for(self, backend_name: str | None, host_name: str | None) -> Any:
         if host_name:
@@ -1234,21 +1230,28 @@ class Controller:
         self._agent_args[agent_id] = extra_args
         host = agent.get("host")
         self._agent_hosts[agent_id] = host
-        spec = SessionSpec(
-            command=self._launch_command(agent["kind"], extra_args, host=host),
-            cwd=agent.get("cwd") or (None if host else os.getcwd()),
-            env=None,
-            cols=int(agent.get("cols", 120)),
-            rows=int(agent.get("rows", 40)),
-            name=agent.get("name"),
-            host=host,
-        )
-        session = InteractiveSession(
-            self._backend_for(agent.get("backend"), host), spec, session_id=agent_id
-        )
-        session.created_at = float(agent.get("created_at") or session.created_at)
-        session._status = Status.EXITED
-        self.registry.add(session)
+        # A process that survived the restart was already adopted (see
+        # ``_adopt_tmux``). Reuse that live session so the agent keeps running
+        # instead of being reconstructed as EXITED and losing its work.
+        session = self._live_adopted(agent_id)
+        if session is not None:
+            self._overlay_persisted(session, agent)
+        else:
+            spec = SessionSpec(
+                command=self._launch_command(agent["kind"], extra_args, host=host),
+                cwd=agent.get("cwd") or (None if host else os.getcwd()),
+                env=None,
+                cols=int(agent.get("cols", 120)),
+                rows=int(agent.get("rows", 40)),
+                name=agent.get("name"),
+                host=host,
+            )
+            session = InteractiveSession(
+                self._backend_for(agent.get("backend"), host), spec, session_id=agent_id
+            )
+            session.created_at = float(agent.get("created_at") or session.created_at)
+            session._status = Status.EXITED
+            self.registry.add(session)
         harness = harness_cls(session, name=agent.get("name"))
         # Keep the last conversation readable for a stopped agent (Claude reads
         # it from its on-disk file; a revived agent gets a new id).
@@ -1256,6 +1259,67 @@ class Controller:
         self.agents.add(harness)
         self._base_env[agent_id] = dict(agent.get("env") or {})
         self._agent_tokens.setdefault(agent_id, secrets.token_hex(16))
+
+    def _session_by_id(self, session_id: str) -> InteractiveSession | None:
+        """Exact lookup, never a name/prefix match (ids must be unambiguous)."""
+        for session in self.registry.all():
+            if session.session_id == session_id:
+                return session
+        return None
+
+    def _agent_by_id(self, agent_id: str) -> Harness | None:
+        for harness in self.agents.all():
+            if harness.agent_id == agent_id:
+                return harness
+        return None
+
+    def _live_adopted(self, session_id: str) -> InteractiveSession | None:
+        """A live adopted session for ``session_id``, if one survived a restart."""
+        session = self._session_by_id(session_id)
+        if session is not None and (
+            getattr(session, "_adopted", False) or session.status.alive
+        ):
+            return session
+        return None
+
+    def _overlay_persisted(self, session: InteractiveSession, agent: dict[str, Any]) -> None:
+        """Keep the persisted control-plane metadata on an adopted live session."""
+        spec = session.spec
+        spec.cwd = agent.get("cwd") or spec.cwd
+        spec.name = agent.get("name")
+        if agent.get("cols"):
+            spec.cols = int(agent["cols"])
+        if agent.get("rows"):
+            spec.rows = int(agent["rows"])
+        session.name = spec.name
+
+    def _register_adopted(self, session: InteractiveSession) -> None:
+        """Register a session adopted from a surviving tmux server.
+
+        When the id already belongs to an agent reconstructed as EXITED (or one
+        being restored), the live session replaces the dead placeholder and the
+        harness is pointed at it, so a daemon restart — or a remote host coming
+        back — never silently loses a running agent.
+        """
+        existing = self._session_by_id(session.session_id)
+        if existing is not None and getattr(existing, "_adopted", False):
+            return  # already adopted; leave it alone
+        self.registry.add(session)
+        harness = self._agent_by_id(session.session_id)
+        if harness is None:
+            return
+        if getattr(harness.session, "_adopted", False) or harness.session.status.alive:
+            return
+        old = harness.session.spec
+        spec = session.spec
+        spec.cwd = spec.cwd or old.cwd
+        spec.name = old.name
+        if old.cols:
+            spec.cols = old.cols
+        if old.rows:
+            spec.rows = old.rows
+        session.name = old.name
+        harness.session = session
 
     def _restore_terminal(self, term: dict[str, Any]) -> None:
         """Re-create a persisted terminal (fresh shell) with the same id."""

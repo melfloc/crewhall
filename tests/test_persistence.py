@@ -7,7 +7,7 @@ import unittest
 from crewhall import Controller
 from crewhall.persistence import StateStore
 
-from .support import FakeHarness
+from .support import FakeHarness, FakeSession
 
 
 class PersistenceUnit(unittest.TestCase):
@@ -61,6 +61,42 @@ class PersistenceUnit(unittest.TestCase):
         restored = c2.get_agent("a")
         self.assertEqual(restored.agent_id, a.agent_id)
         self.assertFalse(restored.session.status.alive)
+
+    def _state_with_agent(self, agent_id: str = "sess_scripts01") -> dict:
+        return {
+            "schema": 1, "teams": [], "requests": [], "terminals": [],
+            "agents": [{
+                "agent_id": agent_id, "name": "scripts", "kind": "opencode",
+                "backend": "pty", "cwd": "/tmp", "cols": 120, "rows": 40,
+                "args": [], "host": None, "conversation_id": None, "env": {},
+            }],
+        }
+
+    def test_restore_reuses_adopted_live_session(self):
+        c = self._controller()
+        live = FakeSession(screen="Build · model\n ctrl+p commands", name="scripts")
+        live.session_id = "sess_scripts01"
+        live._adopted = True
+        c.registry.add(live)
+        self.store.save(self._state_with_agent())
+
+        c.restore()
+        harness = c.get_agent("scripts")
+        self.assertIs(harness.session, live)
+        self.assertTrue(harness.session.status.alive)
+
+    def test_adoption_upgrades_exited_placeholder(self):
+        c = self._controller()
+        self.store.save(self._state_with_agent())
+        c.restore()
+        harness = c.get_agent("scripts")
+        self.assertFalse(harness.session.status.alive)
+
+        live = FakeSession(screen="Build · model\n ctrl+p commands", name="scripts")
+        live.session_id = "sess_scripts01"
+        live._adopted = True
+        c._register_adopted(live)
+        self.assertIs(harness.session, live)
 
     def test_load_missing_returns_empty(self):
         data = StateStore(path=os.path.join(self.tmp, "nope.json")).load()

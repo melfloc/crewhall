@@ -37,6 +37,9 @@ class InteractiveSession:
         self._exited_at: float | None = None
         self._last_input_at: float | None = None
         self._last_output_at: float | None = None
+        # True when this object wraps a process/session that already existed
+        # (adopted after a restart) rather than one this daemon started.
+        self._adopted = False
 
         self._buffer: collections.deque[str] = collections.deque()
         self._events: collections.deque[Event] = collections.deque(maxlen=2000)
@@ -57,6 +60,7 @@ class InteractiveSession:
         backend.adopt(session_id)
         with session._lock:
             session._status = Status.RUNNING
+        session._adopted = True
         session._log("adopted", {"backend": backend.name})
         return session
 

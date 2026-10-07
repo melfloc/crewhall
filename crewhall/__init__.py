@@ -18,7 +18,7 @@ from .session import InteractiveSession, SessionTimeout
 from .team import Team, TeamError, TeamNotFound, TeamRegistry
 from .types import Event, SessionInfo, SessionSpec, Status
 
-__version__ = "0.71.2"
+__version__ = "0.71.3"
 
 __all__ = [
     "InteractiveSession",
