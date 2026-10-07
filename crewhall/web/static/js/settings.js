@@ -267,6 +267,7 @@ async function tabAccess(box){
         try { const r = await op("web_session_revoke"); toast(`${r.revoked} session(s) revoked`, "ok"); } catch(e){ flash(e.message); } }}, "Sign out all devices"),
       el("button", {className:"btn", type:"button", onclick:()=>{ closeSettings(); openAccess(); }}, "Connected devices…")),
     el("div", {className:"hint"}, "Rotating creates a new token (shown once), makes the old one stop working and signs out the other devices. This browser stays signed in."));
+  parts.push(el("h4", {className:"mc-h"}, "Authenticator codes (TOTP)"), await totpSection());
   parts.push(el("h4", {className:"mc-h"}, "Passkeys"), await passkeysSection());
   parts.push(el("h4", {className:"mc-h"}, "Terminal tokens"), await terminalTokensSection());
   parts.push(el("h4", {className:"mc-h"}, "Security"), settingsGroup("security", "security"));
@@ -325,6 +326,66 @@ async function passkeysSection(){
         el("button", {className:"btn primary", type:"button", onclick:addPasskey}, "Add passkey"))),
     el("div", {className:"hint"}, "Passkeys need a secure context (HTTPS or localhost); "
       + "over plain HTTP the browser does not offer them. The access token still works as a fallback."));
+  return wrap;
+}
+
+async function totpEnroll(){
+  try{
+    const label = (document.getElementById("totp-label") || {}).value || "web";
+    const r = await (await fetch("/api/totp/begin", {method:"POST",
+      headers:{"Content-Type":"application/json"}, credentials:"same-origin",
+      body:JSON.stringify({label})})).json();
+    if(!r.ok) throw new Error(r.error || "cannot start");
+    const box = el("div", {className:"qr-box"});
+    if(window.qrcode){ const qr = qrcode(0, "M"); qr.addData(r.uri); qr.make();
+      box.innerHTML = qr.createImgTag(4, 8); }
+    else { box.textContent = r.uri; }
+    const code = el("input", {className:"input", id:"totp-code", inputmode:"numeric",
+      maxlength:"7", autocomplete:"one-time-code", placeholder:"000000"});
+    const ok = await openDlg(close => el("form", {onsubmit:e=>{ e.preventDefault(); close(true); }},
+      el("h3", {}, "Add an authenticator"),
+      el("p", {className:"sub"}, "Scan the QR with Authy / Samsung Pass / Google Authenticator, then type the 6-digit code."),
+      box, el("div", {className:"hint mono"}, r.secret),
+      el("div", {className:"field"}, el("label", {htmlFor:"totp-code"}, "Code"), code),
+      el("div", {className:"dlg-actions"},
+        el("button", {className:"btn", type:"button", onclick:()=>close(false)}, "Cancel"),
+        el("button", {className:"btn primary", type:"submit"}, "Confirm"))));
+    if(!ok) return;
+    const fin = await fetch("/api/totp/confirm", {method:"POST",
+      headers:{"Content-Type":"application/json"}, credentials:"same-origin",
+      body:JSON.stringify({ceremony:r.ceremony, code: code.value})});
+    const j = await fin.json().catch(()=>({}));
+    if(fin.ok){ toast("Authenticator added", "ok"); renderSettings(); }
+    else { toast(j.error || "invalid code", "error"); }
+  }catch(e){ toast(String(e.message || e), "error"); }
+}
+
+async function totpSection(){
+  const wrap = el("div", {className:"tt-sec"});
+  let data = {enrollments: []};
+  try{
+    data = await (await fetch("/api/totp/list", {method:"POST",
+      headers:{"Content-Type":"application/json"}, credentials:"same-origin", body:"{}"})).json();
+  }catch(e){}
+  for(const en of (data.enrollments || [])){
+    wrap.append(el("div", {className:"tt-row"},
+      el("span", {className:"mono"}, en.id), el("span", {}, en.label || ""),
+      el("span", {className:"muted"}, en.last_used ? "used" : "new"),
+      el("button", {className:"btn sm danger", type:"button", onclick:async()=>{
+        if(!await confirmDlg({title:"Remove authenticator?", message:en.id, ok:"Remove", danger:true})) return;
+        try{ await fetch("/api/totp/revoke", {method:"POST",
+          headers:{"Content-Type":"application/json"}, credentials:"same-origin",
+          body:JSON.stringify({id:en.id})}); toast("Removed", "ok"); renderSettings(); }
+        catch(e){ flash(e.message); }
+      }}, "Remove")));
+  }
+  if(!(data.enrollments || []).length) wrap.append(el("div", {className:"hint"}, "No authenticator enrolled."));
+  const label = el("input", {className:"input", id:"totp-label", placeholder:"name (e.g. phone)"});
+  wrap.append(el("div", {className:"field"}, el("label", {}, "Add an authenticator (TOTP)"),
+      el("div", {className:"row"}, label,
+        el("button", {className:"btn primary", type:"button", onclick:totpEnroll}, "Set up"))),
+    el("div", {className:"hint"}, "Codes from Authy / Samsung Pass / Google Authenticator. "
+      + "Works over plain HTTP too (unlike passkeys)."));
   return wrap;
 }
 

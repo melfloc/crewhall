@@ -152,3 +152,18 @@ Face ID) generado por el teléfono o el equipo.
 
 El login emite la cookie `at_session` con `Max-Age` = `security.session_ttl_hours` (def.
 12 h): sobrevive a cerrar el navegador. La caducidad real la impone la firma del servidor.
+
+## Códigos de autenticador (TOTP, 0.73.0)
+
+Además del token y los passkeys, se puede iniciar sesión con un **código de 6 dígitos**
+(RFC 6238) generado por Authy / Samsung Pass / Google Authenticator / 1Password.
+
+- Alta en Ajustes → **Access & network → Authenticator codes**: se muestra un **QR**
+  `otpauth://` (generado por nosotros) y el secreto en base32. Alta = escanear + confirmar
+  con un código.
+- **Funciona por HTTP** (no necesita contexto seguro), a diferencia de los passkeys.
+- **Anti-replay**: cada paso de tiempo (30 s) se registra por alta; un código usado no se
+  acepta de nuevo en su ventana. Límite de intentos como el login.
+- Almacén `web-totp.json` (0600): secreto compartido en claro (necesario para verificar),
+  igual que el token maestro. Revocable por alta.
+- El **token de acceso sigue siendo el respaldo**.

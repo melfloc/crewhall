@@ -45,6 +45,18 @@ async function passkeyLogin(){
   }catch(e){ $("e").textContent = e.message || "passkey failed"; }
 }
 
+async function codeLogin(){
+  $("e").textContent = "";
+  const r = await fetch("/api/totp/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: $("c").value }),
+  });
+  if (r.ok) { location.href = "/"; }
+  else { $("e").textContent = "invalid code"; }
+}
+$("cb").addEventListener("click", codeLogin);
+$("c").addEventListener("keydown", (e) => { if(e.key === "Enter"){ e.preventDefault(); codeLogin(); } });
+
 if(window.PublicKeyCredential){
   const btn = $("pk");
   btn.classList.remove("init-hidden");

@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ..client import Client, RpcError, ensure_daemon
-from . import auth, terminal_tokens, webauthn, ws
+from . import auth, terminal_tokens, totp, webauthn, ws
 
 # Terminal ops that need a write scope vs a read scope.
 TERMINAL_WRITE_OPS = {
@@ -49,7 +49,10 @@ _LOGIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <form id="f"><div>crewhall</div>
 <input id="t" type="password" placeholder="access token" autofocus>
 <div class="err" id="e"></div><button type="submit">Sign in</button>
-<button type="button" id="pk" class="pk init-hidden">Sign in with a passkey</button></form>
+<button type="button" id="pk" class="pk init-hidden">Sign in with a passkey</button>
+<div class="or">or a 6-digit code (Authy / Samsung Pass…)</div>
+<input id="c" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000000">
+<button type="button" id="cb">Sign in with code</button></form>
 <script src="/static/login.js"></script></body></html>"""
 
 # Content-Security-Policy: no inline script, no eval. Inline *styles* are
@@ -318,6 +321,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._do_terminal_ticket()
         if parsed.path.startswith("/api/webauthn/"):
             return self._do_webauthn(parsed.path[len("/api/webauthn/"):])
+        if parsed.path.startswith("/api/totp/"):
+            return self._do_totp(parsed.path[len("/api/totp/"):])
         if parsed.path != "/api/op":
             return self._error("not found", 404)
         if not self._guard():
@@ -691,7 +696,9 @@ class Handler(BaseHTTPRequestHandler):
             "pubKeyCredParams": [{"type": "public-key", "alg": -7},
                                  {"type": "public-key", "alg": -257}],
             "timeout": 60000, "attestation": "none",
-            "authenticatorSelection": {"residentKey": "preferred",
+            # A discoverable credential lets the device find the passkey on login
+            # without falling back to the cross-device (QR) flow.
+            "authenticatorSelection": {"residentKey": "required",
                                        "userVerification": "preferred"},
             "excludeCredentials": [{"type": "public-key", "id": cid}
                                    for cid in webauthn.credential_ids()],
@@ -720,7 +727,10 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "ceremony": ceremony, "publicKey": {
             "challenge": webauthn.b64u_encode(challenge),
             "rpId": rp_id, "timeout": 60000, "userVerification": "preferred",
-            "allowCredentials": [],
+            # Tell the browser which credentials we know: a local one is used
+            # directly (no cross-device QR); an empty list would force discovery.
+            "allowCredentials": [{"type": "public-key", "id": cid}
+                                 for cid in webauthn.credential_ids()],
         }})
 
     def _webauthn_login_finish(self, payload: dict[str, Any], rp_id: str, origin: str) -> None:
@@ -741,6 +751,76 @@ class Handler(BaseHTTPRequestHandler):
         session = auth.issue_session(ip=ip, user_agent=self.headers.get("User-Agent", ""))
         audit.record("web_login", actor=self._audit_actor(), result="ok", summary="passkey")
         return self._json({"ok": True}, extra=[self._session_cookie(session)])
+
+    # -- TOTP codes (Authy / Samsung Pass …) ------------------------------
+    def _do_totp(self, action: str) -> None:
+        from .. import audit
+
+        if not self._host_ok() or not self._origin_ok():
+            return self._error("request not allowed", 403)
+        raw = self._read_body()
+        if raw is None:
+            return
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._error("bad json")
+        if action == "begin":
+            if not self._guard():
+                return
+            secret = totp.new_secret()
+            ceremony = secrets.token_urlsafe(24)
+            label = (payload.get("label") or "web")[:80]
+            now = time.time()
+            with self.server.totp_lock:
+                for key in [k for k, v in self.server.totp_pending.items()
+                            if v.get("expires", 0) < now]:
+                    self.server.totp_pending.pop(key, None)
+                self.server.totp_pending[ceremony] = {
+                    "secret": secret, "label": label, "expires": now + 600.0}
+            return self._json({"ok": True, "ceremony": ceremony, "secret": secret,
+                               "uri": totp.otpauth_uri(secret, label)})
+        if action == "confirm":
+            if not self._guard():
+                return
+            with self.server.totp_lock:
+                pending = self.server.totp_pending.get(payload.get("ceremony", ""))
+                if pending and pending.get("expires", 0) < time.time():
+                    pending = None
+            if not pending:
+                return self._error("unknown or expired ceremony", 400)
+            if totp.verify(pending["secret"], payload.get("code")) is None:
+                return self._error("invalid code", 401)
+            record = totp.add_enrollment(pending["secret"], pending["label"])
+            with self.server.totp_lock:
+                self.server.totp_pending.pop(payload.get("ceremony", ""), None)
+            audit.record("web_totp_add", actor=self._audit_actor(), result="ok",
+                         summary=f"id={record['id']}")
+            return self._json({"ok": True, "enrollment": {"id": record["id"],
+                                                          "label": record["label"]}})
+        if action == "login":
+            enrollment = totp.verify_any(payload.get("code"))
+            if not enrollment:
+                ip = "totp:" + self._client_label()
+                auth.note_login_failure(ip)
+                return self._error("invalid code", 401)
+            auth.note_login_success("totp:" + self._client_label())
+            session = auth.issue_session(ip=self._client_label(),
+                                         user_agent=self.headers.get("User-Agent", ""))
+            audit.record("web_login", actor=self._audit_actor(), result="ok", summary="totp")
+            return self._json({"ok": True}, extra=[self._session_cookie(session)])
+        if action == "list":
+            return self._json({"ok": True, "enrollments": totp.list_enrollments(),
+                               "file_permissions_ok": totp.file_permissions_ok()})
+        if action == "revoke":
+            if not self._guard():
+                return
+            removed = totp.revoke(payload.get("id"))
+            audit.record("web_totp_revoke", actor=self._audit_actor(),
+                         result="ok" if removed else "error",
+                         summary=f"id={payload.get('id')}")
+            return self._json({"ok": True, "revoked": removed})
+        return self._error("not found", 404)
 
     def _serve_login_page(self) -> None:
         body = _LOGIN_HTML.encode("utf-8")
@@ -1287,6 +1367,8 @@ class _TrackingHTTPServer(ThreadingHTTPServer):
         self.terminal_clients_by_session: dict[str, int] = {}
         self.webauthn_challenges: dict[str, Any] = {}
         self.webauthn_lock = threading.Lock()
+        self.totp_pending: dict[str, Any] = {}
+        self.totp_lock = threading.Lock()
         super().__init__(*args, **kwargs)
 
     def close_terminal_hubs(self) -> None:

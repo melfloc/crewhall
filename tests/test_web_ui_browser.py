@@ -125,6 +125,8 @@ class _Browser(unittest.TestCase):
         self.page.route(re.compile(r".*/api/op.*"), self._api)
         self.page.route(re.compile(r".*/api/webauthn/.*"), lambda r: r.fulfill(
             status=200, content_type="application/json", body='{"ok": true, "credentials": []}'))
+        self.page.route(re.compile(r".*/api/totp/.*"), lambda r: r.fulfill(
+            status=200, content_type="application/json", body='{"ok": true, "enrollments": []}'))
         self.page.route("http://localhost/static/**", self._static)
         self.page.route("http://localhost/sw.js", self._swjs)
         self.page.route("http://localhost/", lambda r: r.fulfill(
@@ -310,7 +312,9 @@ class ConversationView(_Browser):
     def test_page_loads_every_module_from_static_without_errors(self):
         srcs = self.page.eval_on_selector_all("script[src]", "els => els.map(e => e.getAttribute('src'))")
         self.assertEqual(srcs, [
-            "/static/js/core.js", "/static/js/transport.js", "/static/js/terminals.js",
+            "/static/js/core.js",
+            "/static/vendor/qrcode/qrcode.js", "/static/vendor/qrcode/qrcode_UTF8.js",
+            "/static/js/transport.js", "/static/js/terminals.js",
             "/static/js/terminal_view.js", "/static/js/sidebar.js",
             "/static/js/agent.js", "/static/js/timeline.js", "/static/js/usage.js", "/static/js/cleaning.js",
             "/static/js/version.js", "/static/js/inbox.js", "/static/js/access.js", "/static/js/bundle.js", "/static/js/settings.js",

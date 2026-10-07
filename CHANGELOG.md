@@ -5,6 +5,20 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.73.0] — 2026-10-07
+
+- **Códigos de autenticador (TOTP)**: login con un código de 6 dígitos que cambia cada
+  30 s, generado por **Authy / Samsung Pass / Google Authenticator / 1Password** y similares.
+  Alta en Ajustes → **Access & network → Authenticator codes (TOTP)** con un **QR**
+  `otpauth://` (generado por nosotros, formato correcto) o el secreto en base32; el login
+  tiene un campo de **código**. Funciona **también por HTTP** (a diferencia de passkeys),
+  con anti-replay por paso de tiempo. Sin dependencias (RFC 6238 con la stdlib).
+- **Passkeys**: la credencial se pide **descubrible** (`residentKey: "required"`) y el
+  login envía `allowCredentials`, para que un passkey del propio dispositivo se use
+  **directamente** y no caiga en el flujo **cross-device** (ese QR lo genera el navegador
+  y su formato `FIDO:/…` solo lo entiende el flujo de passkeys de Google/Chrome, no un
+  escáner genérico).
+
 ## [0.72.0] — 2026-10-06
 
 - **Passkeys / WebAuthn** (sin dependencias): alta y login con huella/PIN/Face ID desde el

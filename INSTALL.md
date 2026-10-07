@@ -295,3 +295,9 @@ En Ajustes → **Access & network → Passkeys** pulsa **Add passkey** (huella/P
 La próxima vez, la pantalla de login ofrece **Sign in with a passkey**. Requiere un
 **contexto seguro** (HTTPS o `localhost`); sobre HTTP plano usa el token. El token sigue
 siendo el respaldo si pierdes el passkey.
+
+### Códigos de autenticador (TOTP, opcional)
+
+Ajustes → **Access & network → Authenticator codes → Set up**: escanea el QR con Authy /
+Samsung Pass / Google Authenticator y confirma con el código. Luego, en el login, escribe
+el código de 6 dígitos. Funciona también por HTTP. El token sigue como respaldo.

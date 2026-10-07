@@ -642,3 +642,7 @@ dialog.settings { width:min(980px,96vw); max-height:90vh; }
   .head .title { font-size:15px; }
   .side-foot .btn { flex:1 1 100%; }
 }
+
+/* TOTP enrollment QR */
+.qr-box{display:flex;justify-content:center;padding:8px;background:#fff;border-radius:var(--r-sm)}
+.qr-box img{display:block;width:200px;height:200px;image-rendering:pixelated}
