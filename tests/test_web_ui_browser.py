@@ -320,7 +320,7 @@ class ConversationView(_Browser):
             "/static/js/version.js", "/static/js/inbox.js", "/static/js/access.js", "/static/js/bundle.js", "/static/js/settings.js",
             "/static/js/archived.js", "/static/js/onboarding.js", "/static/js/mission.js", "/static/js/notify.js",
             "/static/js/palette.js", "/static/js/composer.js", "/static/js/conversation.js",
-            "/static/js/actions.js", "/static/js/main.js"])
+            "/static/js/actions.js", "/static/js/multiview.js", "/static/js/main.js"])
         self.assertTrue(self.page.evaluate("!!document.querySelector('link[href=\"/static/app.css\"]')"))
         self.assertEqual(self.console_errors, [])
         self.assertEqual(self.errors, [])
@@ -1800,6 +1800,30 @@ class TerminalPane(_Browser):
 
 
 
+
+
+class MultiView(_Browser):
+    agents = [AGENT, WORKING]
+
+    def test_grid_shows_a_viewport_per_agent_and_full_view_round_trips(self):
+        self.page.click("#multiBtn")
+        self.page.wait_for_selector("#multi:not(.init-hidden)")
+        self.page.wait_for_selector("#multi .mv-cell")
+        self.assertEqual(self.page.locator("#multi .mv-cell").count(), 2)
+        # The overlay covers the whole window: sidebar and header are not visible.
+        covers = self.page.evaluate(
+            "() => { const m = document.getElementById('multi').getBoundingClientRect();"
+            " return m.width >= innerWidth - 1 && m.height >= innerHeight - 1; }")
+        self.assertTrue(covers)
+        # Full view for a single agent, then Escape goes back to the grid, then closes.
+        self.page.locator("#multi .mv-cell").first.locator("button[aria-label='Full view']").click()
+        self.page.wait_for_selector("#multi .mv-cell.full")
+        self.assertIn("Full view", self.page.inner_text("#multi .mv-bar"))
+        self.page.keyboard.press("Escape")
+        self.page.wait_for_selector("#multi .mv-grid")
+        self.page.keyboard.press("Escape")
+        self.page.wait_for_function("document.getElementById('multi').classList.contains('init-hidden')")
+        self.assertEqual(self.errors, [])
 
 
 if __name__ == "__main__":

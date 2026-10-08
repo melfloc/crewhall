@@ -44,6 +44,22 @@ def _fallback_runtime_dir() -> str:
     return path
 
 
+def _tighten_private(path: str) -> None:
+    """Keep a per-user base directory private.
+
+    ``os.makedirs`` applies ``mode`` only to the leaf, so the ``/tmp/crewhall-<uid>``
+    fallback base can be born 0755. Other parts of crewhall (the remote gateway
+    preparation) require it to be 0700, so we fix it here, but only for a real
+    directory we own under ``/tmp`` (never a symlink or someone else's dir).
+    """
+    try:
+        if path.startswith("/tmp") and os.path.isdir(path) and not os.path.islink(path) \
+                and os.stat(path).st_uid == os.getuid():
+            os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
 def usable_tmpdir() -> str | None:
     """Return the dedicated TMPDIR that agent-managed processes must use.
 
@@ -141,6 +157,7 @@ def runtime_dir() -> str:
         path = os.path.join(base, brand.runtime_name())
         try:
             _makedirs(path)
+            _tighten_private(base)
             os.chmod(path, 0o700)
             chosen = path
         except OSError:

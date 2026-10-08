@@ -39,6 +39,11 @@
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M9 3v6H3M15 21v-6h6M21 3l-7 7M3 21l7-7"/></symbol>
+  <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="16" rx="1"/><rect x="17" y="4" width="4" height="16" rx="1"/></symbol>
+  <symbol id="i-rows" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="5" rx="1"/><rect x="4" y="10" width="16" height="5" rx="1"/><rect x="4" y="17" width="16" height="4" rx="1"/></symbol>
 </svg>
 
 <div class="app">
@@ -50,6 +55,8 @@
     <button class="btn icon ghost" id="missionBtn" aria-label="Mission control" title="Mission control — every agent and the message flow"><svg class="ic"><use href="#i-activity"/></svg></button>
     <button class="btn icon ghost" id="timelineBtn" aria-label="Timeline" title="Timeline — work / wait / error periods per agent"><svg class="ic"><use href="#i-list"/></svg></button>
     <button class="btn icon ghost" id="usageBtn" aria-label="Cost and usage" title="Cost and usage — tokens, cost and active time"><svg class="ic"><use href="#i-shield"/></svg></button>
+    <button class="btn icon ghost" id="multiBtn" aria-label="Multi-view" title="Multi-view — several agents side by side in a grid (Alt+M)"><svg class="ic"><use href="#i-grid"/></svg></button>
+    <button class="btn icon ghost" id="fullBtn" aria-label="Full view" title="Full view — the active agent fills the window"><svg class="ic"><use href="#i-expand"/></svg></button>
     <button class="btn icon ghost" id="cleanBtn" aria-label="Clean up" title="Clean up — temp leftovers, old backups and old releases"><svg class="ic"><use href="#i-trash"/></svg></button>
     <button class="btn ghost inbox-btn init-hidden" id="inboxBtn" aria-label="Needs your answer" title="Pending permissions and questions from all agents"><svg class="ic"><use href="#i-shield"/></svg><span class="inbox-n" id="inboxN">0</span></button>
     <button class="btn icon ghost notify-btn init-hidden" id="notifyBtn" aria-label="Enable notifications" aria-pressed="false" title="Enable browser notifications"><svg class="ic"><use href="#i-bell"/></svg></button>
@@ -145,6 +152,7 @@
     </section>
   </div>
 </div>
+<div class="multi init-hidden" id="multi" role="dialog" aria-modal="true" aria-label="Multi-view"></div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <dialog id="newAgent">
@@ -249,6 +257,7 @@
 <script src="/static/js/composer.js"></script>
 <script src="/static/js/conversation.js"></script>
 <script src="/static/js/actions.js"></script>
+<script src="/static/js/multiview.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>

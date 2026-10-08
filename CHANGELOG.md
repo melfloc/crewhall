@@ -5,6 +5,21 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.74.0] — 2026-10-08
+
+- **Vista múltiple (multi-view)**: un modo a pantalla completa que muestra **varios
+  agentes a la vez** como una cuadrícula de viewports (el sitio donde ocurre toda la
+  interacción). Al abrirla oculta el **panel lateral** y la **cabecera** (modelo,
+  backend/terminal, directorio, pid, equipo…) para no restar espacio; se entra con el
+  botón de cuadrícula del topbar o **Alt+M**. Incluye un **selector de disposición**
+  (Auto, 1, 2 columnas, 2 filas, 3 columnas, 2×2, 3×2), **añadir/quitar** agentes y
+  **arrastrar celdas** para intercambiar agentes de sitio (la disposición y el orden se
+  recuerdan). Cada celda tiene su propia conversación o salida en vivo, sus **tarjetas de
+  permiso/pregunta** respondibles al momento y su **composer** (Enter envía).
+- **Vista completa (full view)**: el viewport de **un solo agente** ocupa toda la ventana,
+  desde el topbar (agente activo) o desde el botón de expandir de una celda. `Esc` vuelve a
+  la cuadrícula (si se abrió desde ella) o cierra la vista.
+
 ## [0.73.0] — 2026-10-07
 
 - **Códigos de autenticador (TOTP)**: login con un código de 6 dígitos que cambia cada

@@ -20,7 +20,7 @@ function connect() {
     fetch("/api/op", {method:"POST",credentials:"same-origin",
       headers:{"Content-Type":"application/json"},body:JSON.stringify({op:"ping"})})
       .then(r => { if (r.status === 401) location.href = "/login"; }); };
-  w.onopen = () => { setConn(true); sendFocus(S.selected); };
+  w.onopen = () => { setConn(true); sendFocus(S.selected); if(window.mvSync) mvSync(); };
   w.onclose = () => { setConn(false); setTimeout(connect, 1200); };
   w.onmessage = (e) => {
     const m = JSON.parse(e.data);
@@ -35,9 +35,11 @@ function connect() {
       if (!S.selected && S.state.agents.length && !S.autoSelected) { S.autoSelected = true; select(S.state.agents[0].agent_id); }
       render();
       if (S.selected) renderTerm();
+      if (window.mvSync) mvSync();
     }
     if (m.type === "output") { S.output[m.agent_id] = m.output;
-      if (S.selected === m.agent_id) renderTerm(); }
+      if (S.selected === m.agent_id) renderTerm();
+      if (window.mvOnOutput) mvOnOutput(m.agent_id); }
   };
 }
 function sendFocus(id){
