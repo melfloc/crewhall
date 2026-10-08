@@ -667,6 +667,10 @@ dialog.settings { width:min(980px,96vw); max-height:90vh; }
 .mv-grid[data-layout="3x2"] { grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }
 .mv-empty { grid-column:1/-1; display:grid; place-items:center; color:var(--muted); padding:40px; text-align:center; }
 .mv-cell { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--border); border-radius:var(--r); background:var(--surface); }
+/* Full view: the single cell is a flex item of the column overlay, so it must
+   grow to fill the window (otherwise its height is content-driven and leaves
+   empty space below for short/empty conversations). */
+.mv-cell.full { flex:1; min-height:0; }
 .mv-cell.dragging { opacity:.5; }
 .mv-cell.mv-drop { outline:2px dashed var(--accent); outline-offset:-3px; }
 .mv-cell-head { display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid var(--border); background:var(--surface-2); flex:none; }

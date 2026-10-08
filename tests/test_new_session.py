@@ -32,6 +32,16 @@ OC_HOME = """\
 OLD, NEW = "ses_old1", "ses_new2"
 
 
+class _FakeLink:
+    """Minimal OpenCodeLink stand-in: reports a fixed message total."""
+
+    def __init__(self, total: int = 0) -> None:
+        self.total = total
+
+    def history(self, session_id, limit=200, before=None):
+        return {"available": True, "messages": [], "total": self.total, "start": 0}
+
+
 class LeavingTheConversation(unittest.TestCase):
     def setUp(self):
         self.c = Controller(adopt=False)
@@ -74,13 +84,49 @@ class LeavingTheConversation(unittest.TestCase):
         self.assertEqual(self.h.conversation_id, NEW)
 
     def test_start_screen_reached_outside_crewhall_is_detected(self):
-        self.h.link = object()  # history goes through OpenCode's server
+        self.h.link = _FakeLink(total=3)  # the tracked conversation had messages
         self.h.conversation_resolver = lambda: None
         self.assertFalse(self.h.on_home_screen())
         self.h.session.screen = OC_HOME
         self.assertTrue(self.h.on_home_screen())
         self.h.history()
         self.assertIsNone(self.h.conversation_id)
+
+    def test_home_screen_on_a_fresh_empty_session_is_not_retired(self):
+        # crewhall's own /new adopted the new, still-empty session; the start
+        # screen must not blacklist it. Regression: the Conversation view went
+        # permanently empty after a teammate cleared the agent.
+        self.h.link = _FakeLink(total=0)
+        self.h.conversation_resolver = lambda: None
+        self.h.session.screen = OC_HOME
+        self.c._adopt_conversation(self.h, NEW)
+        self.assertEqual(self.h.conversation_id, NEW)
+        self.h.history()
+        self.assertEqual(self.h.conversation_id, NEW)
+        self.assertNotIn(NEW, self.c._retired_conversations.get(self.h.agent_id, set()))
+
+    def test_cleared_agent_keeps_adopting_the_new_conversation(self):
+        # End to end: an orchestrator clears an OpenCode agent; OpenCode creates
+        # an empty session and reports it; history polls must keep it, and once
+        # the agent runs, its messages come from the new session.
+        self.h.link = _FakeLink(total=0)
+        self.h.conversation_resolver = lambda: (
+            NEW if self.h.conversation_id is None else self.h.conversation_id)
+        self.h.session.send_key = lambda key, s=self.h.session: (
+            s.keys.append(key), setattr(s, "screen", OC_HOME))
+        self.c._conversation_left(self.h, OLD)
+        self.h.session.screen = OC_HOME
+        self.c._on_opencode_event(self.h, {"type": "session.created",
+                                           "properties": {"sessionID": NEW, "info": {"id": NEW}}})
+        self.assertEqual(self.h.conversation_id, NEW)
+        self.h.history()  # the poll that used to retire NEW
+        self.assertEqual(self.h.conversation_id, NEW)
+        self.h.session.screen = OC_SESSION  # the agent ran turns in the new session
+        self.h.link.total = 2
+        data = self.h.history()
+        self.assertTrue(data["available"])
+        self.assertEqual(data["total"], 2)
+        self.assertEqual(self.h.conversation_id, NEW)
 
     def test_a_new_id_reported_first_is_not_undone(self):
         # Claude: the SessionStart hook can arrive before the harness notices /clear.

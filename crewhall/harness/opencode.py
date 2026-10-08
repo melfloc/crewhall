@@ -87,16 +87,27 @@ class OpenCodeHarness(Harness):
                 and not WORKING_RE.search(low) and not COMPLETION_RE.search(text))
 
     def history(self, limit: int = 200, before: int | None = None) -> dict:
-        # /new typed straight into the TUI (not through crewhall): the
-        # start screen means the previous conversation was left.
-        if (self.link and self.conversation_id and self.session.status.alive
-                and self.on_home_screen()):
-            self._new_session_started()
         if self.link and not self.conversation_id and self.conversation_resolver:
             self.conversation_id = self.conversation_resolver()
         if not (self.link and self.conversation_id):
             return super().history(limit, before)
-        return self.link.history(self.conversation_id, limit, before)
+        data = self.link.history(self.conversation_id, limit, before)
+        # ``/new`` typed straight into the TUI (not through crewhall): the start
+        # screen shows while the tracked conversation still has messages, so we
+        # left it.  A start screen over an *empty* conversation is just the fresh
+        # session crewhall's own ``/new`` created — retiring it here blacklisted
+        # the new conversation and left the Conversation view empty forever, even
+        # as the Live view kept showing activity (OpenCode >= 1.18.34 creates the
+        # empty session before the first prompt).
+        if (self.session.status.alive and int(data.get("total") or 0) > 0
+                and self.on_home_screen()):
+            self._new_session_started()
+            if self.conversation_resolver:
+                self.conversation_resolver()
+                if self.conversation_id:
+                    return self.link.history(self.conversation_id, limit, before)
+            return super().history(limit, before)
+        return data
 
     def activity_snapshot(self) -> dict:
         from .. import activity

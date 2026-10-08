@@ -5,6 +5,22 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.75.1] — 2026-10-08
+
+- **Corrección (OpenCode)**: limpiar la conversación de un agente (`/new`, `/clear`)
+  mediante un comando de **otro** agente dejaba la pestaña **Conversation** vacía para
+  siempre, aunque la conversación siguiera existiendo (la pestaña **Live** seguía
+  mostrando actividad). Desde OpenCode 1.18.34 la sesión nueva —vacía— se crea antes del
+  primer mensaje, y el heurístico de «pantalla de inicio» de crewhall la interpretaba
+  como un `/new` escrito a mano en la TUI y la **retiraba** (la cazaba en memoria para no
+  volver a adoptarla). Ahora solo se abandona la conversación cuando la que seguimos
+  **todavía tiene mensajes**: una pantalla de inicio sobre una conversación ya vacía es la
+  sesión nueva que creó el propio `/new`, y se conserva.
+- **Corrección (vista completa)**: la vista completa de un agente no aprovechaba el alto
+  de la ventana. La celda era un ítem flex sin `flex-grow`, así que su altura la fijaba el
+  contenido: con conversaciones cortas o vacías dejaba medio panel en blanco por debajo.
+  Ahora (`app.css`: `.mv-cell.full { flex:1; min-height:0 }`) llena todo el alto.
+
 ## [0.75.0] — 2026-10-08
 
 - **`terminals.totp_grants`** (def. `false`, requiere `CONFIRM`): un **código TOTP**

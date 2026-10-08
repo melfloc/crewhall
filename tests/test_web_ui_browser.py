@@ -1828,6 +1828,21 @@ class MultiView(_Browser):
         self.page.wait_for_function("document.getElementById('multi').classList.contains('init-hidden')")
         self.assertEqual(self.errors, [])
 
+    def test_full_view_cell_fills_the_window(self):
+        # Short/empty conversation: the single-agent viewport must still fill
+        # the window instead of shrinking to its content height.
+        self.total, self.available = 0, False
+        self._open()
+        self.page.locator("#multi .mv-cell").first.locator("button[aria-label='Full view']").click()
+        self.page.wait_for_selector("#multi .mv-cell.full")
+        self.page.wait_for_timeout(300)
+        rect = self.page.evaluate(
+            "() => { const c = document.querySelector('#multi .mv-cell.full')"
+            ".getBoundingClientRect(); return {w:c.width, h:c.height, bottom:c.bottom,"
+            " iw:innerWidth, ih:innerHeight}; }")
+        self.assertGreaterEqual(round(rect["w"]), rect["iw"] - 1, rect)
+        self.assertGreaterEqual(round(rect["bottom"]), rect["ih"] - 1, rect)
+
     def test_new_agents_are_detected_while_open_without_reload(self):
         self._open()
         self.assertEqual(self.page.locator("#multi .mv-cell").count(), 2)
