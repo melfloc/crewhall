@@ -50,6 +50,7 @@ names = zipfile.ZipFile(sys.argv[1]).namelist()
 assert "crewhall/web/static/index.html" in names, "Web UI page missing from wheel"
 assert "crewhall/web/static/app.css" in names and "crewhall/web/static/js/core.js" in names, "Web UI assets missing from wheel"
 assert "crewhall/web/static/vendor/xterm/xterm.js" in names, "vendored xterm assets missing from wheel"
+assert "crewhall/web/static/vendor/qrcode/qrcode.js" in names, "vendored qrcode assets missing from wheel"
 if sys.argv[2]:
     assert "crewhall/_build_info.json" in names, "build info missing from wheel"
 PY

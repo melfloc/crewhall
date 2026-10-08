@@ -179,9 +179,12 @@ class Packaging(unittest.TestCase):
         data = cfg["tool"]["setuptools"]["package-data"]["crewhall.web"]
         self.assertIn("static/*", data)
         self.assertIn("static/js/*", data)
+        # Vendored assets live one level under vendor/ and must all ship.
+        self.assertIn("static/vendor/*/*", data)
         self.assertEqual(cfg["project"]["requires-python"], ">=3.11")  # tomllib
         static = os.path.join(ROOT, "crewhall", "web", "static")
-        for rel in ("index.html", "app.css", "js/core.js", "js/main.js"):
+        for rel in ("index.html", "app.css", "js/core.js", "js/main.js",
+                    "vendor/xterm/xterm.js", "vendor/qrcode/qrcode.js"):
             self.assertTrue(os.path.exists(os.path.join(static, rel)), rel)
 
     def test_shell_scripts_parse_and_show_help(self):

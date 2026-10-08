@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crewhall"
-version = "0.74.0"
+version = "0.74.1"
 description = "Control real interactive CLI agents (Claude Code, OpenCode, Codex) from one place and let them talk to each other."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -41,9 +41,11 @@ agent-terminal = "crewhall.cli:main"
 include = ["crewhall*"]
 
 # The Web UI is a static page (index.html + css/js) that must ship inside the wheel,
-# including the vendored xterm.js assets used by the terminal view.
+# including every vendored asset directory (xterm.js for the terminal view, qrcode for
+# the TOTP enrollment QR). ``static/vendor/*/*`` keeps future vendor dirs from being
+# forgotten, which silently 404s them in a deployed install.
 [tool.setuptools.package-data]
-"crewhall.web" = ["static/*", "static/js/*", "static/vendor/xterm/*"]
+"crewhall.web" = ["static/*", "static/js/*", "static/vendor/*/*"]
 "crewhall" = ["_build_info.json", "py.typed"]
 
 [tool.ruff]

@@ -5,6 +5,16 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.74.1] — 2026-10-08
+
+- **Corrección**: el **QR de alta de TOTP** no se dibujaba en las instalaciones
+  desplegadas. El wheel no incluía `web/static/vendor/qrcode/` (el mismo tipo de
+  fallo que tuvo xterm en su día), así que el navegador pedía
+  `/static/vendor/qrcode/qrcode.js` y recibía 404; sin la librería, el diálogo
+  mostraba el URI `otpauth://` como texto en vez del QR. Ahora se empaqueta todo
+  `static/vendor/*/` y `build-release.sh` comprueba explícitamente que el QR
+  viene en el wheel. En un checkout de desarrollo no se apreciaba.
+
 ## [0.74.0] — 2026-10-08
 
 - **Vista múltiple (multi-view)**: un modo a pantalla completa que muestra **varios
