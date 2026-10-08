@@ -12,11 +12,12 @@ const MV = {
   focus: null,             // agent id in full view
   layout: store.get("at.mv.layout") || "auto",
   ids: null,               // ordered agent ids shown in the grid
+  auto: store.get("at.mv.auto") !== "0",  // mirror every agent until the user curates
   cells: {},               // agent id -> per-cell state
 };
 
 const MV_LAYOUTS = [
-  ["auto", "Auto", "i-grid"],
+  ["auto", "Auto (tiling)", "i-grid"],
   ["1", "Single", "i-expand"],
   ["2c", "2 columns", "i-columns"],
   ["2r", "2 rows", "i-rows"],
@@ -36,16 +37,23 @@ function mvLoadIds(){
   catch(e){ return []; }
 }
 function mvSaveIds(){ store.set("at.mv.agents", JSON.stringify(MV.ids || [])); }
+function mvSaveAuto(){ store.set("at.mv.auto", MV.auto ? "1" : "0"); }
 function mvSaveLayout(l){ MV.layout = l; store.set("at.mv.layout", l); }
 function mvCap(){ return MV_CAP[MV.layout] || 99; }
-function mvLayoutLabel(){ const row = MV_LAYOUTS.find(x => x[0] === MV.layout); return row ? row[1] : "Auto"; }
+function mvLayoutLabel(){ const row = MV_LAYOUTS.find(x => x[0] === MV.layout); return row ? row[1] : "Auto (tiling)"; }
+/* The user curated the list (added/removed/reordered): stop mirroring every agent. */
+function mvCurated(){ MV.auto = false; mvSaveAuto(); }
 
 function mvResolveIds(){
   const agents = (S.state && S.state.agents) || [];
   const valid = new Set(agents.map(a => a.agent_id));
   if(MV.ids === null) MV.ids = mvLoadIds();
   let ids = (MV.ids || []).filter(id => valid.has(id));
-  if(!ids.length){
+  if(MV.auto){
+    // Mirror the live agent set: drop gone ones (done by the filter) and append new ones.
+    agents.forEach(a => { if(!ids.includes(a.agent_id)) ids.push(a.agent_id); });
+  }
+  if(!ids.length && agents.length){
     const ordered = agents.map(a => a.agent_id);
     ids = (S.selected && valid.has(S.selected))
       ? [S.selected].concat(ordered.filter(x => x !== S.selected))
@@ -102,12 +110,54 @@ function mvRenderGrid(root){
 }
 
 function mvGrid(ids){
+  if(MV.layout === "auto") return mvTileGrid(ids);
   const grid = el("div", {className:"mv-grid", dataset:{layout:MV.layout}});
   if(!ids.length){
-    grid.append(el("div", {className:"mv-empty"}, "No agents to show. Create an agent, then open Multi-view again."));
+    grid.append(el("div", {className:"mv-empty"}, "No agents shown. Use “Add agent” to bring one in."));
     return grid;
   }
   ids.forEach(id => grid.append(mvCell(id)));
+  return grid;
+}
+
+/* Auto layout: binary space partition ("dwindle", like Hyprland/Omarchy). The
+   first split halves the screen (50/50), the next split halves the largest
+   remaining pane along its longer side, and so on. Each pane is placed with CSS
+   grid tracks derived from the partition, so the tiling is exact at any size. */
+function mvTileRects(n){
+  const rects = [{x:0, y:0, w:1, h:1}];
+  while(rects.length < n){
+    let idx = 0, best = -1;
+    rects.forEach((r, i) => { const area = r.w * r.h; if(area >= best){ best = area; idx = i; } });
+    const r = rects.splice(idx, 1)[0];
+    if(r.w >= r.h){  // wider than tall -> split vertically
+      rects.splice(idx, 0, {x:r.x, y:r.y, w:r.w/2, h:r.h},
+                          {x:r.x + r.w/2, y:r.y, w:r.w/2, h:r.h});
+    } else {          // taller than wide -> split horizontally
+      rects.splice(idx, 0, {x:r.x, y:r.y, w:r.w, h:r.h/2},
+                          {x:r.x, y:r.y + r.h/2, w:r.w, h:r.h/2});
+    }
+  }
+  return rects;
+}
+function mvTileGrid(ids){
+  const grid = el("div", {className:"mv-grid tiled", dataset:{layout:"auto"}});
+  if(!ids.length){
+    grid.append(el("div", {className:"mv-empty"}, "No agents shown. Use “Add agent” to bring one in."));
+    return grid;
+  }
+  const rects = mvTileRects(ids.length);
+  const xs = [...new Set(rects.flatMap(r => [r.x, r.x + r.w]))].sort((a, b) => a - b);
+  const ys = [...new Set(rects.flatMap(r => [r.y, r.y + r.h]))].sort((a, b) => a - b);
+  applyStyle(grid, `grid-template-columns:repeat(${xs.length - 1},minmax(0,1fr));`
+                 + `grid-template-rows:repeat(${ys.length - 1},minmax(0,1fr))`);
+  ids.forEach((id, i) => {
+    const r = rects[i];
+    const cell = mvCell(id);
+    applyStyle(cell, `grid-column:${xs.indexOf(r.x) + 1} / ${xs.indexOf(r.x + r.w) + 1};`
+                   + `grid-row:${ys.indexOf(r.y) + 1} / ${ys.indexOf(r.y + r.h) + 1}`);
+    grid.append(cell);
+  });
   return grid;
 }
 
@@ -140,16 +190,16 @@ function mvAddMenu(){
 function mvAdd(id){
   mvResolveIds();
   if(!MV.ids.includes(id)) MV.ids.push(id);
-  mvSaveIds(); mvRender();
+  mvCurated(); mvSaveIds(); mvRender();
 }
 function mvRemove(id){
   MV.ids = mvResolveIds().filter(x => x !== id);
-  mvSaveIds(); mvRender();
+  mvCurated(); mvSaveIds(); mvRender();
 }
 function mvSetCell(oldId, newId){
   const ids = mvResolveIds().map(x => x === oldId ? newId : x);
   MV.ids = ids.filter((x, i) => ids.indexOf(x) === i);   // no duplicates
-  mvSaveIds(); mvRender();
+  mvCurated(); mvSaveIds(); mvRender();
 }
 
 function mvCell(id, full){
@@ -188,6 +238,9 @@ function mvCellHead(id){
     "aria-label":"Full view", onclick:()=>mvOpenFull(id, {})}, ic("expand","sm"));
   const moreBtn = el("button", {className:"btn icon sm ghost", type:"button", title:"Agent options",
     "aria-label":"Agent options", onclick:(e)=>{ e.stopPropagation(); openMenu(moreBtn, mvCellMenu(id)); }}, ic("more","sm"));
+  const removeBtn = el("button", {className:"btn icon sm ghost mv-remove", type:"button",
+    title:"Remove this agent from the multi-view", "aria-label":"Remove from multi-view",
+    onclick:(e)=>{ e.stopPropagation(); mvRemove(id); }}, ic("x","sm"));
   return el("div", {className:"mv-cell-head"},
     el("span", {className:`avatar ${state}`, style:`--h:${hue(a.kind||a.name||id)}`},
       (a.name || id).trim().charAt(0) || "?", el("span", {className:"st"}, dot(state, actOf(a).kind))),
@@ -195,7 +248,7 @@ function mvCellHead(id){
       el("button", {className:"mv-name", type:"button", title:"Open this agent in the main view",
         onclick:()=>select(id)}, a.name || id),
       el("span", {className:"mv-sub"}, actEl)),
-    pillBox, viewBtn, expBtn, moreBtn);
+    pillBox, viewBtn, expBtn, moreBtn, removeBtn);
 }
 
 function mvCellMenu(id){
@@ -209,7 +262,7 @@ function mvCellMenu(id){
   const others = (S.state?.agents || []).filter(a => a.agent_id !== id);
   others.slice(0, 12).forEach(a => items.push(
     {label:"Show here: " + (a.name || a.agent_id), icon:"users", run:()=>mvSetCell(id, a.agent_id)}));
-  if(mvVisibleIds().length > 1) items.push("-", {label:"Remove from view", icon:"x", run:()=>mvRemove(id)});
+  items.push("-", {label:"Remove from view", icon:"x", danger:true, run:()=>mvRemove(id)});
   return items;
 }
 
@@ -426,7 +479,7 @@ function mvDrop(e, id, cell){
   if(!MV_DRAG || MV_DRAG === id){ MV_DRAG = null; return; }
   const arr = mvResolveIds().slice();
   const i = arr.indexOf(MV_DRAG), j = arr.indexOf(id);
-  if(i >= 0 && j >= 0){ arr[i] = id; arr[j] = MV_DRAG; MV.ids = arr; mvSaveIds(); mvRender(); }
+  if(i >= 0 && j >= 0){ arr[i] = id; arr[j] = MV_DRAG; MV.ids = arr; mvCurated(); mvSaveIds(); mvRender(); }
   MV_DRAG = null;
 }
 

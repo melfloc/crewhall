@@ -1805,10 +1805,13 @@ class TerminalPane(_Browser):
 class MultiView(_Browser):
     agents = [AGENT, WORKING]
 
-    def test_grid_shows_a_viewport_per_agent_and_full_view_round_trips(self):
+    def _open(self):
         self.page.click("#multiBtn")
         self.page.wait_for_selector("#multi:not(.init-hidden)")
         self.page.wait_for_selector("#multi .mv-cell")
+
+    def test_grid_shows_a_viewport_per_agent_and_full_view_round_trips(self):
+        self._open()
         self.assertEqual(self.page.locator("#multi .mv-cell").count(), 2)
         # The overlay covers the whole window: sidebar and header are not visible.
         covers = self.page.evaluate(
@@ -1824,6 +1827,40 @@ class MultiView(_Browser):
         self.page.keyboard.press("Escape")
         self.page.wait_for_function("document.getElementById('multi').classList.contains('init-hidden')")
         self.assertEqual(self.errors, [])
+
+    def test_new_agents_are_detected_while_open_without_reload(self):
+        self._open()
+        self.assertEqual(self.page.locator("#multi .mv-cell").count(), 2)
+        self.agents = [AGENT, WORKING, READY]
+        self._push()
+        self.page.wait_for_function("document.querySelectorAll('#multi .mv-cell').length === 3")
+
+    def test_remove_agent_from_view_is_remembered(self):
+        self._open()
+        self.assertEqual(self.page.locator("#multi .mv-cell").count(), 2)
+        self.page.locator("#multi .mv-cell").first.locator(".mv-remove").click()
+        self.page.wait_for_function("document.querySelectorAll('#multi .mv-cell').length === 1")
+        # Once curated, a new agent must NOT be auto-added...
+        self.agents = [AGENT, WORKING, READY]
+        self._push()
+        self.page.wait_for_timeout(300)
+        self.assertEqual(self.page.locator("#multi .mv-cell").count(), 1)
+        # ...but it can be brought back on demand from "Add agent".
+        self.page.get_by_role("button", name="Add agent").click()
+        self.page.locator(".menu button", has_text="beta").first.click()
+        self.page.wait_for_function("document.querySelectorAll('#multi .mv-cell').length === 2")
+
+    def test_auto_layout_tiles_the_panes(self):
+        self.agents = [AGENT, WORKING, READY]
+        self._push()
+        self._open()
+        self.page.wait_for_function("document.querySelectorAll('#multi .mv-cell').length === 3")
+        self.assertTrue(self.page.evaluate(
+            "!!document.querySelector('#multi .mv-grid.tiled')"))
+        spans = self.page.eval_on_selector_all(
+            "#multi .mv-cell", "els => els.map(e => e.style.gridRow + '|' + e.style.gridColumn)")
+        # Master pane spans both rows (the widest pane is split horizontally).
+        self.assertTrue(any("1 / 3" in s for s in spans), spans)
 
 
 if __name__ == "__main__":

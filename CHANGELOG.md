@@ -5,6 +5,21 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.74.2] — 2026-10-08
+
+- **Vista múltiple — disposición automática tipo mosaico (tiling)**: el modo «Auto»
+  ahora reparte la pantalla como un gestor de ventanas (dwindle, al estilo de
+  Omarchy/Hyprland): dos agentes al 50 %, el siguiente parte una de las mitades, y así
+  sucesivamente, en lugar de una cuadrícula fija.
+- **Detección de agentes**: la vista múltiple refleja automáticamente los agentes
+  presentes, incluidos los creados con la vista ya abierta, sin recargar la página
+  (antes podía hacer falta F5).
+- **Quitar agentes de la vista**: botón × en cada celda y opción en el menú para mostrar
+  solo algunos agentes. Al hacerlo, la selección pasa a ser manual y se recuerda: no se
+  vuelven a añadir solos.
+- **Corrección**: los menús de la vista múltiple (disposición, añadir/quitar agente)
+  quedaban por debajo del overlay y no se podían pulsar.
+
 ## [0.74.1] — 2026-10-08
 
 - **Corrección**: el **QR de alta de TOTP** no se dibujaba en las instalaciones
