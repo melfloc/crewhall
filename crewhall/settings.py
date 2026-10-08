@@ -128,6 +128,10 @@ def _static_schema() -> list[dict[str, Any]]:
         s("terminals.master_grants", "terminals", "bool", False, "Master session can use terminals",
           "On: the master Web UI session gets terminal access without a separate terminal token "
           "(a leaked master token would then open shells). Enabling is privileged."),
+        s("terminals.totp_grants", "terminals", "bool", False, "TOTP unlocks every terminal",
+          "On: signing in with a TOTP code grants terminal read+write access on all hosts, and the "
+          "unlock prompt also accepts a TOTP code (a leaked code would then open shells). "
+          "Enabling is privileged."),
         s("terminals.keep_exited_seconds", "terminals", "int", 300, "Keep exited terminals (s)",
           "Terminals whose shell has exited are closed and removed after this (0 = keep forever).",
           min=0, max=86400),
@@ -642,6 +646,8 @@ def patch(changes: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
         raise SettingsError("enabling terminals needs typed confirmation")
     if changes.get("terminals.master_grants") is True and not confirm:
         raise SettingsError("letting the master session use terminals needs typed confirmation")
+    if changes.get("terminals.totp_grants") is True and not confirm:
+        raise SettingsError("letting TOTP sessions use terminals needs typed confirmation")
     with _LOCK:
         data = json.loads(json.dumps(load()))
         for key, value in changes.items():

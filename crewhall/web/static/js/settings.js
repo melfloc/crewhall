@@ -51,8 +51,10 @@ function settingsGroup(group, title, exclude = []){
       const listy = f.item.type === "list" || f.item.type === "paths";
       const v = f.get(); if(JSON.stringify(v) !== JSON.stringify(listy ? (f.item.value||[]).join("\n") : f.item.value) ) changes[f.item.key] = v; });
     if(!Object.keys(changes).length){ save.disabled = true; return; }
+    const confirmKeys = new Set(["terminals.enabled", "terminals.master_grants",
+                                 "terminals.totp_grants"]);
     const needsConfirm = Object.keys(changes).some(k =>
-      k === "terminals.enabled" || k.endsWith(".command") || k.endsWith(".env"));
+      confirmKeys.has(k) || k.endsWith(".command") || k.endsWith(".env"));
     if(needsConfirm){
       const ok = await confirmTyped({title:"Confirm privileged change?", word:"CONFIRM", ok:"Apply",
         message:"This change lets the daemon run arbitrary code as your user. Type CONFIRM to proceed."});
@@ -441,7 +443,7 @@ async function terminalTokensSection(){
   if(!(data.tokens || []).length) wrap.append(el("div", {className:"hint"}, "No terminal tokens yet."));
   wrap.append(el("div", {className:"field"}, el("label", {}, "New terminal token"),
     el("div", {className:"row"}, scope, hosts, ttl, label, issue)),
-    el("div", {className:"hint"}, "Creating or typing in a terminal needs a token with scope write; read only allows viewing. The token is limited to the hosts you list. Open the Terminals tab and unlock with it (the tab offers to create one if you have none)."));
+    el("div", {className:"hint"}, "Creating or typing in a terminal needs a token with scope write; read only allows viewing. The token is limited to the hosts you list. Open the Terminals tab and unlock with a TOTP code (if \u201cTOTP unlocks every terminal\u201d is on) or paste a token there."));
   return wrap;
 }
 async function rotateToken(){

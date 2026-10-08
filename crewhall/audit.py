@@ -36,6 +36,7 @@ AUDITED = {
     "bundle_export", "bundle_import", "bundle_delete", "fs_complete",
     "web_token_rotate", "web_token_revoke", "web_session_revoke", "web_login",
     "web_passkey_add", "web_passkey_revoke", "web_totp_add", "web_totp_revoke",
+    "web_terminal_unlock",
     "terminal_create", "terminal_close", "terminal_write", "terminal_key",
     "terminal_resize", "terminal_capture",
     "terminal_ws_open", "terminal_ws_close", "terminal_ws_mode",
@@ -269,4 +270,6 @@ def summarize(op: str, request: dict[str, Any], result: dict[str, Any] | None = 
         return f"id={request.get('id')} scope={request.get('scope')}"
     if op == "web_terminal_token_revoke":
         return f"id={request.get('id')}"
+    if op == "web_terminal_unlock":
+        return "totp"
     return ""

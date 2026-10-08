@@ -124,6 +124,25 @@ maestro filtrado pasaría a abrir shells. Por eso sigue **desactivado por defect
 recomendación es usarlo solo en loopback/Tailscale. Los tokens de terminal con alcance
 siguen existiendo para acceso limitado (solo lectura o restringido a hosts).
 
+### `terminals.totp_grants` (0.75.0)
+
+Si se activa (requiere `CONFIRM`), un **código TOTP** desbloquea **todas** las
+terminales de una vez con `terminal:read`/`terminal:write` sobre `*` (todos los hosts),
+sin tokens de terminal ni un alcance por token:
+
+- **Al iniciar sesión** con `/api/totp/login`, la sesión recién emitida recibe el
+  desbloqueo completo automáticamente.
+- **En el prompt de desbloqueo** (`POST /api/terminal-unlock`), se acepta `{"code":"123456"}`
+  como alternativa a `{"token":"..."}`. Un código de 6 dígitos presenta el mismo límite
+  de intentos que el login; un código inválido responde 401.
+
+Igual que `master_grants`, **debilita** la separación de capacidades: quien obtenga el
+código TOTP (o un secreto de autenticador) pasa a abrir shells en cualquier host. Por eso
+está **desactivado por defecto**, la activación es privilegiada y la recomendación es
+usarlo solo en loopback/Tailscale. El desbloqueo por TOTP se audita como
+`web_terminal_unlock` (summary `totp`). Los tokens de terminal con alcance siguen
+disponibles para acceso limitado (solo lectura o restringido a hosts).
+
 Las terminales cuyo shell ha salido se cierran y eliminan solas tras
 `terminals.keep_exited_seconds` (def. 300 s), y los tokens caducados se purgan; así no
 se acumulan recursos.

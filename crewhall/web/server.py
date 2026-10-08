@@ -538,7 +538,7 @@ class Handler(BaseHTTPRequestHandler):
         return session, [self._session_cookie(session)]
 
     def _do_terminal_unlock(self) -> None:
-        from .. import audit
+        from .. import audit, settings
 
         if not self._host_ok() or not self._origin_ok():
             return self._error("request not allowed", 403)
@@ -555,18 +555,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._error("too many attempts; try again later", 429,
                                extra=[("Retry-After", str(int(retry) + 1))])
         token = payload.get("token")
+        code = payload.get("code")
         rec = terminal_tokens.verify(token) if isinstance(token, str) else None
-        if not rec:
+        # A TOTP code is an alternative unlock factor, gated by terminals.totp_grants.
+        code_ok = bool(settings.get("terminals.totp_grants")) and isinstance(code, str)
+        if not rec and not code_ok:
             auth.note_login_failure(ip)
             return self._error("invalid terminal token", 401)
-        auth.note_login_success(ip)
         session, extra = self._session_or_new()
         if not session:
             return self._error("sign in first", 401)
-        auth.unlock_terminal(session, scopes=rec["scopes"], hosts=rec["hosts"],
-                             token_id=rec["id"])
-        return self._json({"ok": True, "scopes": rec["scopes"], "hosts": rec["hosts"]},
-                          extra=extra)
+        if rec:
+            auth.note_login_success(ip)
+            auth.unlock_terminal(session, scopes=rec["scopes"], hosts=rec["hosts"],
+                                 token_id=rec["id"])
+            return self._json({"ok": True, "scopes": rec["scopes"], "hosts": rec["hosts"]},
+                              extra=extra)
+        if not totp.verify_any(code):
+            auth.note_login_failure(ip)
+            return self._error("invalid code", 401)
+        auth.note_login_success(ip)
+        scopes = [terminal_tokens.SCOPE_READ, terminal_tokens.SCOPE_WRITE]
+        auth.unlock_terminal(session, scopes=scopes, hosts=["*"], token_id=None)
+        audit.record("web_terminal_unlock", actor=self._audit_actor(), result="ok",
+                     summary="totp")
+        return self._json({"ok": True, "scopes": scopes, "hosts": ["*"]}, extra=extra)
 
     def _do_terminal_ticket(self) -> None:
         from .. import settings
@@ -807,6 +820,7 @@ class Handler(BaseHTTPRequestHandler):
             auth.note_login_success("totp:" + self._client_label())
             session = auth.issue_session(ip=self._client_label(),
                                          user_agent=self.headers.get("User-Agent", ""))
+            self._grant_totp_terminals(session)
             audit.record("web_login", actor=self._audit_actor(), result="ok", summary="totp")
             return self._json({"ok": True}, extra=[self._session_cookie(session)])
         if action == "list":
@@ -821,6 +835,16 @@ class Handler(BaseHTTPRequestHandler):
                          summary=f"id={payload.get('id')}")
             return self._json({"ok": True, "revoked": removed})
         return self._error("not found", 404)
+
+    def _grant_totp_terminals(self, session: str | None) -> bool:
+        """Unlock every terminal for a TOTP session when ``terminals.totp_grants`` is on."""
+        from .. import settings
+
+        if not settings.get("terminals.enabled") or not settings.get("terminals.totp_grants"):
+            return False
+        return auth.unlock_terminal(
+            session, scopes=[terminal_tokens.SCOPE_READ, terminal_tokens.SCOPE_WRITE],
+            hosts=["*"], token_id=None)
 
     def _serve_login_page(self) -> None:
         body = _LOGIN_HTML.encode("utf-8")

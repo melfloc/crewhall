@@ -33,41 +33,20 @@
     if(unlockBtn) unlockBtn.classList.toggle("init-hidden", !v);
   }
 
-  async function hasAnyToken(){
-    try{ const r = await op("terminal_token_list"); return (r.tokens || []).length > 0; }
-    catch(e){ return true; }  // can't tell: let the user paste one
-  }
-
-  async function issueAndUnlock(){
-    try{
-      const r = await op("terminal_token_issue",
-        {scope:"write", hosts:null, ttl:8*3600, label:"web"});
-      if(typeof showIssuedToken === "function") showIssuedToken(r.token, r.record);
-      const u = await fetch("/api/terminal-unlock", {method:"POST", credentials:"same-origin",
-        headers:{"Content-Type":"application/json"}, body: JSON.stringify({token:r.token})});
-      if(u.ok){ setLocked(false); toast("Terminals unlocked", "ok"); return true; }
-      toast("Created the token; paste it with Unlock", "info");
-      return false;
-    }catch(e){ toast(String(e), "error"); return false; }
-  }
-
   async function unlockTerminal(){
-    if(!await hasAnyToken()){
-      if(!await confirmDlg({title:"No terminal tokens yet",
-        message:"Create a write-scoped terminal token now? It will be shown once, then used to unlock this browser.",
-        ok:"Create token"})) return false;
-      return issueAndUnlock();
-    }
-    const token = await promptDlg({title:"Unlock terminals", ok:"Unlock",
-      sub:"Paste a terminal token with scope write (Settings → Access & network → Terminal tokens).",
-      fields:[{key:"token", label:"Terminal token", mono:true, required:true}]});
-    if(!token) return false;
+    const v = await promptDlg({title:"Unlock terminals", ok:"Unlock",
+      sub:"Enter your 6-digit authenticator (TOTP) code to unlock every terminal, " +
+          "or paste a terminal token.",
+      fields:[{key:"secret", label:"TOTP code or terminal token", mono:true, required:true}]});
+    if(!v) return false;
+    const raw = (v.secret || "").trim();
+    const body = /^\d{6}$/.test(raw) ? {code: raw} : {token: raw};
     const r = await fetch("/api/terminal-unlock", {
       method: "POST", credentials: "same-origin",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({token: token.token}),
+      body: JSON.stringify(body),
     });
-    if(!r.ok){ toast("Invalid or read-only terminal token", "error"); return false; }
+    if(!r.ok){ toast("Invalid TOTP code or terminal token", "error"); return false; }
     setLocked(false); toast("Terminals unlocked", "ok"); return true;
   }
 

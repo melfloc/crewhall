@@ -312,6 +312,64 @@ class TerminalSecurity(_Harness):
         finally:
             settings.patch({"terminals.master_grants": False})
 
+    def test_totp_grants_needs_confirm(self):
+        from crewhall import settings
+
+        with self.assertRaises(settings.SettingsError):
+            settings.patch({"terminals.totp_grants": True})
+
+    def test_totp_code_rejected_when_grants_off(self):
+        from crewhall.web import totp
+
+        secret = totp.new_secret()
+        totp.add_enrollment(secret, "test")
+        cookie = self._cookie()
+        status, _, _ = self._request(
+            "POST", "/api/terminal-unlock", {"code": totp.code_at(secret)}, cookie=cookie,
+            origin=f"http://127.0.0.1:{self.port}")
+        self.assertEqual(status, 401)
+
+    def test_totp_code_unlocks_every_terminal(self):
+        from crewhall import settings
+        from crewhall.web import terminal_tokens, totp
+
+        settings.patch({"terminals.totp_grants": True}, confirm=True)
+        try:
+            secret = totp.new_secret()
+            totp.add_enrollment(secret, "test")
+            cookie = self._cookie()
+            status, data, _ = self._request(
+                "POST", "/api/terminal-unlock", {"code": totp.code_at(secret)}, cookie=cookie,
+                origin=f"http://127.0.0.1:{self.port}")
+            self.assertEqual(status, 200, data)
+            self.assertEqual(data["hosts"], ["*"])
+            self.assertTrue(terminal_tokens.scopes_imply(data["scopes"],
+                                                         terminal_tokens.SCOPE_WRITE))
+            term = self._new_terminal(cookie, cwd="/tmp")
+            self.assertEqual(self._op(cookie, "terminal_list")[0], 200)
+            self._op(cookie, "terminal_close", id=term["session_id"])
+        finally:
+            settings.patch({"terminals.totp_grants": False})
+
+    def test_totp_login_unlocks_every_terminal(self):
+        from crewhall import settings
+        from crewhall.web import totp
+
+        settings.patch({"terminals.totp_grants": True}, confirm=True)
+        try:
+            secret = totp.new_secret()
+            totp.add_enrollment(secret, "test")
+            status, _data, sc = self._request(
+                "POST", "/api/totp/login", {"code": totp.code_at(secret)},
+                origin=f"http://127.0.0.1:{self.port}")
+            self.assertEqual(status, 200)
+            cookie = sc.split(";", 1)[0]
+            term = self._new_terminal(cookie, cwd="/tmp")
+            self.assertEqual(self._op(cookie, "terminal_list")[0], 200)
+            self._op(cookie, "terminal_close", id=term["session_id"])
+        finally:
+            settings.patch({"terminals.totp_grants": False})
+
     def test_read_scope_cannot_write(self):
         token, _ = self._issue(scope="read")
         cookie = self._cookie()

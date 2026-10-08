@@ -289,6 +289,18 @@ Así la sesión maestra obtiene acceso a terminales directamente. Mantén los to
 terminal solo si quieres dar acceso **limitado** (solo lectura, o restringido a hosts).
 Tradeoff en [SECURITY.md](SECURITY.md).
 
+Si prefieres que sea el **código TOTP** el que desbloquee **todas** las terminales de una
+vez (sin conservar tokens por sesión), activa `terminals.totp_grants` (requiere
+`CONFIRM`):
+
+```bash
+crewhall settings set terminals.totp_grants true --confirm
+```
+
+Al iniciar sesión con un código TOTP la sesión queda desbloqueada automáticamente, y el
+prompt de desbloqueo también acepta el código de 6 dígitos. Tradeoff igual que
+`master_grants` (quien tenga el código abre shells): úsalo solo en loopback/Tailscale.
+
 ### Passkeys (opcional)
 
 En Ajustes → **Access & network → Passkeys** pulsa **Add passkey** (huella/PIN/Face ID).

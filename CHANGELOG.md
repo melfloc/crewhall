@@ -5,6 +5,17 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.75.0] — 2026-10-08
+
+- **`terminals.totp_grants`** (def. `false`, requiere `CONFIRM`): un **código TOTP**
+  desbloquea **todas** las terminales de una vez (`terminal:read`/`terminal:write` sobre
+  todos los hosts), sin conservar un token de terminal por sesión. Al **iniciar sesión**
+  con `/api/totp/login` la sesión queda desbloqueada automáticamente, y el **prompt de
+  desbloqueo** del Web UI también acepta el código de 6 dígitos como alternativa al
+  token. Debilita la separación (quien tenga el código abre shells), por eso sigue
+  desactivado por defecto. Los tokens de terminal con alcance siguen disponibles.
+- El desbloqueo por TOTP se audita como `web_terminal_unlock`.
+
 ## [0.74.2] — 2026-10-08
 
 - **Vista múltiple — disposición automática tipo mosaico (tiling)**: el modo «Auto»
