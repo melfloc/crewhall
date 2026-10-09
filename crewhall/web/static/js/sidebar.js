@@ -382,10 +382,14 @@ function renderHead(){
   const teams = (S.state.teams||[]).filter(t=>(t.members||[]).some(m=>m.agent_id===a.agent_id)).map(t=>t.name);
   const st = a.state || "unknown";
   const acts = [];
+  const gone = st === "exited" || st === "error";
+  if(gone) acts.push(el("button", {className:"btn primary", type:"button", id:"agent-start",
+      title:"Start this agent again", onclick:()=>restartAgent(a.agent_id)}, ic("refresh","sm"), el("span", {className:"lbl"}, "Start")));
   if(st === "working") acts.push(el("button", {className:"btn danger", type:"button", title:"Interrupt the running turn (Ctrl+C)",
       onclick:()=>stopTurn(a.agent_id)}, ic("stop","sm"), el("span", {className:"lbl"}, "Stop")));
-  if(a.kind==="claude"||a.kind==="opencode") acts.push(el("button", {className:"btn", type:"button", id:"agent-new-session",
+  if((a.kind==="claude"||a.kind==="opencode") && !gone) acts.push(el("button", {className:"btn", type:"button", id:"agent-new-session",
       title:"Claude /clear · OpenCode /new", onclick:()=>newSession(a.agent_id)}, ic("refresh","sm"), el("span", {className:"lbl"}, "New session")));
+  if(typeof quickActionsBtn === "function") acts.push(quickActionsBtn(a));
   acts.push(el("button", {className:"btn danger", type:"button", id:"agent-delete", title:"Stop and unregister this agent",
       onclick:()=>deleteAgent(a.agent_id)}, ic("trash","sm"), el("span", {className:"lbl"}, "Delete")));
   const copyChip = (icon, text, what) => el("span", {className:"chip mono copy", role:"button", tabIndex:0, title:`Click to copy · ${text}`,
@@ -399,7 +403,9 @@ function renderHead(){
           (a.interactions||[]).length ? el("span", {className:"pill s-waiting_input"}, ic("shield","sm"), `${a.interactions.length} awaiting your answer`) : null)),
       el("div", {className:"actions"}, ...acts)),
     el("div", {className:"meta"},
-      el("span", {className:"chip mono model", id:"agent-model", title:modelOf(a) ? "Model running this agent" : "Model not observed yet"},
+      el("span", {className:"chip mono model clickable", id:"agent-model", role:"button", tabIndex:0,
+        title:"Click to change the model", onclick:()=>{ if(typeof openModelPicker === "function") openModelPicker(a); },
+        onkeydown:(e)=>{ if(e.key==="Enter" && typeof openModelPicker === "function") openModelPicker(a); }},
         ic("activity","sm"), modelOf(a) || "model n/d"),
       el("span", {className:"chip mono", title:"Backend"}, ic("terminal","sm"), a.backend||"—"),
       a.host ? el("span", {className:`chip mono host-${a.host_state||"unknown"}`, id:"agent-host",
@@ -430,6 +436,7 @@ function renderHead(){
   else if (st === "working") box.placeholder = "Agent working… input is disabled until it finishes";
   else if (st === "starting") box.placeholder = "Agent starting…";
   else box.placeholder = "Type and press Enter to send to the agent…";
+  if(typeof renderModelCtl === "function") renderModelCtl(a);
 }
 
 /* ---------- main-pane terminal controls ---------- */

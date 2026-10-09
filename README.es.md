@@ -835,6 +835,25 @@ WebSocket lo usa para el panel de salida.
 - La renderización fiel del TUI (colores/cursor) con un emulador (pyte) queda para una
   fase futura; hoy el transcript es texto (misma limitación de capture que la TUI).
 
+### Herramientas del composer
+
+Junto a *prompt templates* el composer añade:
+
+- **Adjuntar archivos** (botón, *arrastrar y soltar* o pegar capturas). El archivo se
+  sube a `POST /api/upload`, se guarda en el servidor y el agente recibe su **ruta
+  absoluta** (imágenes incluidas: el agente las lee con sus herramientas). El nombre se
+  sanea a un basename, se escribe `0600` con nombre único y hay tope de tamaño
+  (`uploads.max_mb`). Destino: `uploads.mode` = `temp` (limpiado por el janitor) o
+  `permanent` + `uploads.dir` (*Settings → Uploads*). Solo para agentes **locales**.
+- **Selector de modelo**: Claude cambia con `/model <alias>` directo. OpenCode lee su
+  catálogo real del servidor local del agente y **conduce su picker** (abre `/models`,
+  escribe el nombre, `Enter`, y acepta el *variant* si aparece); Codex abre su propio
+  *picker*. La lista se amplía con `providers.<kind>.models`. Los comandos se envían como
+  *input sin turno* (`Harness.send_command`) para no marcar un turno falso.
+- **Palette de slash-commands** por proveedor, **acciones rápidas** (interrumpir, nueva
+  sesión, ciclo de permisos con `Shift+Tab`), **exportar** la conversación (Markdown/JSON),
+  **búsqueda global** entre agentes y **menciones `@`** para rutas del workspace.
+
 ## 17. Acceso remoto seguro con Tailscale (Fase 12)
 
 Tailscale aporta **transporte** (red privada); crewhall aporta **autenticación

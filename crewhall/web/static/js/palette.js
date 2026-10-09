@@ -12,6 +12,7 @@ function paletteCommands(){
   (S.state?.teams||[]).forEach(t => cmds.push({label:`Mission control: ${t.name}`, icon:"activity", run:()=>openMission(t.team_id)}));
   cmds.push({label:"Timeline", icon:"list", run:()=>openTimeline()});
   cmds.push({label:"Cost & usage", icon:"shield", run:()=>openUsage()});
+  cmds.push({label:"Search all conversations…", icon:"search", run:()=>openGlobalSearch()});
   cmds.push({label:"Clean up (temp, backups, releases)", icon:"trash", run:()=>openClean()});
   cmds.push({label:"Archived agents", icon:"terminal", run:()=>openArchived()});
   cmds.push({label:"Setup wizard", icon:"plus", run:()=>openOnboarding()});
@@ -19,6 +20,8 @@ function paletteCommands(){
     cmds.push({label:"Go to Conversation", icon:"msg", run:()=>setView("hist")});
     cmds.push({label:"Go to Live", icon:"activity", run:()=>setView("live")});
     cmds.push({label:"Go to Processes", icon:"terminal", run:()=>setView("proc")});
+    cmds.push({label:"Change model…", icon:"activity", run:()=>{ const a=agentById(S.selected); if(a) openModelPicker(a); }});
+    cmds.push({label:"Export conversation (Markdown)", icon:"file", run:()=>exportConversation("md")});
   }
   (S.state?.agents || []).forEach(a => {
     cmds.push({label:`Switch to ${a.name||a.agent_id}`, icon:"terminal", run:()=>{ select(a.agent_id); }});

@@ -5,6 +5,47 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.76.0] — 2026-10-09
+
+- **Subir archivos desde el Web UI (el servidor hace de proxy).** El composer tiene un
+  botón de adjuntar (y *arrastrar y soltar* y pegar capturas): el archivo se sube a
+  `POST /api/upload`, se guarda en el servidor y el agente recibe su **ruta absoluta**
+  (las imágenes y cualquier otro tipo se leen con las propias herramientas del agente).
+  El nombre se sanea a un basename, se escribe `0600` con nombre único y un tope de
+  tamaño. **Almacenamiento**: `uploads.mode` (`temp`, limpiado por el janitor, o
+  `permanent`), `uploads.dir`, `uploads.max_mb` (25 por defecto) y `uploads.keep_days`;
+  panel propio en *Settings → Uploads*. Solo se ofrece para agentes **locales**: un
+  agente remoto por SSH no ve los archivos del servidor (se avisa en la UI).
+- **Cambiar el modelo desde el viewport.** Junto a *prompt templates* hay un **selector
+  de modelo** (y el chip del sidebar ahora es clicable). Claude acepta `/model <alias>`
+  directo (`default`, `sonnet`, `opus`, `haiku`, `opusplan`, `fable`, `best`). **OpenCode**
+  no tiene comando directo: crewhall lee su catálogo real del servidor local del agente
+  (`/provider`, solo proveedores conectados) y **conduce su picker** — abre `/models`,
+  escribe el nombre (filtro difuso) y pulsa `Enter`, aceptando además el diálogo
+  **"Select variant"** que algunos modelos encadenan. Codex abre su propio *picker*.
+  La lista es ampliable por proveedor (`providers.<kind>.models`, editable en
+  *Settings → Providers*). Los comandos se envían como **input sin turno**
+  (`Harness.send_command`), así que no dejan al agente leyéndose como `unknown`.
+  Operación auditada (`agent_set_model`).
+- **Reiniciar un agente parado** (`agent_restart`): botón **Start** en la cabecera y en
+  las acciones rápidas cuando el agente está `EXITED`/`ERROR` (antes había que mandarle
+  un mensaje desde otro agente para revivirlo).
+- **Palette de slash-commands por proveedor** (Claude/OpenCode/Codex) que inserta el
+  comando en el composer.
+- **Acciones rápidas** en la cabecera del agente: interrumpir, nueva sesión, ciclo de
+  modo de permisos (Claude, `Shift+Tab`, nueva tecla `SHIFT_TAB` en `keys.py`), cambiar
+  modelo, exportar y buscar.
+- **Exportar la conversación** (Markdown/JSON) y **búsqueda global** entre las
+  conversaciones de todos los agentes (`conversation_search`, substring, con salto al
+  mensaje).
+- **Menciones `@`** en el composer: autocompletado de rutas del workspace reutilizando
+  `fs_complete`.
+- **Threat model (uploads).** *Activos*: el sistema de archivos del servidor. *Adversario*:
+  una sesión del Web UI (ya de confianza para crear agentes y ejecutar código). *Control*:
+  guardado confinado al directorio dedicado o al configurado, nombre saneado a basename,
+  `O_EXCL` + `0600`, tope de tamaño (`uploads.max_mb`) y auditoría sin contenido
+  (`web_upload`, solo modo y tamaño).
+
 ## [0.75.1] — 2026-10-08
 
 - **Corrección (OpenCode)**: limpiar la conversación de un agente (`/new`, `/clear`)

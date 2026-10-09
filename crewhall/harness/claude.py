@@ -124,6 +124,14 @@ class ClaudeCodeHarness(Harness):
 
         return activity.claude_model(text)
 
+    # Claude accepts ``/model <alias|name>`` mid-session; the aliases below are
+    # stable across versions (the versions they resolve to are not).
+    model_switch_mode = "direct"
+
+    @classmethod
+    def models(cls) -> list[str]:
+        return ["default", "sonnet", "opus", "haiku", "opusplan", "fable", "best"]
+
     def config_risks(self) -> list[str]:
         import json
         import os

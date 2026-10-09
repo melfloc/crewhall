@@ -8,7 +8,8 @@ const _wunb64u = s => {
   return u;
 };
 /* ---------- Settings: providers, agents, access & network, maintenance, interface, emergency ---------- */
-const SET_TABS = [["providers", "Providers"], ["agents", "Agents"], ["hosts", "Remote hosts"], ["terminals", "Terminals"],
+const SET_TABS = [["providers", "Providers"], ["agents", "Agents"], ["hosts", "Remote hosts"], ["uploads", "Uploads"],
+                  ["terminals", "Terminals"],
                   ["access", "Access & network"],
                   ["maintenance", "Maintenance"], ["interface", "Interface"], ["audit", "Audit"], ["emergency", "Emergency"]];
 const SK = { tab:"providers", data:null };
@@ -28,6 +29,10 @@ function setField(item, onChange){
   } else if(item.type === "int"){
     input = el("input", {className:"input", type:"number", id, value:item.value, min:item.min, max:item.max, disabled:locked, oninput:onChange});
     get = () => input.value === "" ? null : Number(input.value);
+  } else if(item.type === "path"){
+    input = el("input", {className:"input mono", id, value:item.value || "", disabled:locked, spellcheck:false, autocomplete:"off", oninput:onChange});
+    if(!locked) queueMicrotask(() => attachPathComplete(input));
+    get = () => input.value;
   } else {  // list / paths: one entry per line
     input = el("textarea", {className:"input mono", id, rows:3, value:(item.value||[]).join("\n"), disabled:locked, spellcheck:false, oninput:onChange});
     get = () => input.value;
@@ -92,6 +97,8 @@ function providerCard(p, status){
   const command = el("input", {className:"input mono", id:id("command"), value:p.command, placeholder:`built-in: ${p.kind}`, spellcheck:false, autocomplete:"off"});
   const model = el("input", {className:"input mono", id:id("model"), value:p.default_model, placeholder:"provider default", spellcheck:false, autocomplete:"off"});
   const args = el("input", {className:"input mono", id:id("args"), value:p.default_args, placeholder:"e.g. --verbose", spellcheck:false, autocomplete:"off"});
+  const models = el("textarea", {className:"input mono", id:id("models"), rows:3, spellcheck:false,
+    placeholder:"one model per line, e.g. sonnet", value:(p.models||[]).join("\n")});
   const env = el("textarea", {className:"input mono", id:id("env"), rows:3, spellcheck:false, placeholder:"NAME=value, one per line",
     value:Object.entries(p.env||{}).map(([k, v]) => `${k}=${v}`).join("\n")});
   const stat = el("div", {className:"prov-status", id:id("status")});
@@ -105,7 +112,8 @@ function providerCard(p, status){
   const save = el("button", {className:"btn primary", type:"button", onclick:async()=>{
     const changes = {[`providers.${p.kind}.enabled`]:enabled.checked, [`providers.${p.kind}.command`]:command.value,
       [`providers.${p.kind}.default_model`]:model.value, [`providers.${p.kind}.default_args`]:args.value,
-      [`providers.${p.kind}.env`]:env.value, [`providers.${p.kind}.mcp`]:mcp.checked};
+      [`providers.${p.kind}.env`]:env.value, [`providers.${p.kind}.mcp`]:mcp.checked,
+      [`providers.${p.kind}.models`]:models.value};
     const envText = Object.entries(p.env||{}).map(([k, v]) => `${k}=${v}`).join("\n");
     const sensitive = command.value.trim() !== (p.command||"") || env.value.trim() !== envText.trim();
     let confirm = false;
@@ -133,6 +141,8 @@ function providerCard(p, status){
       el("div", {className:"field"}, el("label", {htmlFor:id("model")}, "Default model"), model,
         el("div", {className:"hint"}, "Passed as --model unless the agent sets its own."))),
     el("div", {className:"field"}, el("label", {htmlFor:id("args")}, "Default arguments"), args),
+    el("div", {className:"field"}, el("label", {htmlFor:id("models")}, "Models in the selector"), models,
+      el("div", {className:"hint"}, "One per line. Offered in the composer's model selector; for agents whose CLI opens its own picker they are shown as suggestions only.")),
     el("div", {className:"field"}, el("label", {htmlFor:id("env")}, "Environment variables"), env,
       el("div", {className:"hint"}, "Added to every agent of this provider. Values that look like secrets are hidden after saving; leave them as shown to keep them.")),
     el("div", {className:"field check-row"}, el("label", {className:"check", htmlFor:id("mcp")}, mcp,
@@ -535,6 +545,18 @@ async function previewReset(level){
     toast(bad ? `Done with ${bad} problem(s): ${out.errors[0]}` : "Done: " + out.done.slice(-3).join(" · "), bad ? "err" : "ok", 7000);
   } catch(e){ flash(e.message); }
 }
+/* ----- uploads (files the Web UI hands to agents as paths) ----- */
+async function tabUploads(view){
+  let info = null;
+  try { info = await op("uploads_info"); } catch(e){}
+  view.replaceChildren(settingsGroup("uploads", "uploads"),
+    el("div", {className:"hint"},
+      info ? `Temp files: ${info.temp_dir} · permanent: ${info.permanent_dir || "(not set)"} · max ${info.max_mb} MB per file.`
+           : "Files uploaded from the composer are stored on the server; the agent receives their absolute path."),
+    el("div", {className:"hint"},
+      "Uploads are only offered for agents running on this machine; an agent on a remote host cannot see the server's files."));
+}
+
 /* ----- terminals (raw interactive shells; closed by default) ----- */
 async function tabTerminals(view){
   view.replaceChildren(settingsGroup("terminals", "terminals"),
@@ -565,6 +587,7 @@ async function renderSettings(){
   if(SK.tab === "providers") await tabProviders(view);
   else if(SK.tab === "agents") view.replaceChildren(settingsGroup("agents", "agent"));
   else if(SK.tab === "hosts") await tabHosts(view);
+  else if(SK.tab === "uploads") await tabUploads(view);
   else if(SK.tab === "terminals") await tabTerminals(view);
   else if(SK.tab === "access") await tabAccess(view);
   else if(SK.tab === "maintenance") view.replaceChildren(settingsGroup("maintenance", "maintenance"),

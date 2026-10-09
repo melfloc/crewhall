@@ -51,6 +51,24 @@ class Basics(_Base):
                 settings.patch({key: bad})
         self.assertFalse(os.path.exists(settings.path()))
 
+    def test_uploads_settings_and_path_validation(self):
+        self.assertEqual(settings.get("uploads.mode"), "temp")
+        self.assertEqual(settings.get("uploads.max_mb"), 25)
+        settings.patch({"uploads.mode": "permanent", "uploads.dir": "/tmp/crewhall-up",
+                        "uploads.max_mb": 50})
+        self.assertEqual(settings.get("uploads.mode"), "permanent")
+        self.assertEqual(settings.get("uploads.dir"), "/tmp/crewhall-up")
+        for bad in ("relative/path", "", "x\x00y"):
+            with self.assertRaises(settings.SettingsError):
+                settings.patch({"uploads.dir": bad})
+
+    def test_provider_models_are_validated_and_listed(self):
+        self.assertEqual(settings.provider_models("claude"), [])
+        settings.patch({"providers.claude.models": ["opus", "sonnet", "haiku"]})
+        self.assertEqual(settings.provider_models("claude"), ["opus", "sonnet", "haiku"])
+        with self.assertRaises(settings.SettingsError):
+            settings.patch({"providers.claude.models": [1, 2]})
+
     def test_a_partly_bad_patch_changes_nothing(self):
         with self.assertRaises(settings.SettingsError):
             settings.patch({"security.session_ttl_hours": 5, "maintenance.tmp_max_mb": 1})

@@ -698,3 +698,38 @@ dialog.settings { width:min(980px,96vw); max-height:90vh; }
   .mv-bar { flex-wrap:wrap; row-gap:6px; }
   .mv-name-lg { max-width:none; }
 }
+
+/* Composer tools: attachments, model selector, drag & drop */
+.attach-tray { display:flex; flex-wrap:wrap; gap:6px; max-width:880px; margin:0 auto 6px; }
+.attach-tray.init-hidden { display:none; }
+.attach-chip { display:inline-flex; align-items:center; gap:6px; padding:3px 6px 3px 8px; border:1px solid var(--border-strong);
+  border-radius:999px; background:var(--surface-2); font-size:12px; max-width:280px; }
+.attach-chip .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--mono); }
+.attach-chip .sz { color:var(--muted); font-size:11px; flex:none; }
+.attach-chip .x { border:0; background:transparent; color:var(--muted); cursor:pointer; display:flex; padding:1px; border-radius:4px; }
+.attach-chip .x:hover { color:var(--err); background:var(--err-soft); }
+.composer-wrap.dragging { outline:2px dashed var(--accent); outline-offset:-6px; border-radius:var(--r); }
+.model-ctl { display:flex; align-items:center; flex:none; }
+.model-ctl:empty { display:none; }
+.select.sm, .model-sel { width:auto; min-height:26px; height:26px; padding:0 6px; font-size:12px; max-width:150px; }
+.model-btn { max-width:150px; overflow:hidden; }
+.model-btn span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chip.clickable { cursor:pointer; }
+.chip.clickable:hover { background:var(--border-strong); color:var(--fg); }
+
+/* Global conversation search */
+.search-results { max-height:50vh; overflow:auto; margin-top:8px; display:flex; flex-direction:column; gap:4px; }
+.search-hit { text-align:left; border:1px solid var(--border); background:var(--surface); color:var(--fg); border-radius:var(--r-sm);
+  padding:7px 9px; cursor:pointer; display:flex; flex-direction:column; gap:3px; }
+.search-hit:hover { border-color:var(--accent); background:var(--surface-2); }
+.search-hit .who { display:flex; align-items:center; gap:7px; font-size:12px; }
+.search-hit .who .nm { font-weight:700; }
+.search-hit .snip { color:var(--fg-2); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.flash-hit { animation:flashHit 1.6s ease; }
+@keyframes flashHit { 0%,100% { background:transparent; } 30% { background:var(--accent-soft); } }
+
+@media (max-width:640px) {
+  .model-sel, .model-btn { max-width:96px; }
+  .composer { flex-wrap:wrap; }
+  .composer textarea { flex-basis:100%; order:3; }
+}

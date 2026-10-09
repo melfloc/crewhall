@@ -59,6 +59,15 @@ tmux *or* a plain PTY.
   `at/<team>/<agent>`, isolated under the state directory.
 - **Mission Control**, a live activity view, conversation history, cost/usage,
   cleanup/reset, bundles and a settings panel — all in the Web UI.
+- **File uploads from the Web UI**: the composer accepts files (button, drag & drop
+  or paste), stores them on the server — temp, cleaned by the janitor, or a permanent
+  directory — and hands the agent their absolute path.
+- **Composer tools**: a per-provider **model selector** (Claude applies
+  `/model <alias>`; OpenCode's catalog is read from its local server and its picker
+  is driven for you; Codex opens its own picker), a **slash-command palette**,
+  **quick actions** (interrupt, new session, permission mode), **conversation export**
+  (Markdown/JSON), **global search** across every agent, and **`@`-mentions** for
+  workspace paths.
 - **Web terminals** (off by default): real `xterm.js` shells shown in the sidebar
   like agents and in the main pane, local or over SSH, gated by scoped tokens.
 - **Drag & drop** in the sidebar: reorder teams and move an agent to another team.

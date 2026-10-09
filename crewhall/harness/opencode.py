@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import time
 
-from .base import AgentState, Harness
+from .base import AgentState, Harness, HarnessNotReady
 
 WORKING_RE = re.compile(r"esc\s+interrupt", re.IGNORECASE)
 # One ``Build · <model> · 4.3s`` line is appended to the transcript per completed
@@ -119,6 +119,111 @@ class OpenCodeHarness(Harness):
         from .. import activity
 
         return activity.opencode_model(text)
+
+    # OpenCode has no one-shot ``/model <name>``: ``/models`` opens its own
+    # picker. We drive it (open, type to fuzzy-filter, Enter) so the Web UI can
+    # still offer a real model list; the catalog comes from the local server.
+    model_switch_mode = "direct"
+    PICKER_TITLE = "select model"
+    VARIANT_TITLE = "select variant"
+    _MODELS_TTL = 60.0
+
+    def model_switch(self, model: str | None = None) -> list[str]:
+        return ["/models"]
+
+    def available_models(self) -> list[dict[str, str]]:
+        """Model catalog from the agent's own server (connected providers only)."""
+        link = self.link
+        if link is None:
+            return []
+        cache = getattr(self, "_models_cache", None)
+        now = time.monotonic()
+        if cache and now - cache[0] < self._MODELS_TTL:
+            return cache[1]
+        try:
+            data = link.get_json("/provider", timeout=3.0)
+        except Exception:  # noqa: BLE001 - the server may be busy or older
+            return cache[1] if cache else []
+        providers = data.get("all") if isinstance(data, dict) else None
+        if not isinstance(providers, list):
+            return cache[1] if cache else []
+        connected = data.get("connected")
+        allowed = {c if isinstance(c, str) else (c or {}).get("id") for c in connected} \
+            if isinstance(connected, list) and connected else None
+        out: list[dict[str, str]] = []
+        for provider in providers:
+            if not isinstance(provider, dict):
+                continue
+            pid = provider.get("id")
+            if allowed is not None and pid not in allowed:
+                continue
+            pname = provider.get("name") or pid or ""
+            models = provider.get("models")
+            for mid, model in (models.items() if isinstance(models, dict) else []):
+                name = (model or {}).get("name") or mid
+                out.append({"value": name, "label": f"{name} — {pname}"})
+        out.sort(key=lambda item: item["label"].lower())
+        result = out[:300]
+        self._models_cache = (now, result)
+        return result
+
+    _DIALOG_TITLES = ("select model", "select variant", "select agent",
+                      "select session", "select theme")
+
+    def set_model(self, model: str | None = None) -> bool:
+        """Open ``/models`` and, when a name is given, filter and select it.
+
+        The picker has a fuzzy search box: typing the model name narrows the
+        list to the match and Enter selects the highlighted row. We first close
+        any dialog left open by a previous attempt (so keystrokes do not land in
+        its filter), wait for the picker to appear, type from an empty filter and
+        only then press Enter.
+        """
+        self._close_dialogs()
+        self.send_command("/models")
+        name = (model or "").strip()
+        if not name:
+            return True
+        if not self._await(lambda text: self.PICKER_TITLE in text.lower(), 4.0):
+            raise HarnessNotReady(self.agent_id, "the model picker did not open")
+        # Type from an empty filter so the name never appends to residue.
+        self.session.send_key("CTRL_U")
+        time.sleep(0.1)
+        self.write_raw(name)
+        first = name.split()[0].lower()
+        self._await(lambda text: first in text.lower(), 2.0)
+        time.sleep(0.25)
+        self.session.send_enter()
+        # Some models chain into a variant picker (Default/low/high/max) right
+        # after the model is chosen; accept its default. Otherwise, if the list
+        # is still open the Enter did not land, so try once more.
+        if self._await(lambda text: self.VARIANT_TITLE in text.lower(), 1.2):
+            self.session.send_enter()
+            self._await(lambda text: self.VARIANT_TITLE not in text.lower(), 2.0)
+        elif self._await(lambda text: self.PICKER_TITLE in text.lower(), 0.3):
+            self.session.send_enter()
+            self._await(lambda text: self.PICKER_TITLE not in text.lower(), 1.5)
+        return True
+
+    def _close_dialogs(self) -> None:
+        """Dismiss any TUI dialog left open (a picker would swallow keystrokes)."""
+        for _ in range(3):
+            low = self.session.capture().lower()
+            if not any(title in low for title in self._DIALOG_TITLES):
+                return
+            self.session.send_key("ESC")
+            time.sleep(0.25)
+
+    def _await(self, predicate, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                if predicate(self.session.capture()):
+                    return True
+            except Exception:  # noqa: BLE001 - best effort polling
+                pass
+            time.sleep(0.15)
+        return False
 
     def usage_from_screen(self, text: str) -> dict:
         from .. import usage

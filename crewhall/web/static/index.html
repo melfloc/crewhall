@@ -44,6 +44,10 @@
   <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M9 3v6H3M15 21v-6h6M21 3l-7 7M3 21l7-7"/></symbol>
   <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="16" rx="1"/><rect x="17" y="4" width="4" height="16" rx="1"/></symbol>
   <symbol id="i-rows" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="5" rx="1"/><rect x="4" y="10" width="16" height="5" rx="1"/><rect x="4" y="17" width="16" height="4" rx="1"/></symbol>
+  <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10.5 18a2 2 0 0 1-3-3l7.5-7.5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
 </svg>
 
 <div class="app">
@@ -131,12 +135,17 @@
       </div>
       <div class="asks" id="asks"></div>
       <div class="composer-wrap init-hidden" id="composer-wrap">
+        <div class="attach-tray init-hidden" id="attachTray" aria-live="polite"></div>
         <div class="composer" id="composer">
           <span class="state-ic" id="composer-ic"></span>
+          <button class="btn icon ghost sm" id="cmdBtn" type="button" aria-label="Slash commands" title="Slash commands for this agent"><svg class="ic sm"><use href="#i-terminal"/></svg></button>
           <button class="btn icon ghost sm" id="tplBtn" type="button" aria-label="Prompt templates" title="Prompt templates"><svg class="ic sm"><use href="#i-list"/></svg></button>
+          <button class="btn icon ghost sm" id="attachBtn" type="button" aria-label="Attach a file" title="Attach a file — uploaded to the server, the agent gets its path"><svg class="ic sm"><use href="#i-paperclip"/></svg></button>
+          <span class="model-ctl" id="modelCtl"></span>
           <textarea id="input" rows="1" placeholder="Type and press Enter to send to the agent…  (Shift+Enter for a new line)" autocomplete="off" aria-label="Message for the agent"></textarea>
           <button class="btn primary" id="send"><svg class="ic"><use href="#i-send"/></svg>Send</button>
         </div>
+        <input type="file" id="fileInput" multiple hidden>
       </div>
       <div class="keys-wrap init-hidden" id="keys-wrap">
         <div class="keys" id="keys">
@@ -255,6 +264,7 @@
 <script src="/static/js/notify.js"></script>
 <script src="/static/js/palette.js"></script>
 <script src="/static/js/composer.js"></script>
+<script src="/static/js/tools.js"></script>
 <script src="/static/js/conversation.js"></script>
 <script src="/static/js/actions.js"></script>
 <script src="/static/js/multiview.js"></script>

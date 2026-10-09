@@ -31,6 +31,11 @@ care about:
 - **Filesystem**: directory suggestions are confined to `security.fs_roots`
   (`realpath`, no `..`/symlink escape); worktree git calls are argv-only and
   confined to the state directory.
+- **Web UI uploads**: a file is stored only in the dedicated temp directory or
+  the configured `uploads.dir`; the client filename is reduced to a basename
+  (no directory components), written `O_EXCL`/`0600` under a unique name, capped
+  by `uploads.max_mb` and audited (`web_upload`, mode and size only). The agent
+  receives a path, never the bytes.
 - **Audit**: privileged operations are appended to `state/audit.jsonl` (0600),
   with no secret values.
 

@@ -165,6 +165,46 @@ class Harness(ABC):
         """Model display name shown on the agent's own screen."""
         return None
 
+    # How the Web UI may change the model:
+    #  - "direct": the composer offers a model list and ``set_model`` applies the
+    #    chosen name (a slash command, or driving the TUI's own picker);
+    #  - "picker": there is no list to offer; the UI only opens the TUI selector.
+    model_switch_mode = "direct"
+
+    @classmethod
+    def models(cls) -> list[str]:
+        """Static model names this adapter can switch to (may be empty)."""
+        return []
+
+    def available_models(self) -> list:
+        """Model names/labels discoverable at runtime (e.g. OpenCode's catalog).
+
+        Returns a list of strings or ``{"value", "label"}`` dicts. The default
+        is the static ``models()``; adapters with a local server override it.
+        """
+        return list(self.models())
+
+    def model_switch(self, model: str | None = None) -> list[str]:
+        """Inputs to type (each submitted with Enter) to change the model.
+
+        ``direct`` adapters return a single ``/model <name>``; ``picker``
+        adapters return the command that opens their selector. ``set_model``
+        sends each step through ``Harness.send_command`` (a non-turn input), so
+        input cleanliness and readiness are enforced without faking a turn.
+        """
+        return [f"/model {model}".strip() if model else "/model"]
+
+    def set_model(self, model: str | None = None) -> bool:
+        """Apply a model change; True when it was driven successfully.
+
+        The default sends ``model_switch`` steps as non-turn commands. Adapters
+        whose CLI only has an interactive picker override this to open it and
+        drive the selection.
+        """
+        for step in self.model_switch(model):
+            self.send_command(step)
+        return True
+
     def usage_from_screen(self, text: str) -> dict[str, Any]:
         """Usage (tokens/cost) the TUI shows; ``{"available": False}`` if none."""
         return {"available": False}
@@ -235,6 +275,30 @@ class Harness(ABC):
             # Not a turn: the TUI is idle on a fresh conversation, no reply comes.
             self._prompt_sent = False
             self._new_session_started(previous)
+
+    def send_command(self, text: str, timeout: float = 30.0) -> None:
+        """Send a slash command / non-turn input to the agent's own TUI.
+
+        Same readiness and clean-input guarantees as ``send`` but it does *not*
+        mark a work cycle as started: commands like ``/model``, ``/compact`` or
+        a picker opener produce no completion line, so treating them as a turn
+        would leave the agent reading as ``unknown`` afterwards.
+        """
+        state = self.ensure_ready(timeout)
+        if not state.usable:
+            raise HarnessError(self.agent_id, f"cannot send while state={state.value}")
+        if not self.ensure_input_clean(timeout=timeout):
+            raise HarnessNotReady(self.agent_id, "input line not clean")
+        state = self.state()
+        if not state.usable:
+            raise HarnessNotReady(
+                self.agent_id, f"not ready to receive input (state={state.value})"
+            )
+        self.session.write(text)
+        if self.submit_delay > 0:
+            time.sleep(self.submit_delay)
+        self.session.send_enter()
+        self._typed = ""
 
     # -- input readiness ---------------------------------------------------
     def input_line(self) -> str:

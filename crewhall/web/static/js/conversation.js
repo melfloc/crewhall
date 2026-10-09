@@ -1,6 +1,7 @@
 "use strict";
 function select(id){ S.selected = id; S.selectedTerm = null;
   if(S.termView){ S.termView.dispose(); S.termView = null; }
+  if(typeof clearAttachments === "function") clearAttachments();
   S.follow = true;
   $("follow").className="follow on"; $("follow").textContent="● follow";
   sendFocus(id);               // server pushes this agent's transcript right away
@@ -363,11 +364,15 @@ document.addEventListener("keydown", (e)=>{
 });
 
 async function submitInput(){
-  const box = $("input"), text = box.value; if(!text.trim() || !S.selected || box.disabled) return;
+  const box = $("input"), text = box.value;
+  const atts = (typeof hasAttachments === "function") && hasAttachments();
+  if((!text.trim() && !atts) || !S.selected || box.disabled) return;
+  const full = typeof withAttachments === "function" ? withAttachments(text) : text;
   const btn = $("send"); box.value = ""; composerGrow(); btn.classList.add("loading");
-  pushHistory(text);
-  try { await op("agent_write", {target:S.selected, text}); await op("agent_key", {target:S.selected, key:"ENTER"});
-        afterSend(text); }
+  pushHistory(full);
+  try { await op("agent_write", {target:S.selected, text:full}); await op("agent_key", {target:S.selected, key:"ENTER"});
+        if(typeof clearAttachments === "function") clearAttachments();
+        afterSend(full); }
   catch(err){ flash(err.message); if(!box.value){ box.value = text; composerGrow(); } }
   finally { btn.classList.remove("loading"); }
 }

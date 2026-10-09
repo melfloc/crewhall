@@ -126,14 +126,15 @@ ALLOWED_OPS = {
     "ping", "meta_info", "agent_list", "agent_info", "agent_create",
     "agent_send", "agent_write", "agent_key", "agent_resize", "agent_capture",
     "agent_transcript", "agent_history", "agent_interrupt",
-    "agent_state", "agent_wait", "agent_stop",
+    "agent_models", "agent_set_model", "conversation_search",
+    "agent_state", "agent_wait", "agent_stop", "agent_restart",
     "team_list", "team_info", "team_create", "team_set_workspace",
     "team_add_member", "team_remove_member", "team_remove", "team_members", "team_up",
     "message_send", "message_history", "agent_identity",
     "interaction_list", "interaction_respond", "agent_new_session",
     "agent_processes", "agent_process_output", "agent_process_signal",
     "clean_plan", "clean_apply", "update_status",
-    "bundle_export", "bundle_list", "bundle_import", "bundle_delete", "fs_complete",
+    "bundle_export", "bundle_list", "bundle_import", "bundle_delete", "fs_complete", "uploads_info",
     "settings_get", "settings_set", "settings_reset", "provider_check",
     "frontend_status", "frontend_set", "reset_plan", "reset_apply",
     "agent_archive_list", "agent_archive_get",
@@ -315,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._do_logout()
         if parsed.path == "/api/bundle":
             return self._bundle_upload(parse_qs(parsed.query))
+        if parsed.path == "/api/upload":
+            return self._upload(parse_qs(parsed.query))
         if parsed.path == "/api/terminal-unlock":
             return self._do_terminal_unlock()
         if parsed.path == "/api/terminal-ticket":
@@ -383,6 +386,40 @@ class Handler(BaseHTTPRequestHandler):
         except bundle.BundleError as exc:
             return self._error(f"not a valid bundle: {exc}", 400)
         return self._json({"ok": True, "name": name})
+
+    def _upload(self, query: dict[str, list[str]]) -> None:
+        """Accept a file from the Web UI and store it on the server (proxy).
+
+        The body is the raw file (no multipart parsing); the original name
+        travels in ``X-Filename`` (percent-encoded) and the optional storage
+        mode in ``?mode=temp|permanent``. The stored path is what the UI hands
+        to the agent, so the agent only ever reads a path.
+        """
+        from .. import audit, uploads
+
+        if not self._guard():
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            return self._error("bad Content-Length", 400)
+        cap = uploads.max_bytes()
+        if length <= 0:
+            return self._error("empty upload", 400)
+        if length > cap:
+            self.close_connection = True
+            return self._error(f"file too large (max {cap // (1024 * 1024)} MB)", 413)
+        data = self.rfile.read(length)
+        raw_name = self.headers.get("X-Filename", "")
+        name = unquote(raw_name) if raw_name else (query.get("name") or ["file"])[0]
+        storage = (query.get("mode") or [""])[0].lower() or None
+        try:
+            info = uploads.store(name, data, storage=storage)
+        except uploads.UploadError as exc:
+            return self._error(str(exc), 400)
+        audit.record("web_upload", actor=self._audit_actor(), result="ok",
+                     summary=f"mode={info['mode']} size={info['size']}")
+        return self._json({"ok": True, **info})
 
     def _do_logout(self) -> None:
         # Revoke this session server-side too (clear the cookie and the record).

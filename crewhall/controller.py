@@ -1993,6 +1993,86 @@ class Controller:
         cache[harness.agent_id] = (key, now, out)
         return out
 
+    def agent_models(self, target: str) -> dict[str, Any]:
+        """Model catalog the Web UI may offer for this agent, plus the current one."""
+        harness = self.agents.resolve(target)
+        current = (self.agent_summary(harness).get("activity") or {}).get("model")
+        entries: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        def add(value: Any, label: Any = None) -> None:
+            name = str(value or "").strip()
+            if not name or name in seen:
+                return
+            seen.add(name)
+            entries.append({"value": name, "label": str(label or name)})
+
+        for name in settings.provider_models(harness.kind):
+            add(name)
+        try:
+            for item in harness.available_models():
+                if isinstance(item, dict):
+                    add(item.get("value"), item.get("label"))
+                else:
+                    add(item)
+        except Exception:  # noqa: BLE001 - discovery is best effort
+            pass
+        # The TUI often shows "<name> <provider>"; map it back to a catalog value
+        # so the selector marks the real entry instead of inventing a new one.
+        selected = current
+        if current:
+            for entry in entries:
+                if current == entry["value"] or current.startswith(entry["value"] + " "):
+                    selected = entry["value"]
+                    break
+        return {"kind": harness.kind, "current": selected,
+                "mode": harness.model_switch_mode, "models": entries}
+
+    def set_agent_model(self, target: str, model: str | None = None) -> dict[str, Any]:
+        """Change a running agent's model: a direct command or its own picker."""
+        harness = self.agents.resolve(target)
+        name = (model or "").strip() or None
+        if harness.model_switch_mode == "direct" and not name:
+            raise HarnessError(harness.agent_id, "a model name is required")
+        harness.set_model(name)
+        return self.agent_summary(harness)
+
+    def search_conversations(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Search the readable conversation of every agent for a substring."""
+        q = (query or "").strip()
+        if len(q) < 2:
+            return []
+        low = q.lower()
+        out: list[dict[str, Any]] = []
+        for harness in self.agents.all():
+            try:
+                data = harness.history(limit=200)
+            except Exception:  # noqa: BLE001 - one unreadable agent must not stop the search
+                continue
+            if not data.get("available"):
+                continue
+            start = int(data.get("start") or 0)
+            for i, msg in enumerate(data.get("messages") or []):
+                text = str(msg.get("text") or "")
+                pos = text.lower().find(low)
+                if pos < 0:
+                    continue
+                snippet = text.replace("\n", " ").strip()
+                pos = snippet.lower().find(low)
+                cut = max(0, pos - 60)
+                out.append({
+                    "agent_id": harness.agent_id,
+                    "name": harness.name or harness.agent_id,
+                    "kind": harness.kind,
+                    "role": msg.get("role"),
+                    "at": msg.get("at"),
+                    "index": start + i,
+                    "snippet": snippet[cut:cut + 220],
+                })
+                if len(out) >= limit:
+                    return out
+        return out
+
     def remove_agent(self, target: str, force: bool = False) -> AgentInfo:
         harness = self.agents.resolve(target)
         agent_id = harness.agent_id

@@ -96,6 +96,17 @@ def _static_schema() -> list[dict[str, Any]]:
           "Only directories under these roots are offered by the workspace autocomplete "
           "(one absolute path or ~ per line). Team workspaces and running agents' directories "
           "are always allowed.", restart=False),
+        s("uploads.mode", "uploads", "choice", "temp", "Upload storage",
+          "temp: uploaded files go to the state temp directory and are cleaned automatically. "
+          "permanent: they are kept in the directory below.",
+          choices=["temp", "permanent"]),
+        s("uploads.dir", "uploads", "path", "~/crewhall-uploads", "Permanent upload directory",
+          "Absolute directory used when storage is 'permanent'. Created (0700) if missing."),
+        s("uploads.max_mb", "uploads", "int", 25, "Max upload size (MB)",
+          "Largest single file the Web UI accepts.", min=1, max=2048),
+        s("uploads.keep_days", "uploads", "int", 30, "Keep permanent uploads (days)",
+          "Permanent uploads older than this are removed by the janitor (0 = keep forever).",
+          min=0, max=3650),
         s("requests.max_open_per_agent", "requests", "int", 2, "Open requests per agent",
           "How many requests an agent may have waiting for a reply at once.", min=1, max=10),
         s("requests.max_depth", "requests", "int", 4, "Max request chain depth",
@@ -162,7 +173,7 @@ def schema() -> list[dict[str, Any]]:
 
 def provider_defaults(kind: str) -> dict[str, Any]:
     return {"enabled": True, "command": "", "default_args": "", "default_model": "", "env": {},
-            "mcp": False}
+            "mcp": False, "models": []}
 
 
 _LOCK = threading.RLock()
@@ -211,6 +222,14 @@ def _validate(item: dict[str, Any], value: Any) -> Any:
             if len(entry) > 4096 or "\0" in entry or not os.path.isabs(os.path.expanduser(entry)):
                 raise SettingsError(f"{item['key']}: {entry!r} is not an absolute path")
         return value
+    if typ == "path":
+        if not isinstance(value, str):
+            raise SettingsError(f"{item['key']}: an absolute path is required")
+        value = value.strip()
+        if (not value or len(value) > 4096 or "\0" in value
+                or not os.path.isabs(os.path.expanduser(value))):
+            raise SettingsError(f"{item['key']}: an absolute path is required")
+        return value
     raise SettingsError(f"{item['key']}: unsupported type")
 
 
@@ -237,6 +256,15 @@ def _provider_value(field: str, value: Any, kind: str) -> Any:
             if not isinstance(v, str) or len(v) > 4096 or "\0" in v:
                 raise SettingsError(f"{key}: invalid value for {k}")
         return dict(value)
+    if field == "models":
+        if isinstance(value, str):
+            value = [v.strip() for v in value.splitlines()]
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise SettingsError(f"{key}: a list of model names expected")
+        value = [v.strip() for v in value if v.strip()]
+        if len(value) > 50 or any(len(v) > 200 or "\0" in v or "\n" in v for v in value):
+            raise SettingsError(f"{key}: up to 50 model names")
+        return value
     if field in ("command", "default_args", "default_model"):
         if not isinstance(value, str) or len(value) > 1024 or "\0" in value or "\n" in value:
             raise SettingsError(f"{key}: a single line of text expected")
@@ -460,6 +488,8 @@ def get(key: str, default: Any = None) -> Any:
                 return max(item["min"], min(item["max"], int(float(raw))))
             if item["type"] == "choice":
                 return _validate(item, raw.lower())
+            if item["type"] == "path":
+                return _validate(item, raw)
         except (SettingsError, ValueError):
             pass
     group, _, name = key.partition(".")
@@ -498,6 +528,11 @@ def provider_args(kind: str, given: list[str] | None = None) -> list[str]:
 
 def provider_env(kind: str) -> dict[str, str]:
     return dict(provider(kind)["env"])
+
+
+def provider_models(kind: str) -> list[str]:
+    """Model names offered in the Web UI selector for this provider."""
+    return list(provider(kind).get("models") or [])
 
 
 _STANDARD_BIN_PREFIXES = ("/usr/", "/opt/", "/bin/", "/sbin/", "/snap/", "/nix/")

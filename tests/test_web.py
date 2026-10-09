@@ -395,6 +395,45 @@ class WebServerTest(unittest.TestCase):
         for raw in ("../../etc/passwd", "..%2f..%2fetc%2fpasswd", "x.txt", "nope.tar.gz"):
             self.assertEqual(self._raw_req("GET", "/api/bundle/" + raw)[0], 404, raw)
 
+    def test_uploads_info_and_conversation_search_ops(self):
+        r = self._post("uploads_info")
+        self.assertTrue(r["ok"], r)
+        self.assertIn("temp_dir", r)
+        r = self._post("conversation_search", query="hello")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["matches"], [])
+        r = self._post("agent_models", target="does-not-exist")
+        self.assertFalse(r["ok"])
+
+    def test_upload_stores_a_sanitized_file_and_returns_its_path(self):
+        import urllib.parse
+
+        body = b"hello upload"
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/upload?mode=temp", data=body, method="POST",
+            headers={"Content-Type": "application/octet-stream",
+                     "X-Filename": urllib.parse.quote("../../etc/evil name.txt")})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            up = json.loads(r.read())
+        self.assertTrue(up["ok"], up)
+        self.assertTrue(os.path.isabs(up["path"]))
+        self.assertEqual(os.path.basename(up["path"]), up["name"])
+        self.assertTrue(up["name"].endswith(".txt"))
+        self.assertNotIn("..", up["name"])
+        with open(up["path"], "rb") as fh:
+            self.assertEqual(fh.read(), body)
+        os.unlink(up["path"])
+
+    def test_upload_rejects_an_empty_body(self):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/upload", data=b"", method="POST",
+            headers={"Content-Type": "application/octet-stream", "X-Filename": "a.txt"})
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            self.fail("empty upload should be rejected")
+        except urllib.error.HTTPError as exc:
+            self.assertEqual(exc.code, 400)
+
     def test_bundle_list_flags_empty_bundles(self):
         name = self._post("bundle_export")["name"]  # no config, no teams: an empty bundle
         self.addCleanup(lambda: self._post("bundle_delete", name=name))

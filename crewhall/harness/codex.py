@@ -75,6 +75,12 @@ class CodexHarness(Harness):
                 "tool": None,
                 "last_event": snap.get("last_event")}
 
+    # Codex opens its own picker with ``/model`` (model + reasoning effort).
+    model_switch_mode = "picker"
+
+    def model_switch(self, model: str | None = None) -> list[str]:
+        return ["/model"]
+
     @classmethod
     def model_from_screen(cls, text: str | None) -> str | None:
         for line in reversed((text or "").splitlines()):

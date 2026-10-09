@@ -31,6 +31,7 @@ AUDITED = {
     "team_remove_member", "team_remove",
     "request_create", "request_reply", "request_cancel", "worktree_discard",
     "interaction_respond", "agent_process_signal", "agent_new_session", "team_new_session",
+    "agent_set_model", "agent_restart",
     "settings_set", "settings_reset", "provider_check", "frontend_set",
     "reset_plan", "reset_apply", "clean_plan", "clean_apply",
     "bundle_export", "bundle_import", "bundle_delete", "fs_complete",
@@ -207,6 +208,8 @@ def summarize(op: str, request: dict[str, Any], result: dict[str, Any] | None = 
         return f"kind={request.get('kind')} name={request.get('name')} team={request.get('team')}"
     if op in ("agent_stop", "agent_info", "agent_state"):
         return f"target={request.get('target')}"
+    if op == "agent_set_model":
+        return f"target={request.get('target')} model={request.get('model') or 'picker'}"
     if op in ("message_send", "team_send"):
         return f"sender={request.get('sender')} recipient={request.get('recipient')}"
     if op.startswith("team_") and op not in ("team_send",):

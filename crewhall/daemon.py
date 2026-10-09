@@ -512,6 +512,17 @@ class Server:
         harness = self.controller.get_agent(request["target"])
         return {"interrupted": harness.interrupt()}
 
+    def _op_agent_models(self, request: dict[str, Any]) -> dict[str, Any]:
+        return {"models": self.controller.agent_models(request["target"])}
+
+    def _op_agent_set_model(self, request: dict[str, Any]) -> dict[str, Any]:
+        return {"agent": self.controller.set_agent_model(
+            request["target"], request.get("model"))}
+
+    def _op_conversation_search(self, request: dict[str, Any]) -> dict[str, Any]:
+        return {"matches": self.controller.search_conversations(
+            str(request.get("query") or ""), int(request.get("limit", 50) or 50))}
+
     def _op_frontend_status(self, request: dict[str, Any]) -> dict[str, Any]:
         return self.frontends.status()
 
@@ -652,6 +663,14 @@ class Server:
         )
         info = self.controller.agent_summary(harness)
         return {"reached": state is target or state == target, "agent": info}
+
+    def _op_agent_restart(self, request: dict[str, Any]) -> dict[str, Any]:
+        harness = self.controller.restart_agent(request["target"])
+        try:
+            harness.start(timeout=float(request.get("timeout", 20.0)))
+        except Exception:  # noqa: BLE001 - return the summary even if readiness times out
+            log.exception("agent restart: readiness wait failed")
+        return {"agent": self.controller.agent_summary(harness)}
 
     def _op_agent_stop(self, request: dict[str, Any]) -> dict[str, Any]:
         info = self.controller.remove_agent(
@@ -832,6 +851,11 @@ class Server:
             threading.Thread(target=self._delayed_stop, daemon=True).start()
         return result
 
+    def _op_uploads_info(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import uploads
+
+        return uploads.info()
+
     def _op_fs_complete(self, request: dict[str, Any]) -> dict[str, Any]:
         from . import fscomplete
 
@@ -908,6 +932,11 @@ def _start_tmpdir_janitor(interval: float | None = None) -> None:
                     max_bytes=settings.get("maintenance.tmp_max_mb") * 1024 * 1024)
                 if removed:
                     log.info("tmpdir janitor removed %d stale file(s)", removed)
+                from . import uploads
+
+                pruned = uploads.cleanup()
+                if pruned:
+                    log.info("uploads janitor removed %d stale file(s)", pruned)
             except Exception:
                 log.exception("tmpdir janitor failed")
 
@@ -947,6 +976,12 @@ def main(argv: list[str] | None = None) -> int:
 
     _setup_logging()
     paths.cleanup_tmpdir()  # prune any leaked agent temp files on startup
+    try:
+        from . import uploads
+
+        uploads.cleanup()
+    except Exception:  # noqa: BLE001 - never block startup on cleanup
+        log.exception("upload cleanup failed")
     _start_tmpdir_janitor()
     controller = Controller(adopt=True, persist=True)
     controller.restore()

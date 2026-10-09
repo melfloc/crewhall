@@ -16,7 +16,10 @@ def meta_info() -> dict[str, Any]:
     return {
         # Only enabled providers can start new agents (Settings -> Providers).
         "harnesses": [
-            {"kind": kind, "command": settings.provider_command(kind) or get_harness(kind).command()}
+            {"kind": kind,
+             "command": settings.provider_command(kind) or get_harness(kind).command(),
+             "models": settings.provider_models(kind),
+             "model_switch": get_harness(kind).model_switch_mode}
             for kind in available_harnesses() if kind in enabled
         ],
         "disabled": [k for k in available_harnesses() if k not in enabled],
