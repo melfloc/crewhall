@@ -36,6 +36,7 @@ function connect() {
       render();
       if (S.selected) renderTerm();
       if (window.mvSync) mvSync();
+      if (window.chatOnState) chatOnState();
     }
     if (m.type === "output") { S.output[m.agent_id] = m.output;
       if (S.selected === m.agent_id) renderTerm();

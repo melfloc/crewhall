@@ -181,6 +181,26 @@ class ClaudeCodeHarness(Harness):
             state = self.state()
         return state
 
+    def accept_workspace_trust(self, timeout: float = 15.0) -> bool:
+        """Accept Claude's folder-trust dialog for a crewhall-owned chat workspace.
+
+        Only chat agents call this: their cwd is an isolated folder crewhall
+        created, so trusting it is safe. The dialog highlights "No, exit"; we
+        move down to "Yes, I trust this folder" and confirm.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            low = self.session.capture().lower()
+            if "trust this folder" in low or "accessing workspace" in low:
+                self.session.send_key("DOWN")
+                time.sleep(0.2)
+                self.session.send_key("ENTER")
+                return True
+            if "shift+tab to cycle" in low or "esc to interrupt" in low:
+                return False  # already past the dialog
+            time.sleep(0.3)
+        return False
+
     def _settle(self, quiet: float = 0.8, timeout: float = 10.0) -> None:
         """Wait until the screen stops changing (startup notices settle)."""
         deadline = time.monotonic() + timeout

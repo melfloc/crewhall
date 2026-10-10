@@ -62,6 +62,52 @@ class Doctor(unittest.TestCase):
         self.assertTrue(json.loads(out.stdout))
 
 
+class DoctorOffice(unittest.TestCase):
+    def setUp(self):
+        from crewhall import settings
+
+        self.settings = settings
+        self.d = tempfile.mkdtemp(prefix="at-doc-office-")
+        self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
+        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self.d, "XDG_STATE_HOME": self.d})
+        env.start(); self.addCleanup(env.stop)
+
+    def test_disabled_is_ok(self):
+        self.settings.patch({"office.enabled": False})
+        self.assertEqual(doctor.check_office()["status"], "ok")
+
+    def test_enabled_and_healthy_is_ok(self):
+        self.settings.patch({"office.enabled": True, "office.public_url": "http://127.0.0.1:8081",
+                             "office.base_url": "http://172.17.0.1:8765",
+                             "office.jwt_enabled": True, "office.jwt_secret": "s"})
+        resp = mock.MagicMock()
+        resp.status = 200
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = lambda *a: False
+        with mock.patch("urllib.request.urlopen", return_value=resp):
+            self.assertEqual(doctor.check_office()["status"], "ok")
+
+    def test_enabled_but_unreachable_warns_with_a_hint(self):
+        self.settings.patch({"office.enabled": True, "office.public_url": "http://127.0.0.1:9",
+                             "office.base_url": "http://172.17.0.1:8765"})
+        with mock.patch("urllib.request.urlopen", side_effect=OSError("refused")):
+            r = doctor.check_office()
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("office setup", r["hint"])
+
+    def test_enabled_healthy_without_base_url_warns(self):
+        self.settings.patch({"office.enabled": True, "office.public_url": "http://127.0.0.1:8081",
+                             "office.base_url": ""})
+        resp = mock.MagicMock()
+        resp.status = 200
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = lambda *a: False
+        with mock.patch("urllib.request.urlopen", return_value=resp):
+            r = doctor.check_office()
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("base_url", r["detail"])
+
+
 class BundleRoundtrip(unittest.TestCase):
     def setUp(self):
         self.src = tempfile.mkdtemp(prefix="at-b-src-")

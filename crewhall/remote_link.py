@@ -19,7 +19,8 @@ import os
 import subprocess
 import threading
 import time
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from .backends import ssh_tmux
 from .backends.ssh_tmux import HostUnreachable, SshTmuxBackend

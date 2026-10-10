@@ -392,7 +392,8 @@ class SshTunnelRealTests(unittest.TestCase):
             "    d+=c\n"
             "print(d.decode().strip())\n"
         )
-        import json, shlex
+        import json
+        import shlex
         cmd = f"python3 -c {shlex.quote(script)} {shlex.quote(self.link.remote_socket)}"
         proc = self.backend._ssh_run(cmd, input=json.dumps(request) + "\n", timeout=20)
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -541,7 +542,7 @@ class SshTranscriptRealTests(unittest.TestCase):
         self.assertFalse(transcripts.read_history(other, host=self.host)["available"])
 
     def test_activity_snapshot_never_blocks_and_fills_from_the_remote_tail(self):
-        from crewhall import activity, remote_files
+        from crewhall import activity
 
         t0 = time.monotonic()
         first = activity.claude_snapshot(self.UUID, host=self.host)

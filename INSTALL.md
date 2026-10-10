@@ -243,6 +243,56 @@ Detalle de garantías (backups, firma, rollback automático) en [RELEASING.md](R
 Desinstalar: `./uninstall.sh` (conserva config y estado; `--purge` los borra). Detiene el daemon: los
 agentes en ejecución se cierran.
 
+## Modo chat y OnlyOffice (opcional)
+
+El **modo chat** (botón de chat en la barra) no necesita nada extra: usa los
+agentes que ya tienes. Para **previsualizar y editar los artefactos con
+OnlyOffice** (y que el agente sea co-editor en vivo), un solo comando deja toda
+la infraestructura lista:
+
+```bash
+crewhall office setup
+```
+
+Hace, de forma idempotente: instala/arranca Docker si falta, levanta el
+Document Server (contenedor `crewhall-onlyoffice`, imagen **fijada** a una
+versión concreta para que no cambie entre despliegues, JWT y healthcheck),
+abre el firewall del bridge (`docker0`) si usas UFW, apunta `office.*` a él y
+activa los frontends que el contenedor necesita. Se puede lanzar ya desde el
+instalador (`scripts/install.sh --office`). Comprueba el estado con:
+
+```bash
+crewhall office status     # docker, contenedor, healthcheck y ajustes
+crewhall doctor            # incluye una comprobación de OnlyOffice si está activo
+```
+
+Si ya tienes un Document Server funcionando (otra máquina, un servicio
+compartido…), no hace falta Docker local:
+
+```bash
+crewhall office setup --external https://office.midominio --jwt-secret <secreto>
+```
+
+(para ese caso, define también `web.public_url` para que el DS pueda llamar de
+vuelta a crewhall).
+
+Notas:
+
+- Necesita privilegios para Docker (te pedirá `sudo`). Si añades tu usuario al
+  grupo `docker`, las siguientes veces no lo pedirá.
+- Con **Tailscale**, `setup` enlaza el Document Server a la IP del tailnet y usa
+  el nombre `.ts.net` para el navegador: la misma dirección sirve para el
+  navegador y para la llamada de vuelta del contenedor (el camino recomendado).
+- Sin Tailscale, el navegador usa `127.0.0.1` y el contenedor alcanza crewhall
+  por el gateway del bridge (`172.17.0.1`); en ese caso crewhall debe escuchar en
+  una interfaz que el contenedor alcance (o fija `office.base_url` a una que sí
+  lo sea). `crewhall doctor` lo avisa.
+- **Nivel 3** (el agente edita en vivo como "AI Agent"): necesita `chromium`
+  instalado. Sin él, el visor/editor y el guardado por callback siguen
+  funcionando.
+- El artefacto se sirve por `office.public_url` (por defecto
+  `http://127.0.0.1:8081`); el navegador debe poder alcanzarlo.
+
 ## Problemas frecuentes
 
 - **`crewhall: command not found`** → añade `~/.local/bin` al `PATH`.

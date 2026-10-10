@@ -10,7 +10,6 @@ import unittest
 
 from crewhall import settings
 from crewhall.controller import Controller
-from crewhall.terminals import is_terminal
 from crewhall.types import SessionSpec
 
 from .test_ssh_tmux_real import HAVE as SSH_HAVE, SshdHarness
@@ -162,7 +161,7 @@ class TerminalStreamRealTests(unittest.TestCase):
         self.hubs = []
 
     def tearDown(self):
-        from crewhall import settings, terminal_stream
+        from crewhall import settings
 
         for hub in self.hubs:
             hub.stop()
@@ -232,7 +231,6 @@ class TerminalStreamRealTests(unittest.TestCase):
     def test_slow_client_dropped_daemon_stays_responsive(self):
         import time as _t
 
-        from crewhall import settings
         from crewhall.terminal_stream import HubClient
         from crewhall.web import ws
 

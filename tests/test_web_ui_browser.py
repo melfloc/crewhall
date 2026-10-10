@@ -320,7 +320,7 @@ class ConversationView(_Browser):
             "/static/js/version.js", "/static/js/inbox.js", "/static/js/access.js", "/static/js/bundle.js", "/static/js/settings.js",
             "/static/js/archived.js", "/static/js/onboarding.js", "/static/js/mission.js", "/static/js/notify.js",
             "/static/js/palette.js", "/static/js/composer.js", "/static/js/tools.js", "/static/js/conversation.js",
-            "/static/js/actions.js", "/static/js/multiview.js", "/static/js/main.js"])
+            "/static/js/actions.js", "/static/js/multiview.js", "/static/js/chat.js", "/static/js/main.js"])
         self.assertTrue(self.page.evaluate("!!document.querySelector('link[href=\"/static/app.css\"]')"))
         self.assertEqual(self.console_errors, [])
         self.assertEqual(self.errors, [])
@@ -1359,22 +1359,26 @@ class Composer(_Browser):
         self.page.press("#input", "ArrowDown")
         self.assertEqual(self.page.input_value("#input"), "prompt two")
 
+    def _open_templates(self):
+        self.page.click("#toolsBtn")
+        self._menu_item("Prompt templates…").click()
+
     def test_saving_a_prompt_template_then_inserting_it(self):
         self.page.fill("#input", "Please review this diff")
-        self.page.click("#tplBtn")
+        self._open_templates()
         self._menu_item("Save current prompt as template…").click()
         self.page.wait_for_selector("#dlg[open] #pf-name")
         self.page.fill("#pf-name", "review")
         self.page.locator("#dlg .btn.primary").click()
         self.page.wait_for_selector("#dlg", state="hidden")
         self.page.fill("#input", "")
-        self.page.click("#tplBtn")
+        self._open_templates()
         self._menu_item("review").click()
         self.assertEqual(self.page.input_value("#input"), "Please review this diff")
 
     def test_deleting_a_template(self):
         self.page.evaluate("localStorage.setItem('at.tpl', JSON.stringify([{name:'a', text:'A'}]))")
-        self.page.click("#tplBtn")
+        self._open_templates()
         self._menu_item("Delete a template…").click()
         self.page.wait_for_selector("#dlg[open] .pick")
         self.page.locator("#dlg .pick input[type=checkbox]").first.check()

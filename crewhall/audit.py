@@ -42,6 +42,10 @@ AUDITED = {
     "terminal_resize", "terminal_capture",
     "terminal_ws_open", "terminal_ws_close", "terminal_ws_mode",
     "web_terminal_token_issue", "web_terminal_token_revoke",
+    "conversation_create", "conversation_rename", "conversation_delete",
+    "conversation_artifact_delete", "conversation_artifact_download", "conversation_export",
+    "office_collab_open", "office_collab_close", "office_collab_command",
+    "office_collab_insert", "office_collab_say", "office_collab_comment_add",
 }
 
 
@@ -232,6 +236,23 @@ def summarize(op: str, request: dict[str, Any], result: dict[str, Any] | None = 
         return "fs_complete"
     if op in ("clean_plan", "clean_apply"):
         return "clean"
+    if op == "conversation_create":
+        return f"id={request.get('id')} title={request.get('title')} agent={request.get('agent_id')}"
+    if op == "conversation_rename":
+        return f"id={request.get('id')}"
+    if op == "conversation_delete":
+        return f"id={request.get('id')} files={bool(request.get('delete_files'))}"
+    if op == "conversation_artifact_delete":
+        return f"id={request.get('id')} name={request.get('path')}"
+    if op == "conversation_artifact_download":
+        return f"id={request.get('id')} name={request.get('path')}"
+    if op in ("office_collab_open", "office_collab_close"):
+        return f"id={request.get('id')} path={request.get('path')}"
+    if op == "office_collab_command":
+        return f"id={request.get('id')} method={request.get('method')}"
+    if op in ("office_collab_insert", "office_collab_say", "office_collab_comment_add"):
+        text = str(request.get("text") or "")
+        return f"id={request.get('id')} path={request.get('path')} bytes={len(text.encode('utf-8'))}"
     if op.startswith("web_token") or op.startswith("web_session"):
         return op
     if op.startswith("terminal_"):

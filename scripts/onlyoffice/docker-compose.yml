@@ -1,0 +1,34 @@
+# OnlyOffice Document Server for crewhall (one per host).
+#
+#   cd scripts/onlyoffice
+#   cp .env.example .env      # then set ONLYOFFICE_JWT_SECRET (openssl rand -hex 32)
+#   docker compose up -d
+#
+# The JWT secret here MUST equal crewhall's office.jwt_secret.
+services:
+  onlyoffice:
+    # Pinned on purpose: a floating tag can silently change between deploys.
+    image: onlyoffice/documentserver:8.1.3
+    container_name: crewhall-onlyoffice
+    restart: unless-stopped
+    # Default bridge so the gateway is the stable 172.17.0.1 the UFW rule opens.
+    network_mode: bridge
+    environment:
+      - JWT_ENABLED=true
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
+      - JWT_HEADER=Authorization
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    ports:
+      # Bind to loopback: the host's browser uses http://127.0.0.1:8081.
+      # For remote/Tailscale access, change to "<tailscale-ip>:8081:80" (or
+      # 0.0.0.0) AND set office.public_url to the address the browser reaches.
+      - "127.0.0.1:8081:80"
+    volumes:
+      - ./data:/var/www/onlyoffice/Data
+      - ./lib:/var/lib/onlyoffice
+      - ./logs:/var/log/onlyoffice

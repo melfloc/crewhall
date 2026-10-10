@@ -20,7 +20,8 @@ import logging
 import os
 import socket
 import threading
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 log = logging.getLogger("crewhall.gateway")
 

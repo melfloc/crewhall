@@ -43,13 +43,17 @@ def _decode(data: bytes, i: int) -> tuple[Any, int]:
     if ai < 24:
         n = ai
     elif ai == 24:
-        n = data[i]; i += 1
+        n = data[i]
+        i += 1
     elif ai == 25:
-        n = struct.unpack(">H", data[i:i + 2])[0]; i += 2
+        n = struct.unpack(">H", data[i:i + 2])[0]
+        i += 2
     elif ai == 26:
-        n = struct.unpack(">I", data[i:i + 4])[0]; i += 4
+        n = struct.unpack(">I", data[i:i + 4])[0]
+        i += 4
     elif ai == 27:
-        n = struct.unpack(">Q", data[i:i + 8])[0]; i += 8
+        n = struct.unpack(">Q", data[i:i + 8])[0]
+        i += 8
     else:
         raise ValueError("cbor: unsupported additional info")
     if major == 0:

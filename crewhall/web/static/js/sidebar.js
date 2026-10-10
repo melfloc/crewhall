@@ -436,7 +436,6 @@ function renderHead(){
   else if (st === "working") box.placeholder = "Agent working… input is disabled until it finishes";
   else if (st === "starting") box.placeholder = "Agent starting…";
   else box.placeholder = "Type and press Enter to send to the agent…";
-  if(typeof renderModelCtl === "function") renderModelCtl(a);
 }
 
 /* ---------- main-pane terminal controls ---------- */

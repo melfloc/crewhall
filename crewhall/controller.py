@@ -1075,6 +1075,7 @@ class Controller:
         args: Any = None,
         workspace_mode: str | None = None,
         host: str | None = None,
+        conversation: str | None = None,
     ) -> Harness:
         harness_cls = get_harness(kind)
         if not settings.provider_enabled(kind):
@@ -1101,6 +1102,20 @@ class Controller:
         elif backend is None and settings.get("agents.default_backend") != "auto":
             backend = settings.get("agents.default_backend")
         env = {**settings.provider_env(kind), **(env or {})}
+        conversation_workspace: str | None = None
+        if conversation and not host:
+            # A chat conversation shares its inputs/outputs with the agent through
+            # the environment; a remote agent has no access to this host's disk.
+            # Its cwd is forced into the conversation's own workspace so the chat
+            # is fully isolated (never the user's project nor the daemon's cwd).
+            from . import conversations as _conversations
+
+            try:
+                conv_env = _conversations.env(conversation)
+                env.update(conv_env)
+                conversation_workspace = conv_env["CREWHALL_WORKSPACE"]
+            except _conversations.ConversationError:
+                pass
         conversation_id = self._new_conversation_id(kind, extra_args)
         # The OpenCode server binds the remote loopback and MCP config is a local
         # file: neither is reachable for a remote agent (state falls back to the
@@ -1110,6 +1125,11 @@ class Controller:
         if name and any(h.name == name for h in self.agents.all()):
             raise ValueError(f'agent name "{name}" already exists')
         cwd = cwd if host else self.resolve_cwd(cwd, team)
+        if conversation_workspace:
+            # Isolation wins over any cwd/team/worktree: a chat never runs in a
+            # project directory and never creates worktrees or stray files.
+            cwd = conversation_workspace
+            workspace_mode = "shared"
         session_id = agent_id or new_session_id()
         agent_name = name or session_id
         mode = workspace_mode
@@ -1119,7 +1139,7 @@ class Controller:
                 mode = getattr(t, "workspace_mode", None)
             except Exception:  # noqa: BLE001
                 mode = None
-        if mode == "worktree":
+        if mode == "worktree" and not conversation_workspace:
             cwd = self._make_worktree(session_id, agent_name, team, cwd, host)
         agent_env = self._build_agent_env(session_id, agent_name, [], env, host)
         if link:
@@ -1147,13 +1167,25 @@ class Controller:
         harness.conversation_id = conversation_id
         self._attach_link(harness, link)
         self.agents.add(harness)
+        if conversation and not host:
+            # A chat runs in a crewhall-owned isolated workspace, so accept the
+            # agent's folder-trust dialog in the background (Claude shows one).
+            def _accept() -> None:
+                try:
+                    harness.accept_workspace_trust()
+                except Exception:  # noqa: BLE001 - best effort
+                    pass
+
+            threading.Thread(target=_accept, name=f"trust-{session_id}", daemon=True).start()
         self._agent_tokens.setdefault(session_id, agent_env["CREWHALL_TOKEN"])
         if mcp_file:
             self._mcp_files[session_id] = mcp_file
         self._base_env.setdefault(session_id, dict(env or {}))
         self._agent_args[session_id] = extra_args
         self._agent_hosts[session_id] = host
-        if not host:
+        if not host and not conversation:
+            # A chat conversation must not drop a CLAUDE.md/AGENTS.md anywhere:
+            # its instructions travel through the environment instead.
             self._ensure_control_file(cwd, kind)
         if team:
             try:

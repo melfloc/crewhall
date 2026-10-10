@@ -54,16 +54,23 @@
   <header class="topbar">
     <button class="btn icon ghost" id="menuBtn" aria-label="Open agents list"><svg class="ic"><use href="#i-menu"/></svg></button>
     <div class="brand"><span class="logo">&gt;_</span><span class="brand-name">CREWHALL</span><small id="version"></small></div>
-    <div class="summary" id="summary" aria-live="polite"></div>
+    <div class="mode-switch" id="modeSwitch" role="group" aria-label="Interface">
+      <button type="button" data-mode="cowork" title="Cowork — agents, teams, terminals and messaging"><svg class="ic sm"><use href="#i-users"/></svg><span>Cowork</span></button>
+      <button type="button" data-mode="chat" title="Chat — conversations with artifacts and OnlyOffice"><svg class="ic sm"><use href="#i-msg"/></svg><span>Chat</span></button>
+    </div>
+    <span class="topbar-cowork">
+      <div class="summary" id="summary" aria-live="polite"></div>
+      <span class="spacer"></span>
+      <button class="btn icon ghost" id="missionBtn" aria-label="Mission control" title="Mission control — every agent and the message flow"><svg class="ic"><use href="#i-activity"/></svg></button>
+      <button class="btn icon ghost" id="timelineBtn" aria-label="Timeline" title="Timeline — work / wait / error periods per agent"><svg class="ic"><use href="#i-list"/></svg></button>
+      <button class="btn icon ghost" id="usageBtn" aria-label="Cost and usage" title="Cost and usage — tokens, cost and active time"><svg class="ic"><use href="#i-shield"/></svg></button>
+      <button class="btn icon ghost" id="multiBtn" aria-label="Multi-view" title="Multi-view — several agents side by side in a grid (Alt+M)"><svg class="ic"><use href="#i-grid"/></svg></button>
+      <button class="btn icon ghost" id="fullBtn" aria-label="Full view" title="Full view — the active agent fills the window"><svg class="ic"><use href="#i-expand"/></svg></button>
+      <button class="btn icon ghost" id="cleanBtn" aria-label="Clean up" title="Clean up — temp leftovers, old backups and old releases"><svg class="ic"><use href="#i-trash"/></svg></button>
+      <button class="btn ghost inbox-btn init-hidden" id="inboxBtn" aria-label="Needs your answer" title="Pending permissions and questions from all agents"><svg class="ic"><use href="#i-shield"/></svg><span class="inbox-n" id="inboxN">0</span></button>
+      <button class="btn icon ghost notify-btn init-hidden" id="notifyBtn" aria-label="Enable notifications" aria-pressed="false" title="Enable browser notifications"><svg class="ic"><use href="#i-bell"/></svg></button>
+    </span>
     <span class="spacer"></span>
-    <button class="btn icon ghost" id="missionBtn" aria-label="Mission control" title="Mission control — every agent and the message flow"><svg class="ic"><use href="#i-activity"/></svg></button>
-    <button class="btn icon ghost" id="timelineBtn" aria-label="Timeline" title="Timeline — work / wait / error periods per agent"><svg class="ic"><use href="#i-list"/></svg></button>
-    <button class="btn icon ghost" id="usageBtn" aria-label="Cost and usage" title="Cost and usage — tokens, cost and active time"><svg class="ic"><use href="#i-shield"/></svg></button>
-    <button class="btn icon ghost" id="multiBtn" aria-label="Multi-view" title="Multi-view — several agents side by side in a grid (Alt+M)"><svg class="ic"><use href="#i-grid"/></svg></button>
-    <button class="btn icon ghost" id="fullBtn" aria-label="Full view" title="Full view — the active agent fills the window"><svg class="ic"><use href="#i-expand"/></svg></button>
-    <button class="btn icon ghost" id="cleanBtn" aria-label="Clean up" title="Clean up — temp leftovers, old backups and old releases"><svg class="ic"><use href="#i-trash"/></svg></button>
-    <button class="btn ghost inbox-btn init-hidden" id="inboxBtn" aria-label="Needs your answer" title="Pending permissions and questions from all agents"><svg class="ic"><use href="#i-shield"/></svg><span class="inbox-n" id="inboxN">0</span></button>
-    <button class="btn icon ghost notify-btn init-hidden" id="notifyBtn" aria-label="Enable notifications" aria-pressed="false" title="Enable browser notifications"><svg class="ic"><use href="#i-bell"/></svg></button>
     <span class="conn" id="conn" role="status">connecting…</span>
     <button class="btn icon ghost" id="logoutBtn" aria-label="Session and access" title="Session &amp; access — connected devices, sign out"><svg class="ic"><use href="#i-lock"/></svg></button>
     <button class="btn icon ghost" id="settingsBtn" aria-label="Settings" title="Settings — providers, access, maintenance, emergency reset"><svg class="ic"><use href="#i-settings"/></svg></button>
@@ -138,10 +145,7 @@
         <div class="attach-tray init-hidden" id="attachTray" aria-live="polite"></div>
         <div class="composer" id="composer">
           <span class="state-ic" id="composer-ic"></span>
-          <button class="btn icon ghost sm" id="cmdBtn" type="button" aria-label="Slash commands" title="Slash commands for this agent"><svg class="ic sm"><use href="#i-terminal"/></svg></button>
-          <button class="btn icon ghost sm" id="tplBtn" type="button" aria-label="Prompt templates" title="Prompt templates"><svg class="ic sm"><use href="#i-list"/></svg></button>
-          <button class="btn icon ghost sm" id="attachBtn" type="button" aria-label="Attach a file" title="Attach a file — uploaded to the server, the agent gets its path"><svg class="ic sm"><use href="#i-paperclip"/></svg></button>
-          <span class="model-ctl" id="modelCtl"></span>
+          <button class="btn icon ghost sm" id="toolsBtn" type="button" aria-label="Tools" title="Tools — commands, templates, attach a file, model"><svg class="ic sm"><use href="#i-plus"/></svg></button>
           <textarea id="input" rows="1" placeholder="Type and press Enter to send to the agent…  (Shift+Enter for a new line)" autocomplete="off" aria-label="Message for the agent"></textarea>
           <button class="btn primary" id="send"><svg class="ic"><use href="#i-send"/></svg>Send</button>
         </div>
@@ -159,6 +163,45 @@
         <div class="activity" id="activity"></div>
       </div>
     </section>
+  </div>
+  <div class="chat init-hidden" id="chat" role="region" aria-label="Chat mode">
+    <aside class="chat-side">
+      <div class="chat-side-top">
+        <button class="btn primary" id="chatNew"><svg class="ic sm"><use href="#i-plus"/></svg>New chat</button>
+        <div class="search">
+          <svg class="ic sm"><use href="#i-search"/></svg>
+          <input class="input" id="chat-q" placeholder="Search chats…" autocomplete="off" aria-label="Search chats">
+        </div>
+      </div>
+      <nav class="chat-list" id="chat-list" aria-label="Conversations"></nav>
+      <div class="chat-side-foot"><button class="btn" id="chatExit"><svg class="ic sm"><use href="#i-terminal"/></svg>Back to workspace</button></div>
+    </aside>
+    <section class="chat-main">
+      <div class="chat-head" id="chat-head"></div>
+      <div class="chat-feed hist" id="chat-feed" aria-live="polite"></div>
+      <div class="chat-composer">
+        <button class="btn icon ghost sm" id="chatTools" type="button" aria-label="Tools" title="Tools — attach a file, show artifacts"><svg class="ic sm"><use href="#i-plus"/></svg></button>
+        <textarea id="chat-input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for a new line)" autocomplete="off" aria-label="Message"></textarea>
+        <button class="btn primary" id="chatSend"><svg class="ic"><use href="#i-send"/></svg>Send</button>
+        <input type="file" id="chat-file" multiple hidden>
+      </div>
+      <div class="chat-tray init-hidden" id="chat-tray" aria-live="polite"></div>
+    </section>
+    <div class="chat-split" id="chat-split" role="separator" aria-orientation="vertical" title="Drag to resize the artifact panel"></div>
+    <aside class="chat-artifacts" id="chat-artifacts" aria-label="Artifacts">
+      <div class="chat-art-head">
+        <span>Artifacts</span><span class="spacer"></span>
+        <button class="btn icon ghost sm" id="chatArtWide" aria-label="Parallel view" title="Parallel — split the window half chat, half artifact"><svg class="ic sm"><use href="#i-columns"/></svg></button>
+        <button class="btn icon ghost sm" id="chatArtRefresh" aria-label="Refresh artifacts"><svg class="ic sm"><use href="#i-refresh"/></svg></button>
+        <button class="btn icon ghost sm" id="chatArtClose" aria-label="Hide artifacts"><svg class="ic sm"><use href="#i-x"/></svg></button>
+      </div>
+      <div class="chat-art-body" id="chat-art-body"></div>
+      <div class="chat-office init-hidden" id="chat-office">
+        <div class="chat-office-head"><span id="chat-office-title">Editor</span><span class="spacer"></span>
+          <button class="btn icon ghost sm" id="chat-office-close" aria-label="Close editor"><svg class="ic sm"><use href="#i-x"/></svg></button></div>
+        <div id="chat-office-mount"></div>
+      </div>
+    </aside>
   </div>
 </div>
 <div class="multi init-hidden" id="multi" role="dialog" aria-modal="true" aria-label="Multi-view"></div>
@@ -268,6 +311,7 @@
 <script src="/static/js/conversation.js"></script>
 <script src="/static/js/actions.js"></script>
 <script src="/static/js/multiview.js"></script>
+<script src="/static/js/chat.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>

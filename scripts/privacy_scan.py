@@ -27,7 +27,10 @@ ALLOW = (
     "noreply@anthropic.com",   # git commit trailers
     "@unittest.",              # decorator text matched as an email
     "t@t",                     # tests
+    "t@example.com",           # tests (git author placeholders)
+    "t@e.com",                 # tests (git author placeholders)
     "user@example.com",
+    "~/.ssh/id_ed25519",       # documented default key path (a hint, not a secret)
 )
 
 

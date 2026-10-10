@@ -36,7 +36,7 @@ function withAttachments(text){
 
 async function uploadFiles(fileList, storage){
   const files = [...(fileList || [])]; if(!files.length) return;
-  const btn = $("attachBtn"); if(btn) btn.classList.add("loading");
+  const btn = $("toolsBtn"); if(btn) btn.classList.add("loading");
   try {
     for(const f of files){
       const r = await fetch("/api/upload?mode=" + encodeURIComponent(storage || ""), {
@@ -53,15 +53,21 @@ async function uploadFiles(fileList, storage){
   finally { if(btn) btn.classList.remove("loading"); }
 }
 
-$("attachBtn").onclick = (e) => {
-  e.stopPropagation();
-  openMenu($("attachBtn"), [
-    {label:"Attach a file…", icon:"file", run:() => { S.uploadMode = ""; $("fileInput").click(); }},
-    {label:"Attach to permanent storage…", icon:"folder", run:() => { S.uploadMode = "permanent"; $("fileInput").click(); }},
-    "-",
-    {label:"Insert a server path…", icon:"folder", run:insertServerPath},
-  ]);
-};
+/* One collapsed "tools" button next to the composer keeps the input wide:
+   slash commands, prompt templates, attachments and the model switch. */
+function openComposerTools(anchor){
+  const a = agentById(S.selected);
+  const items = [];
+  if(a && SLASH[a.kind]) items.push({label:"Slash commands…", icon:"terminal", run:() => openSlash(anchor)});
+  items.push({label:"Prompt templates…", icon:"list", run:() => openTemplates(anchor)});
+  items.push("-");
+  items.push({label:"Attach a file…", icon:"paperclip", run:() => { S.uploadMode = ""; $("fileInput").click(); }});
+  items.push({label:"Attach to permanent storage…", icon:"folder", run:() => { S.uploadMode = "permanent"; $("fileInput").click(); }});
+  items.push({label:"Insert a server path…", icon:"folder", run:insertServerPath});
+  if(a) items.push("-", {label:`Change model… (${modelOf(a) || "n/d"})`, icon:"activity", run:() => openModelPicker(a)});
+  openMenu(anchor, items);
+}
+$("toolsBtn").onclick = (e) => { e.stopPropagation(); openComposerTools($("toolsBtn")); };
 $("fileInput").onchange = (e) => { uploadFiles(e.target.files, S.uploadMode); e.target.value = ""; };
 async function insertServerPath(){
   const r = await promptDlg({title:"Insert a path", ok:"Insert",
@@ -102,32 +108,6 @@ async function loadModels(id){
   } catch(e){ info = {mode:"direct", models:[], current:null}; }
   S.modelInfo[id] = {at:Date.now(), info};
   return info;
-}
-async function renderModelCtl(a){
-  const ctl = $("modelCtl"); if(!ctl) return;
-  if(!a){ ctl.replaceChildren(); ctl.dataset.sig = ""; return; }
-  const info = await loadModels(a.agent_id);
-  const sig = [a.agent_id, info.mode, info.current, (info.models || []).join(",")].join("|");
-  if(ctl.dataset.sig === sig) return;
-  ctl.dataset.sig = sig;
-  if(info.mode === "picker"){
-    ctl.replaceChildren(el("button", {className:"btn sm model-btn", type:"button",
-      title:"Open the agent's own model picker", onclick:() => setAgentModel(null)},
-      ic("activity", "sm"), el("span", {}, info.current || "model")));
-  } else {
-    const opts = (info.models || []).map(m => typeof m === "string" ? {value:m, label:m} : m);
-    if(info.current && !opts.some(o => o.value === info.current))
-      opts.unshift({value:info.current, label:info.current});
-    if(!opts.length) opts.push({value:"default", label:"default"});
-    ctl.replaceChildren(el("select", {className:"select sm model-sel", title:"Change the model",
-      onchange:(e) => {
-        const v = e.target.value;
-        if(v === "__custom"){ e.target.value = info.current || opts[0].value; openModelPicker(a); return; }
-        setAgentModel(v);
-      }},
-      ...opts.map(o => el("option", {value:o.value, textContent:o.label, selected:o.value === info.current})),
-      el("option", {value:"__custom", textContent:"Custom…"})));
-  }
 }
 async function setAgentModel(model){
   const a = agentById(S.selected); if(!a) return;
@@ -172,7 +152,7 @@ function openSlash(anchor){
     run:() => insertTemplate(cmd)}));
   openMenu(anchor, items);
 }
-$("cmdBtn").onclick = (e) => { e.stopPropagation(); openSlash($("cmdBtn")); };
+
 
 /* ============================ quick actions ============================ */
 function agentKey(id, key){

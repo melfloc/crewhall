@@ -255,7 +255,6 @@ class WebAuthnEndToEnd(unittest.TestCase):
                 browser.close()
 
     def test_login_without_registered_passkey_is_rejected(self):
-        import http.client
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(executable_path=CHROMIUM, args=["--no-sandbox"])

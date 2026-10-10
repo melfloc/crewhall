@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crewhall"
-version = "0.76.0"
+version = "0.77.0"
 description = "Control real interactive CLI agents (Claude Code, OpenCode, Codex) from one place and let them talk to each other."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -58,5 +58,6 @@ select = ["E", "F", "W", "B", "UP"]
 ignore = ["E501", "B008", "UP037", "UP042"]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests use compact ``a; b`` assertion pairs by convention.
-"tests/**" = ["E702"]
+# Tests use compact ``a; b`` assertion pairs by convention, and assert on broad
+# exceptions when checking that invalid input is rejected.
+"tests/**" = ["E702", "E701", "B017"]

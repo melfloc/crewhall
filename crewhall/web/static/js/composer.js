@@ -58,4 +58,4 @@ function openTemplates(anchor){
   if(list.length) items.push({label:"Delete a template…", icon:"trash", danger:true, run:deleteTemplate});
   openMenu(anchor, items);
 }
-$("tplBtn").onclick = (e) => { e.stopPropagation(); openTemplates($("tplBtn")); };
+/* The templates menu is opened from the composer "tools" button (tools.js). */

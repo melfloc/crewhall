@@ -1382,6 +1382,72 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("target")
     t.set_defaults(func=cmd_terminal_attach)
 
+    p = sub.add_parser("office", help="OnlyOffice: install the Document Server and co-edit artifacts")
+    osub = p.add_subparsers(dest="office_command", required=True)
+    o = osub.add_parser("setup", help="install + run OnlyOffice and wire it to crewhall")
+    o.add_argument("--port", type=int, default=8081, help="Document Server port (default 8081)")
+    o.add_argument("--bind", default=None,
+                   help="address the browser reaches the DS on (default: Tailscale IP, else 127.0.0.1)")
+    o.add_argument("--external", default=None, metavar="URL",
+                   help="use an existing Document Server instead of running Docker here")
+    o.add_argument("--jwt-secret", dest="jwt_secret", default=None,
+                   help="JWT secret of the external Document Server (with --external)")
+    o.add_argument("--no-wait", action="store_true", help="do not wait for the healthcheck")
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("status", help="show the OnlyOffice setup and container status")
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("list", help="documents the agent is co-editing")
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("open", help="open the headless co-editor for an artifact")
+    o.add_argument("--conversation", required=False, help="conversation id (defaults to $CREWHALL_CONVERSATION)")
+    o.add_argument("--path", required=True, help="artifact path inside outputs/")
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("read", help="read the document text")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("insert", help="insert content at the cursor")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.add_argument("--text", required=True)
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("command", help="call any OnlyOffice Automation API method")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.add_argument("--method", required=True)
+    o.add_argument("--args", default="[]", help="JSON array of arguments")
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("close", help="close the co-editor")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("users", help="who is editing the document (co-editors)")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("chat", help="read the messages the user sent in the editor's chat")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("say", help="send a message to the editor's co-authoring chat")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.add_argument("--text", required=True)
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("comments", help="list the document comments (anchored to text)")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("comment", help="add a comment to the document")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.add_argument("--text", required=True)
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("save", help="force-save the document (fires the callback)")
+    o.add_argument("--conversation", required=False)
+    o.add_argument("--path", required=True)
+    o.set_defaults(func=cmd_office)
+
     p = sub.add_parser("host", help="remote SSH hosts")
     hsub = p.add_subparsers(dest="host_command", required=True)
     h = hsub.add_parser("list", help="configured hosts and what is observed about them")
@@ -1694,6 +1760,80 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_ui)
 
     return parser
+
+
+def cmd_office(args: argparse.Namespace) -> int:
+    """Drive the headless OnlyOffice co-editor (Nivel 3) from an agent or shell.
+
+    Typical agent use, with the environment crewhall injects:
+
+        crewhall office open   --conversation "$CREWHALL_CONVERSATION" --path report.docx
+        crewhall office insert --conversation "$CREWHALL_CONVERSATION" --path report.docx --text "hola"
+        crewhall office read   --conversation "$CREWHALL_CONVERSATION" --path report.docx
+        crewhall office close  --conversation "$CREWHALL_CONVERSATION" --path report.docx
+    """
+    import json as _json
+
+    action = args.office_command
+    if action == "setup":
+        from . import office_setup
+
+        try:
+            res = office_setup.setup(port=getattr(args, "port", 8081),
+                                     bind=getattr(args, "bind", None),
+                                     external=getattr(args, "external", None),
+                                     jwt_secret=getattr(args, "jwt_secret", None),
+                                     wait=not getattr(args, "no_wait", False))
+        except office_setup.SetupError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(_json.dumps(res, indent=2))
+        return 0
+    if action == "status":
+        from . import office_setup
+
+        print(_json.dumps(office_setup.status(), indent=2))
+        return 0
+
+    cid = getattr(args, "conversation", None) or os.environ.get("CREWHALL_CONVERSATION")
+    rel = getattr(args, "path", None)
+    client = _client(args)
+    if action == "list":
+        res = client.call("office_collab_list")
+    elif action == "open":
+        res = client.call("office_collab_open", id=cid, path=rel)
+    elif action == "read":
+        res = client.call("office_collab_read", id=cid, path=rel)
+    elif action == "insert":
+        res = client.call("office_collab_insert", id=cid, path=rel, text=args.text)
+    elif action == "command":
+        try:
+            parsed = _json.loads(args.args) if args.args else []
+        except _json.JSONDecodeError as exc:
+            print(f"error: --args is not JSON: {exc}", file=sys.stderr)
+            return 1
+        res = client.call("office_collab_command", id=cid, path=rel,
+                          method=args.method, args=parsed)
+    elif action == "close":
+        res = client.call("office_collab_close", id=cid, path=rel)
+    elif action == "users":
+        res = client.call("office_collab_users", id=cid, path=rel)
+    elif action == "chat":
+        res = client.call("office_collab_chat", id=cid, path=rel)
+    elif action == "say":
+        res = client.call("office_collab_say", id=cid, path=rel, text=args.text)
+    elif action == "comments":
+        res = client.call("office_collab_comments", id=cid, path=rel)
+    elif action == "comment":
+        res = client.call("office_collab_comment_add", id=cid, path=rel, text=args.text)
+    elif action == "save":
+        res = client.call("office_collab_save", id=cid, path=rel)
+    else:  # pragma: no cover - argparse enforces the choices
+        print(f"error: unknown office command {action!r}", file=sys.stderr)
+        return 1
+    res.pop("ok", None)
+    print(_json.dumps(res, ensure_ascii=False))
+    return 0
 
 
 def cmd_adapter(args: argparse.Namespace) -> int:

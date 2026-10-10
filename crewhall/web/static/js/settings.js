@@ -9,7 +9,7 @@ const _wunb64u = s => {
 };
 /* ---------- Settings: providers, agents, access & network, maintenance, interface, emergency ---------- */
 const SET_TABS = [["providers", "Providers"], ["agents", "Agents"], ["hosts", "Remote hosts"], ["uploads", "Uploads"],
-                  ["terminals", "Terminals"],
+                  ["terminals", "Terminals"], ["conversations", "Chat"], ["office", "OnlyOffice"],
                   ["access", "Access & network"],
                   ["maintenance", "Maintenance"], ["interface", "Interface"], ["audit", "Audit"], ["emergency", "Emergency"]];
 const SK = { tab:"providers", data:null };
@@ -33,11 +33,16 @@ function setField(item, onChange){
     input = el("input", {className:"input mono", id, value:item.value || "", disabled:locked, spellcheck:false, autocomplete:"off", oninput:onChange});
     if(!locked) queueMicrotask(() => attachPathComplete(input));
     get = () => input.value;
+  } else if(item.type === "text"){
+    input = el("input", {className:"input" + (item.secret ? " mono" : ""), id, type:item.secret ? "password" : "text",
+      value:item.value || "", disabled:locked, spellcheck:false, autocomplete:"off", oninput:onChange});
+    get = () => input.value;
   } else {  // list / paths: one entry per line
     input = el("textarea", {className:"input mono", id, rows:3, value:(item.value||[]).join("\n"), disabled:locked, spellcheck:false, oninput:onChange});
     get = () => input.value;
   }
-  const hint = [item.help, item.env ? `Set by the environment variable ${item.env}; unset it to change this here.` : null,
+  const hint = [item.help, item.secret ? "Leave as shown to keep the stored value." : null,
+                item.env ? `Set by the environment variable ${item.env}; unset it to change this here.` : null,
                 item.restart ? "Applies after the next daemon restart or when the related feature is restarted." : null].filter(Boolean).join(" ");
   const box = item.type === "bool"
     ? el("div", {className:"field check-row"}, el("label", {htmlFor:id, className:"check"}, input, el("span", {}, item.label)), el("div", {className:"hint"}, hint))
@@ -589,6 +594,9 @@ async function renderSettings(){
   else if(SK.tab === "hosts") await tabHosts(view);
   else if(SK.tab === "uploads") await tabUploads(view);
   else if(SK.tab === "terminals") await tabTerminals(view);
+  else if(SK.tab === "conversations") view.replaceChildren(settingsGroup("conversations", "conversation"));
+  else if(SK.tab === "office") view.replaceChildren(settingsGroup("office", "office"),
+                                                    settingsGroup("web", "web"));
   else if(SK.tab === "access") await tabAccess(view);
   else if(SK.tab === "maintenance") view.replaceChildren(settingsGroup("maintenance", "maintenance"),
     el("div", {className:"dlg-actions", style:"justify-content:flex-start"},

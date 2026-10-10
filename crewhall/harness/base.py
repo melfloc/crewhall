@@ -247,6 +247,15 @@ class Harness(ABC):
             (AgentState.READY, AgentState.WAITING_INPUT), timeout=timeout
         )
 
+    def accept_workspace_trust(self, timeout: float = 0.0) -> bool:
+        """Accept a one-time workspace trust dialog, if the agent shows one.
+
+        Only used for chat agents: their working directory is an isolated folder
+        crewhall created, so accepting it is safe and lets the chat start. The
+        base harness has no such dialog.
+        """
+        return False
+
     def send(self, prompt: str, timeout: float = 30.0) -> None:
         state = self.ensure_ready(timeout)
         if not state.usable:

@@ -14,7 +14,8 @@ from typing import Any
 
 from . import paths, settings
 from .controller import AgentNotFound, Controller, SessionNotFound
-from .terminals import TerminalError, is_terminal
+from .conversations import ConversationError
+from .terminals import TerminalError
 from .harness import AgentState, HarnessError
 from .interactions import InteractionError
 from .processes import ProcessError
@@ -151,6 +152,14 @@ class Server:
         # Web interfaces chosen with `crewhall local|tailscale` come back up.
         self.frontends.begin_restore()
         threading.Thread(target=self.frontends.restore, name="frontends-restore", daemon=True).start()
+        # Deliver OnlyOffice co-authoring chat messages to the conversation's agent.
+        threading.Thread(target=self._collab_watcher, name="collab-watcher", daemon=True).start()
+        try:
+            from . import conversations
+
+            conversations.ensure_global_rules()
+        except Exception:  # noqa: BLE001 - the chat rules are best effort
+            log.exception("could not write the global chat rules")
         self._sock.settimeout(0.5)
         next_check = time.monotonic() + OWNERSHIP_CHECK_EVERY
         while not self._stop.is_set():
@@ -183,6 +192,12 @@ class Server:
         except Exception:  # noqa: BLE001
             log.exception("error stopping frontends")
         try:
+            from . import office_collab
+
+            office_collab.REGISTRY.close_all()
+        except Exception:  # noqa: BLE001
+            log.exception("error stopping headless co-editors")
+        try:
             if not self._orphan:  # a duplicate must not close adopted sessions
                 self.controller.shutdown()
         except Exception:
@@ -204,6 +219,43 @@ class Server:
                 self._lock_fd.close()
             except OSError:
                 pass
+
+    def _collab_watcher(self) -> None:
+        """Forward new OnlyOffice chat messages into the agent's conversation.
+
+        The user talks to "AI Agent" from inside the document; crewhall polls the
+        headless co-editor and injects each message as a normal prompt.
+        """
+        from . import office_collab
+
+        office_collab.REGISTRY.set_forward(self._forward_collab)
+        while not self._stop.is_set():
+            try:
+                office_collab.REGISTRY.poll_forward()
+            except Exception:  # noqa: BLE001
+                log.exception("collab watcher")
+            self._stop.wait(2.0)
+
+    def _forward_collab(self, conversation_id: str, path: str, user: str,
+                        kind: str, text: str) -> None:
+        from . import conversations
+
+        try:
+            agent_id = conversations.get(conversation_id).get("agent_id")
+        except Exception:  # noqa: BLE001
+            return
+        if not agent_id:
+            return
+        label = "comentario" if kind == "comment" else "chat"
+        try:
+            harness = self.controller.get_agent(agent_id)
+            if not harness.state().usable:
+                # The chat agent may be EXITED after a daemon restart: revive it
+                # so the user's message is not lost.
+                harness = self.controller.restart_agent(agent_id)
+            harness.send(f"[OnlyOffice {label} · {user or 'user'} · {path}] {text}")
+        except Exception as exc:  # noqa: BLE001 - a busy/stopped agent must not crash the loop
+            log.info("could not forward OnlyOffice %s to %s: %s", kind, agent_id, exc)
 
     def stop(self) -> None:
         self._stop.set()
@@ -268,7 +320,7 @@ class Server:
             return {"ok": False, "error": f"team not found: {exc}"}
         except TeamError as exc:
             return {"ok": False, "error": str(exc)}
-        except (InteractionError, ProcessError) as exc:
+        except (InteractionError, ProcessError, ConversationError) as exc:
             return {"ok": False, "error": str(exc)}
         except SessionTimeout as exc:
             return {"ok": False, "error": str(exc), "timeout": True}
@@ -451,13 +503,33 @@ class Server:
             args=request.get("args"),
             workspace_mode=request.get("workspace_mode"),
             host=request.get("host"),
+            conversation=request.get("conversation"),
         )
+        if request.get("conversation"):
+            from . import conversations
+
+            try:
+                conversations.set_agent(str(request["conversation"]), harness.agent_id)
+            except conversations.ConversationError:
+                pass
         return {"agent": self.controller.agent_summary(harness)}
 
     def _op_agent_list(self, request: dict[str, Any]) -> dict[str, Any]:
         if request.get("viewer"):
             self._viewer_seen = time.monotonic()
-        return {"agents": self.controller.list_agents()}
+        # Chat agents are isolated from Cowork: the default scope hides them, so
+        # they never show up in the agents sidebar, teams or mission control.
+        from . import conversations
+
+        agents = self.controller.list_agents()
+        scope = request.get("scope") or "cowork"
+        if scope != "all":
+            chat_ids = conversations.agent_ids()
+            if scope == "chat":
+                agents = [a for a in agents if a.get("agent_id") in chat_ids]
+            else:
+                agents = [a for a in agents if a.get("agent_id") not in chat_ids]
+        return {"agents": agents}
 
     def _op_host_list(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"hosts": self.controller.host_status()}
@@ -522,6 +594,162 @@ class Server:
     def _op_conversation_search(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"matches": self.controller.search_conversations(
             str(request.get("query") or ""), int(request.get("limit", 50) or 50))}
+
+    # -- chat conversations (inputs/outputs per conversation) ---------------
+    def _op_conversation_create(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import conversations
+
+        meta = conversations.create(
+            str(request.get("title") or ""), agent_id=request.get("agent_id"))
+        env = conversations.env(meta["id"])
+        meta = {**meta, "dir": env["CREWHALL_CONVERSATION_DIR"],
+                "outputs": env["CREWHALL_OUTPUTS"], "inputs": env["CREWHALL_INPUTS"],
+                "workspace": env["CREWHALL_WORKSPACE"]}
+        return {"conversation": meta}
+
+    def _op_conversation_list(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import conversations
+
+        items: list[dict[str, Any]] = []
+        for meta in conversations.list_all():
+            row = dict(meta)
+            row["inputs"] = len(conversations.list_files(meta["id"], "inputs"))
+            row["outputs"] = len(conversations.list_files(meta["id"], "outputs"))
+            agent = None
+            if meta.get("agent_id"):
+                try:
+                    agent = self.controller.agent_summary(
+                        self.controller.get_agent(meta["agent_id"]))
+                except Exception:  # noqa: BLE001 - a gone agent must not hide the chat
+                    agent = None
+            row["agent"] = agent
+            items.append(row)
+        return {"conversations": items}
+
+    def _op_conversation_info(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import conversations
+
+        info = conversations.info(str(request["id"]))
+        agent = None
+        if info.get("agent_id"):
+            try:
+                agent = self.controller.agent_summary(
+                    self.controller.get_agent(info["agent_id"]))
+            except Exception:  # noqa: BLE001
+                agent = None
+        info["agent"] = agent
+        return {"conversation": info}
+
+    def _op_conversation_rename(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import conversations
+
+        return {"conversation": conversations.rename(
+            str(request["id"]), str(request.get("title") or ""))}
+
+    def _op_conversation_set_agent(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import conversations
+
+        return {"conversation": conversations.set_agent(
+            str(request["id"]), request.get("agent_id"))}
+
+    def _op_conversation_delete(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import conversations
+
+        return conversations.delete(
+            str(request["id"]), delete_files=bool(request.get("delete_files")))
+
+    def _op_conversation_artifact_delete(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import conversations
+
+        return {"artifact": conversations.delete_artifact(
+            str(request["id"]), str(request.get("path") or ""))}
+
+    # -- Level 3: the agent as a live co-editor (headless Chromium) ---------
+    def _op_office_collab_open(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import conversations, office, office_collab
+
+        if not office.enabled():
+            raise ValueError("OnlyOffice is not enabled")
+        cid = str(request["id"])
+        rel = str(request.get("path") or "")
+        path = conversations.resolve(cid, "outputs", rel)
+        base = office.base_url(str(request.get("base") or ""))
+        if not base:
+            raise ValueError("office.base_url (or web.public_url) must be set "
+                             "so the Document Server can fetch the document")
+        config = office.build_config(
+            conversation_id=cid, relpath=rel, name=os.path.basename(path), path=path,
+            document_base=base, callback_base=base, user_id="crewhall-ai",
+            user_name="AI Agent",
+        )
+        return office_collab.REGISTRY.open(cid, rel, config, office.public_url())
+
+    def _op_office_collab_read(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        text = office_collab.REGISTRY.read(str(request["id"]), str(request.get("path") or ""))
+        return {"text": text}
+
+    def _op_office_collab_command(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        result = office_collab.REGISTRY.command(
+            str(request["id"]), str(request.get("path") or ""),
+            str(request["method"]), request.get("args"))
+        return {"result": result}
+
+    def _op_office_collab_insert(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        return {"result": office_collab.REGISTRY.insert(
+            str(request["id"]), str(request.get("path") or ""), str(request.get("text") or ""))}
+
+    def _op_office_collab_save(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        return {"result": office_collab.REGISTRY.save(
+            str(request["id"]), str(request.get("path") or ""))}
+
+    def _op_office_collab_close(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        return {"closed": office_collab.REGISTRY.close(
+            str(request["id"]), str(request.get("path") or ""))}
+
+    def _op_office_collab_list(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        return {"editors": office_collab.REGISTRY.list()}
+
+    def _op_office_collab_users(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        return {"users": office_collab.REGISTRY.users(
+            str(request["id"]), str(request.get("path") or ""))}
+
+    def _op_office_collab_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        return {"messages": office_collab.REGISTRY.chat_messages(
+            str(request["id"]), str(request.get("path") or ""))}
+
+    def _op_office_collab_say(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        return {"result": office_collab.REGISTRY.chat_send(
+            str(request["id"]), str(request.get("path") or ""), str(request.get("text") or ""))}
+
+    def _op_office_collab_comments(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        return {"comments": office_collab.REGISTRY.comments(
+            str(request["id"]), str(request.get("path") or ""))}
+
+    def _op_office_collab_comment_add(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import office_collab
+
+        return {"result": office_collab.REGISTRY.add_comment(
+            str(request["id"]), str(request.get("path") or ""), str(request.get("text") or ""))}
 
     def _op_frontend_status(self, request: dict[str, Any]) -> dict[str, Any]:
         return self.frontends.status()

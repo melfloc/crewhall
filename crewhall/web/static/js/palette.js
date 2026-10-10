@@ -3,6 +3,8 @@
 const P = { open:false, items:[], all:[], i:0 };
 function paletteCommands(){
   const cmds = [
+    {label:"Interface: Chat", icon:"msg", run:()=>setInterface("chat")},
+    {label:"Interface: Cowork", icon:"users", run:()=>setInterface("cowork")},
     {label:"New agent", icon:"plus", run:()=>openNewAgent()},
     {label:"New team", icon:"users", run:()=>newTeam()},
   ];

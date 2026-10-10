@@ -278,10 +278,45 @@ def check_agent_configs() -> list[Check]:
     return out
 
 
+def check_office() -> Check:
+    """OnlyOffice is optional, but if it is enabled it must be reachable.
+
+    Enabled + unreachable is a warning, not a failure: crewhall works without it
+    (chat falls back to plain file artifacts). The hint points at the one command
+    that fixes it.
+    """
+    import urllib.error
+    import urllib.request
+
+    from . import office, settings
+
+    if not settings.get("office.enabled"):
+        return _res("onlyoffice", "ok", "off (enable with `crewhall office setup`)")
+    public = str(settings.get("office.public_url") or "").rstrip("/")
+    if not public:
+        return _res("onlyoffice", "warn", "enabled but office.public_url is unset",
+                    "Run `crewhall office setup` or set office.public_url.")
+    try:
+        with urllib.request.urlopen(f"{public}/healthcheck", timeout=4) as resp:
+            reachable = resp.status == 200
+    except (urllib.error.URLError, OSError):
+        reachable = False
+    if not reachable:
+        return _res("onlyoffice", "warn", f"enabled but not answering at {public}",
+                    "Start it with `crewhall office setup`, or fix office.public_url.")
+    if not str(settings.get("office.base_url") or "").strip():
+        return _res("onlyoffice", "warn", f"healthy at {public}, but office.base_url is unset",
+                    "The Document Server cannot call back without it: `crewhall office setup`.")
+    if office.jwt_enabled() and not office.jwt_active():
+        return _res("onlyoffice", "warn", "JWT enabled but office.jwt_secret is empty",
+                    "Set office.jwt_secret to the same value as the Document Server.")
+    return _res("onlyoffice", "ok", f"healthy at {public}")
+
+
 CHECKS: list[Callable[[], Check | list[Check]]] = [
     check_python, check_install, check_tmux, check_agent_clis, check_command_on_path, check_dirs,
-    check_tmpdir, check_hooks, check_daemon, check_web, check_security, check_agent_configs,
-    check_systemd, check_tailscale,
+    check_tmpdir, check_hooks, check_daemon, check_web, check_office, check_security,
+    check_agent_configs, check_systemd, check_tailscale,
 ]
 
 

@@ -107,6 +107,29 @@ def _static_schema() -> list[dict[str, Any]]:
         s("uploads.keep_days", "uploads", "int", 30, "Keep permanent uploads (days)",
           "Permanent uploads older than this are removed by the janitor (0 = keep forever).",
           min=0, max=3650),
+        s("conversations.enabled", "conversations", "bool", True, "Chat mode",
+          "Shows the chat interface (conversation sidebar, artifact panel).", restart=True),
+        s("conversations.dir", "conversations", "path",
+          os.path.join(brand.state_root_dir(), "conversations"), "Conversations directory",
+          "Root directory for conversations (inputs/ and outputs/ per conversation). Created 0700."),
+        s("conversations.max_mb", "conversations", "int", 200, "Max artifact size (MB)",
+          "Largest file a conversation accepts or serves.", min=1, max=4096),
+        s("office.enabled", "office", "bool", False, "OnlyOffice editor",
+          "Enables the OnlyOffice viewer/editor for artifacts (requires a Document Server)."),
+        s("office.public_url", "office", "text", "http://127.0.0.1:8081", "OnlyOffice public URL",
+          "Base URL the browser uses to load the editor (e.g. the Document Server or a Tailscale name)."),
+        s("office.base_url", "office", "text", "", "crewhall URL seen by OnlyOffice",
+          "Base URL the Document Server uses to fetch documents and post callbacks. Empty = web.public_url "
+          "(or the Docker bridge gateway for a local container)."),
+        s("office.jwt_enabled", "office", "bool", True, "Sign OnlyOffice requests",
+          "Sign the editor config and verify callbacks with JWT (recommended; must match the server)."),
+        s("office.jwt_secret", "office", "text", "", "OnlyOffice JWT secret", "Shared secret; must match the Document Server.", secret=True),
+        s("office.lang", "office", "text", "es", "Editor language", "Two-letter language code for the OnlyOffice UI."),
+        s("office.collab_enabled", "office", "bool", False, "Live co-editing (agent)",
+          "Lets the agent join the open document as a co-editor with its own cursor (headless Chromium)."),
+        s("office.chromium", "office", "text", "", "Chromium binary", "Path to chromium for headless co-editing (auto-detected when empty)."),
+        s("web.public_url", "web", "text", "", "Public URL of crewhall",
+          "Base URL the browser and the Document Server use to reach this crewhall (e.g. the Tailscale name)."),
         s("requests.max_open_per_agent", "requests", "int", 2, "Open requests per agent",
           "How many requests an agent may have waiting for a reply at once.", min=1, max=10),
         s("requests.max_depth", "requests", "int", 4, "Max request chain depth",
@@ -229,6 +252,13 @@ def _validate(item: dict[str, Any], value: Any) -> Any:
         if (not value or len(value) > 4096 or "\0" in value
                 or not os.path.isabs(os.path.expanduser(value))):
             raise SettingsError(f"{item['key']}: an absolute path is required")
+        return value
+    if typ == "text":
+        if not isinstance(value, str):
+            raise SettingsError(f"{item['key']}: text expected")
+        value = value.strip()
+        if len(value) > 4096 or any(ord(c) < 32 for c in value):
+            raise SettingsError(f"{item['key']}: a single line of text (max 4096) is required")
         return value
     raise SettingsError(f"{item['key']}: unsupported type")
 
@@ -488,7 +518,7 @@ def get(key: str, default: Any = None) -> Any:
                 return max(item["min"], min(item["max"], int(float(raw))))
             if item["type"] == "choice":
                 return _validate(item, raw.lower())
-            if item["type"] == "path":
+            if item["type"] in ("path", "text"):
                 return _validate(item, raw)
         except (SettingsError, ValueError):
             pass
@@ -641,7 +671,11 @@ def describe() -> dict[str, Any]:
     for item in schema():
         group, _, name = item["key"].partition(".")
         row = {k: v for k, v in item.items() if k != "env"}
-        row["value"] = get(item["key"])
+        value = get(item["key"])
+        if item.get("secret") and value:
+            row["value"] = MASK
+        else:
+            row["value"] = value
         row["stored"] = name in stored.get(group, {})
         row["env"] = env_override(item)
         items.append(row)
@@ -708,6 +742,8 @@ def patch(changes: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
             item = _find(str(key))
             if item is None:
                 raise SettingsError(f"unknown setting {key!r}")
+            if item.get("secret") and value == MASK:
+                continue  # a masked value means "unchanged"
             group, _, name = item["key"].partition(".")
             data.setdefault(group, {})[name] = _validate(item, value)
         enabled = [k for k in _kinds() if data.get("providers", {}).get(k, {}).get("enabled", True)]

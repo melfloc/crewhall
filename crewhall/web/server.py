@@ -55,15 +55,39 @@ _LOGIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <button type="button" id="cb">Sign in with code</button></form>
 <script src="/static/login.js"></script></body></html>"""
 
-# Content-Security-Policy: no inline script, no eval. Inline *styles* are
-# allowed because xterm.js injects a stylesheet for its dynamic sizing; that is
-# the only relaxation (see SECURITY.md).
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-       "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; "
-       "form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'")
+def _office_origins() -> list[str]:
+    """Origins (http + ws) the OnlyOffice Document Server is served from."""
+    try:
+        from .. import office
+
+        if not office.enabled():
+            return []
+        origin = office.public_origin()
+    except Exception:  # noqa: BLE001 - a broken office setting must not break the UI
+        return []
+    if not origin:
+        return []
+    netloc = origin.split("://", 1)[-1]
+    ws = f"ws://{netloc}" if origin.startswith("http://") else f"wss://{netloc}"
+    return [origin, ws]
+
+
+def content_security_policy() -> str:
+    """No inline script, no eval. Inline *styles* are allowed because xterm.js
+    injects a stylesheet for its dynamic sizing. When the OnlyOffice editor is
+    enabled, its origin is added to the directives the embedded editor needs."""
+    extra = (" " + " ".join(_office_origins())) if _office_origins() else ""
+    return ("default-src 'self'; script-src 'self'" + extra + "; "
+            "style-src 'self' 'unsafe-inline'" + extra + "; img-src 'self' data:" + extra + "; "
+            "font-src 'self'" + extra + "; connect-src 'self'" + extra + "; object-src 'none'; "
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; "
+            "worker-src 'self' blob:" + extra + "; manifest-src 'self'; frame-src 'self'" + extra)
+
+
+# The static CSP under a non-office install; tests read `CSP` by name.
+CSP = content_security_policy()
 
 _SECURITY_HEADERS = (
-    ("Content-Security-Policy", CSP),
     ("X-Content-Type-Options", "nosniff"),
     ("X-Frame-Options", "DENY"),
     ("Referrer-Policy", "no-referrer"),
@@ -142,6 +166,13 @@ ALLOWED_OPS = {
     "worktree_list", "worktree_discard", "host_list", "host_set", "host_remove", "host_test",
     "terminal_create", "terminal_list", "terminal_info", "terminal_write",
     "terminal_key", "terminal_capture", "terminal_resize", "terminal_close",
+    "conversation_create", "conversation_list", "conversation_info",
+    "conversation_rename", "conversation_set_agent", "conversation_delete",
+    "conversation_artifact_delete",
+    "office_collab_open", "office_collab_read", "office_collab_command",
+    "office_collab_insert", "office_collab_close", "office_collab_list",
+    "office_collab_users", "office_collab_chat", "office_collab_say",
+    "office_collab_comments", "office_collab_comment_add", "office_collab_save",
 }
 
 
@@ -194,7 +225,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def end_headers(self) -> None:
         sent = getattr(self, "_sent_headers", set())
-        for key, value in _SECURITY_HEADERS:
+        headers = (("Content-Security-Policy", content_security_policy()), *_SECURITY_HEADERS)
+        for key, value in headers:
             if key.lower() not in sent:
                 self.send_header(key, value)
         if self.path.startswith("/api/") and "cache-control" not in sent:
@@ -288,6 +320,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/static/") or path == "/sw.js":
             # like the index, static assets hold no secrets; the API enforces auth
             return self._serve_static("sw.js" if path == "/sw.js" else path[len("/static/"):])
+        if path == "/api/conversation/artifact":
+            # The Document Server fetches this with a temporary token, not a
+            # session cookie, so it authenticates itself inside.
+            return self._serve_artifact(parse_qs(parsed.query))
         if not self._guard():
             return
         if path == "/api/state":
@@ -302,6 +338,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._ws_terminal(unquote(path[len("/ws/terminal/"):]), parsed)
         if path.startswith("/api/bundle/"):
             return self._bundle_download(unquote(path[len("/api/bundle/"):]))
+        if path == "/api/office/config":
+            return self._office_config(parse_qs(parsed.query))
+        if path == "/api/conversation/export":
+            return self._conversation_export(parse_qs(parsed.query))
         if path == "/api/op":
             query = parse_qs(parsed.query)
             op = (query.get("op") or [""])[0]
@@ -318,6 +358,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._bundle_upload(parse_qs(parsed.query))
         if parsed.path == "/api/upload":
             return self._upload(parse_qs(parsed.query))
+        if parsed.path == "/api/conversation/upload":
+            return self._conversation_upload(parse_qs(parsed.query))
+        if parsed.path == "/api/office/callback":
+            return self._office_callback(parse_qs(parsed.query))
         if parsed.path == "/api/terminal-unlock":
             return self._do_terminal_unlock()
         if parsed.path == "/api/terminal-ticket":
@@ -420,6 +464,231 @@ class Handler(BaseHTTPRequestHandler):
         audit.record("web_upload", actor=self._audit_actor(), result="ok",
                      summary=f"mode={info['mode']} size={info['size']}")
         return self._json({"ok": True, **info})
+
+    def _request_base(self) -> str:
+        host = self.headers.get("Host") or "127.0.0.1"
+        proto = self.headers.get("X-Forwarded-Proto") or "http"
+        return f"{proto}://{host}"
+
+    def _conversation_upload(self, query: dict[str, list[str]]) -> None:
+        """Accept a file for a conversation and store it in its ``inputs/``."""
+        from .. import audit, conversations
+
+        if not self._guard():
+            return
+        cid = (query.get("id") or [""])[0]
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            return self._error("bad Content-Length", 400)
+        cap = conversations.max_bytes()
+        if length <= 0:
+            return self._error("empty upload", 400)
+        if length > cap:
+            self.close_connection = True
+            return self._error(f"file too large (max {cap // (1024 * 1024)} MB)", 413)
+        data = self.rfile.read(length)
+        raw_name = self.headers.get("X-Filename", "")
+        name = unquote(raw_name) if raw_name else (query.get("name") or ["file"])[0]
+        try:
+            info = conversations.store_input(cid, name, data)
+        except conversations.ConversationError as exc:
+            return self._error(str(exc), 400)
+        audit.record("conversation_artifact_download", actor=self._audit_actor(), result="ok",
+                     summary=f"id={cid} upload={info['name']} size={info['size']}")
+        return self._json({"ok": True, **info})
+
+    def _serve_artifact(self, query: dict[str, list[str]]) -> None:
+        """Serve an artifact from a conversation (session or download token)."""
+        import mimetypes
+
+        from .. import audit, conversations, office
+
+        cid = (query.get("id") or [""])[0]
+        rel = (query.get("path") or [""])[0]
+        token = (query.get("dt") or [""])[0]
+        download = (query.get("download") or [""])[0].lower() in ("1", "true", "yes")
+        token_ok = bool(token) and office.verify_download_token(token, cid, rel)
+        if not token_ok and not self._guard():
+            return
+        try:
+            path = conversations.resolve(cid, "outputs", rel)
+        except conversations.ConversationError as exc:
+            return self._error(str(exc), 404)
+        if not os.path.isfile(path):
+            return self._error("not found", 404)
+        ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        # Never render user HTML/SVG/XML inline on our own origin.
+        if ctype.startswith(("text/html", "image/svg", "text/xml", "application/xml",
+                             "application/xhtml")):
+            download = True
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError as exc:
+            return self._error(str(exc), 500)
+        name = os.path.basename(path).replace('"', "")
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Disposition",
+                         ("attachment" if download else "inline") + f'; filename="{name}"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Security-Policy",
+                         "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:")
+        self.end_headers()
+        self.wfile.write(data)
+        if not token_ok:
+            audit.record("conversation_artifact_download", actor=self._audit_actor(),
+                         result="ok", summary=f"id={cid} name={name}")
+
+    def _conversation_export(self, query: dict[str, list[str]]) -> None:
+        """Download a whole conversation as a ZIP (transcript + inputs + outputs).
+
+        Everything stays server-side: the transcript comes from the daemon and the
+        files are read straight from the conversation folders, so an exported chat
+        is a single portable archive.
+        """
+        import io
+        import zipfile
+
+        from .. import audit, conversations
+
+        cid = (query.get("id") or [""])[0]
+        try:
+            meta = conversations.info(cid)
+        except conversations.ConversationError as exc:
+            return self._error(str(exc), 404)
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("meta.json", json.dumps(meta, ensure_ascii=False, indent=2, default=str))
+            zf.writestr("transcript.md", self._conversation_transcript(meta))
+            for section in ("inputs", "outputs"):
+                for f in meta.get(section, []):
+                    try:
+                        path = conversations.resolve(cid, section, f["relpath"])
+                        with open(path, "rb") as fh:
+                            zf.writestr(f"{section}/{f['relpath']}", fh.read())
+                    except (conversations.ConversationError, OSError):
+                        continue
+        data = buf.getvalue()
+        audit.record("conversation_export", actor=self._audit_actor(), result="ok", summary=f"id={cid}")
+        filename = f"chat-{(meta.get('title') or cid)}.zip".replace('"', "").replace("/", "-")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _conversation_transcript(self, meta: dict[str, Any]) -> str:
+        """A readable Markdown transcript, best effort (never fails the export)."""
+        lines = [f"# {meta.get('title') or 'Chat'}", "",
+                 f"- id: {meta.get('id')}",
+                 f"- agent: {meta.get('agent_id') or '(none)'}", ""]
+        agent_id = meta.get("agent_id")
+        if not agent_id:
+            return "\n".join(lines)
+        try:
+            history = self.control.call("agent_history", target=agent_id, limit=1000)
+        except RpcError as exc:
+            lines.append(f"_(transcript unavailable: {exc})_")
+            return "\n".join(lines)
+        for m in history.get("messages") or []:
+            role = "You" if m.get("role") == "user" else "Agent"
+            text = m.get("text") or ""
+            if not text and m.get("blocks"):
+                text = "\n".join(b.get("text", "") for b in m["blocks"]
+                                 if isinstance(b, dict) and b.get("type") == "text")
+            if not text.strip():
+                continue
+            lines += [f"## {role}", "", text, ""]
+        return "\n".join(lines)
+
+    def _office_config(self, query: dict[str, list[str]]) -> None:
+        from .. import conversations, office
+
+        if not office.enabled():
+            return self._error("not found", 404)
+        cid = (query.get("id") or [""])[0]
+        rel = (query.get("path") or [""])[0]
+        try:
+            path = conversations.resolve(cid, "outputs", rel)
+        except conversations.ConversationError as exc:
+            return self._error(str(exc), 404)
+        if not os.path.isfile(path):
+            return self._error("artifact not found", 404)
+        base = office.base_url(self._request_base())
+        if not base:
+            return self._error("office.base_url is not configured", 409)
+        config = office.build_config(
+            conversation_id=cid, relpath=rel, name=os.path.basename(path), path=path,
+            document_base=base, callback_base=base, user_id="web", user_name="you",
+        )
+        return self._json({"ok": True, "config": config, "public_url": office.public_url()})
+
+    def _office_callback(self, query: dict[str, list[str]]) -> None:
+        import urllib.request
+
+        from .. import audit, conversations, office
+
+        if not office.enabled() or not self._host_ok():
+            return self._error("not found", 404)
+        raw = self._read_body()
+        if raw is None:
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._error("bad json")
+        if not self._office_token_ok(body):
+            return self._error("invalid OnlyOffice token", 403)
+        status = body.get("status")
+        if status not in (2, 6):
+            return self._json({"error": 0})
+        cid = (query.get("id") or [""])[0]
+        rel = (query.get("path") or [""])[0]
+        url = body.get("url")
+        if not url:
+            return self._json({"error": 1})
+        try:
+            path = conversations.resolve(cid, "outputs", rel)
+        except conversations.ConversationError:
+            return self._json({"error": 1})
+        cap = conversations.max_bytes()
+        try:
+            with urllib.request.urlopen(str(url), timeout=30) as resp:  # noqa: S310 - OnlyOffice-provided URL, JWT verified
+                data = resp.read(cap + 1)
+        except Exception:  # noqa: BLE001
+            return self._json({"error": 1})
+        if len(data) > cap:
+            return self._json({"error": 1})
+        try:
+            conversations.write_artifact(cid, rel, data)
+        except conversations.ConversationError:
+            return self._json({"error": 1})
+        audit.record("conversation_artifact_download", actor="onlyoffice", result="ok",
+                     summary=f"id={cid} saved={os.path.basename(path)}")
+        return self._json({"error": 0})
+
+    def _office_token_ok(self, body: dict[str, Any]) -> bool:
+        from .. import office
+
+        if not office.jwt_active():
+            return True
+        if office.callback_body_ok(body):
+            return True
+        header = self.headers.get("Authorization", "")
+        if header.startswith("Bearer "):
+            try:
+                office.jwt_decode(header[7:])
+                return True
+            except office.OfficeError:
+                return False
+        return False
 
     def _do_logout(self) -> None:
         # Revoke this session server-side too (clear the cookie and the record).
@@ -697,7 +966,7 @@ class Handler(BaseHTTPRequestHandler):
             return dict(rec)
 
     def _do_webauthn(self, action: str) -> None:
-        from .. import audit, settings
+        from .. import audit
 
         if not self._host_ok() or not self._origin_ok():
             return self._error("request not allowed", 403)

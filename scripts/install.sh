@@ -15,6 +15,7 @@ WANT_SERVICE=0
 WANT_WEB=0
 WEB_PORT=8765
 WEB_TAILSCALE=0
+WANT_OFFICE=0
 SKIP_DOCTOR=0
 
 usage() {
@@ -29,6 +30,7 @@ Usage: install.sh [options]
   --web               enable the local Web UI (127.0.0.1:$WEB_PORT) right away
   --web-port N        Web UI port (default $WEB_PORT)
   --tailscale         enable the Web UI over Tailscale right away (token required)
+  --office            also install + run OnlyOffice (Docker) for chat mode
   (switch any time later, no restart needed:  crewhall local | tailscale | off)
   --no-doctor         do not run 'crewhall doctor' at the end
   -h, --help          show this help
@@ -45,6 +47,7 @@ while [ $# -gt 0 ]; do
     --web) WANT_WEB=1; shift ;;
     --web-port) WEB_PORT="$2"; shift 2 ;;
     --tailscale) WEB_TAILSCALE=1; shift ;;
+    --office) WANT_OFFICE=1; shift ;;
     --no-doctor) SKIP_DOCTOR=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -175,6 +178,12 @@ if [ "$WEB_TAILSCALE" = 1 ]; then
 elif [ "$WANT_WEB" = 1 ]; then
   say "Enabling the local Web UI"
   "$AT" local --port "$WEB_PORT" || warn "could not enable the local Web UI; run: crewhall local"
+fi
+
+# OnlyOffice (chat mode's document editor/co-editor). Optional and idempotent.
+if [ "$WANT_OFFICE" = 1 ]; then
+  say "Installing OnlyOffice (Docker) for chat mode"
+  "$AT" office setup || warn "OnlyOffice setup did not finish; re-run: crewhall office setup"
 fi
 
 # ---------------------------------------------------------------- verify

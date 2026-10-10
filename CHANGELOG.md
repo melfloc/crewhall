@@ -5,6 +5,95 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.77.0] — 2026-10-10
+
+- **Exportar una conversación a ZIP.** Botón **Export** en la cabecera del chat y ruta
+  `GET /api/conversation/export?id=…`: descarga un único archivo con `transcript.md`
+  (el transcript del agente ya legible), `meta.json` y todos los `inputs/` y `outputs/`.
+  Se sirve desde el propio servidor (no hay que empaquetar nada en el navegador).
+- **OnlyOffice robusto entre despliegues.** La imagen del Document Server queda **fijada**
+  a una versión concreta (ya no un tag flotante que cambia solo) y lleva `healthcheck`; si
+  el contenedor queda "zombi" de un despliegue anterior, `office setup` lo **reinicia** una
+  vez antes de fallar.
+- **`office setup` consciente de Tailscale.** Enlaza el Document Server a la IP del tailnet y
+  usa el nombre `.ts.net` para el navegador, de modo que la misma dirección sirve para el
+  navegador y para la llamada de vuelta del contenedor (antes se enlazaba siempre a
+  `127.0.0.1`, lo que rompía el acceso remoto). Sin Tailscale avisa de cómo llegar desde el
+  contenedor.
+- **Document Server externo.** `crewhall office setup --external URL [--jwt-secret …]` apunta
+  crewhall a un Document Server ya existente (sin Docker local).
+- **`crewhall doctor` comprueba OnlyOffice.** Si está activo, verifica que responde
+  `/healthcheck`, que `office.base_url` y el secreto JWT están puestos, y da la orden exacta
+  para arreglarlo. El instalador admite `--office` para dejar la infraestructura lista en la
+  misma pasada.
+
+- **Modo Chat (nueva vista).** Segunda interfaz de primer nivel, al estilo de los chat
+  web de proveedores: sidebar de conversaciones, **full view** de la conversación (el
+  transcript semántico del agente, sin el chrome de coding) y **panel derecho de
+  artefactos**. Cada conversación se respalda con un agente crewhall real; el modo se
+  activa con el botón de chat de la barra superior y vuelve al workspace con un clic.
+- **Conversaciones en disco (servidor).** `conversations.py` guarda cada conversación en
+  `<conversations.dir>/<id>/{inputs,outputs,workspace,meta.json}` (0700/0600) con
+  confinamiento de rutas (sin `..` ni escapes por symlink). `inputs/` es lo que sube el
+  usuario; `outputs/` son los artefactos que produce el agente (los recibe por
+  `CREWHALL_OUTPUTS`). Nuevas ops: `conversation_create/list/info/rename/set_agent/delete/artifact_delete`.
+- **Chats aislados.** Un chat es conversacional y **no** usa un directorio de proyecto: su
+  `cwd` se fuerza a `workspace/` (dentro de la propia conversación), ignora `cwd`/team/
+  worktree y no escribe control files (`CLAUDE.md`/`AGENTS.md`). Toda la conversación vive
+  en su carpeta; `workspace/` es scratch y nunca aparece como artefacto.
+- **Chat y Cowork no se mezclan.** Los agentes de chat se excluyen de la interfaz Cowork
+  (`agent_list` por defecto filtra por `conversations.agent_ids()`); la interfaz de chat
+  toma sus agentes de `conversation_list`. Además, el **diálogo de confianza** del agente
+  (Claude) se acepta automáticamente para el workspace aislado del chat, así arranca sin
+  intervención.
+- **Reglas de interacción con OnlyOffice.** El directorio global de chats
+  (`<conversations.dir>/CLAUDE.md` y `AGENTS.md`) y el workspace de cada conversación llevan
+  las reglas que enseñan al agente a usar `crewhall office …` para editar en vivo, leer
+  comentarios y responder en el chat del documento.
+- **El chat revive al agente.** Si el agente está `exited`/`error` (p. ej. tras reiniciar el
+  daemon), enviar un mensaje en el chat lo **reinicia automáticamente** antes de escribir; el
+  reenvío desde OnlyOffice también lo revive.
+- **Edición en vivo fiable.** Al abrir un artefacto se levanta el co-editor del agente en la
+  misma sesión (mismo `document.key`), así sus cambios aparecen en vivo; y se corrigió el
+  parseo del chat de OnlyOffice (`message`/`username`), que impedía reenviar los mensajes.
+- **Servido y descarga de artefactos por web.** `GET /api/conversation/artifact` (con
+  token de descarga temporal o sesión) y `POST /api/conversation/upload`. Funciona igual
+  en local que por Tailscale, porque sirve el mismo proceso donde corre la conversación.
+- **OnlyOffice integrado.** Visor/editor de artefactos con config firmada (JWT HS256, sin
+  dependencias), `document.key` por mtime, callback de guardado y CSP que permite el
+  origen configurado. Un comando instala y enlaza todo: **`crewhall office setup`**
+  (instala/arranca Docker si falta, levanta el Document Server en el bridge por defecto,
+  abre `docker0` en UFW, fija `office.*` con la IP de Tailscale como base y activa los
+  frontends). `crewhall office status` muestra el estado.
+- **Agente co-editor en vivo (Nivel 3).** `office_collab.py` levanta un editor OnlyOffice
+  headless (Chromium + DocsAPI servido por HTTP local) con identidad propia ("AI Agent")
+  en la misma sesión colaborativa; el agente lee y edita en vivo (`read`/`insert`) por CDP
+  dentro del iframe del editor (`Asc.editor`), porque el DS 8.1.3 no expone
+  `createConnector`. El guardado a disco lo hace el callback de OnlyOffice.
+- Nuevos ajustes `conversations.*` y `office.*` (tipo `text` nuevo, valores sensibles
+  enmascarados en el panel); la subida a conversación y las descargas quedan auditadas.
+- **Composer compacto.** Los botones del composer (slash commands, plantillas, adjuntar,
+  modelo) se colapsan en un único botón **＋ Tools** (en el workspace y en el chat), dejando
+  más ancho al campo de texto. El modelo actual sigue visible en la cabecera.
+- **Panel de artefactos redimensionable + modo paralelo.** Arrastra el divisor entre la
+  conversación y el panel de artefactos (se recuerda el ancho); el botón **Parallel**
+  reparte la ventana mitad chat / mitad artefacto (OnlyOffice).
+- **Dos interfaces de primer nivel: Cowork y Chat.** Selector **Cowork | Chat** en la barra
+  superior (se recuerda): *Cowork* es la interfaz de agentes de siempre (equipos, terminales,
+  live, mensajería, mission control…); *Chat* es la conversacional (conversaciones,
+  artefactos, OnlyOffice) y oculta los controles de agentes. Dentro de Chat hay un
+  sub-conmutador de disposición **Chat | Document** (renombrado desde "Cowork"): *Chat* pone
+  la conversación al frente y *Document* pone el documento (OnlyOffice) al frente con la
+  conversación como columna estrecha; **Parallel** reparte 50/50.
+- **El usuario instruye al agente desde el propio OnlyOffice.** Chat de co-edición activado
+  (`customization.chat`): el usuario escribe al co-editor "AI Agent" dentro del documento y
+  el **watcher del daemon** reenvía cada mensaje al agente como prompt normal; el agente
+  responde con `office_collab_say`. También se reenvían los **comentarios anclados** al texto
+  seleccionado (`[OnlyOffice comentario · user] sobre "…": …`), y el agente puede leerlos
+  (`office_collab_comments`) o crearlos (`office_collab_comment_add`); co-editores en
+  `office_collab_users`. Las ediciones del agente se **guardan solas** (`Asc.editor.asc_Save()`
+  tras `insert`). Nuevos comandos: `crewhall office users|chat|say|comments|comment|save`.
+
 ## [0.76.0] — 2026-10-09
 
 - **Subir archivos desde el Web UI (el servidor hace de proxy).** El composer tiene un
@@ -199,7 +288,7 @@ to run without it and ships these notes with the release.
 ## [0.70.2] — 2026-10-06
 
 - **Corrección**: la release no empaquetaba `web/static/vendor/xterm/`, así que en una
-  instalación desplegada (p. ej. Oficina) la terminal fallaba con «xterm failed to
+  instalación desplegada (p. ej. en un servidor remoto) la terminal fallaba con «xterm failed to
   load». Añadido a `package-data` (con una comprobación en el build de release).
 - Reordenar agentes **dentro de cada team** y en «Ungrouped» arrastrando (orden por
   grupo persistido); antes solo se podía mover entre equipos.
