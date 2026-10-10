@@ -120,6 +120,13 @@ class SetupPlan(unittest.TestCase):
         self.assertIn("healthcheck:", office_setup.COMPOSE)
         self.assertIn("JWT_ENABLED=true", office_setup.COMPOSE)
 
+    def test_probe_host_uses_the_bound_address_not_loopback(self):
+        # The DS binds the Tailscale IP, so probing 127.0.0.1 would never work.
+        self.assertEqual(office_setup._probe_host("100.1.2.3"), "100.1.2.3")
+        self.assertEqual(office_setup._probe_host("127.0.0.1"), "127.0.0.1")
+        for wildcard in (None, "", "0.0.0.0", "::", "*"):
+            self.assertEqual(office_setup._probe_host(wildcard), "127.0.0.1")
+
 
 class ExternalSetup(unittest.TestCase):
     def setUp(self):

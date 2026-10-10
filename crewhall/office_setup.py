@@ -201,9 +201,22 @@ def _bridge_gateway(prefix: list[str]) -> str:
     return "172.17.0.1"
 
 
-def _wait_health(port: int, timeout: float = 300.0) -> bool:
+def _probe_host(bind: str | None) -> str:
+    """The address to probe for health from this host, for a given bind host.
+
+    When the Document Server binds a specific address (e.g. the Tailscale IP) it
+    is *not* reachable on loopback, so probing 127.0.0.1 would always fail. A
+    wildcard bind is probed on loopback.
+    """
+    host = (bind or "").strip()
+    if host in ("", "0.0.0.0", "::", "[::]", "*"):
+        return "127.0.0.1"
+    return host
+
+
+def _wait_health(port: int, host: str = "127.0.0.1", timeout: float = 300.0) -> bool:
     deadline = time.monotonic() + timeout
-    url = f"http://127.0.0.1:{port}/healthcheck"
+    url = f"http://{_probe_host(host)}:{port}/healthcheck"
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=3) as resp:
@@ -325,14 +338,14 @@ def setup(*, port: int = 8081, bind: str | None = None, external: str | None = N
     healthy = True
     if wait:
         log("Waiting for the Document Server to be healthy…")
-        healthy = _wait_health(port)
+        healthy = _wait_health(port, plan["bind"])
         if not healthy:
             # A stale container from a previous deploy is the common cause: restart
             # it once and give it another chance instead of failing the install.
             log("Not healthy yet; restarting the container and waiting again…")
             _run([*prefix, "compose", "-f", _compose_file(), "--env-file", _env_file(),
                   "restart"], cwd=setup_dir(), check=False)
-            healthy = _wait_health(port)
+            healthy = _wait_health(port, plan["bind"])
         if not healthy:
             raise SetupError("OnlyOffice did not answer /healthcheck in time; "
                              "check `docker logs crewhall-onlyoffice`")

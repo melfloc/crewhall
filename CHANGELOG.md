@@ -5,6 +5,14 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.77.1] — 2026-10-10
+
+- **Corrección**: `crewhall office setup` daba por fallido el arranque cuando el
+  Document Server se enlaza a una dirección concreta (p. ej. la IP de Tailscale):
+  la espera de salud sondeaba siempre `127.0.0.1`, que no escucha. Ahora se sondea
+  la dirección realmente enlazada (wildcard → loopback). El contenedor ya estaba
+  sano; era un falso negativo que abortaba el setup antes de aplicar los ajustes.
+
 ## [0.77.0] — 2026-10-10
 
 - **Exportar una conversación a ZIP.** Botón **Export** en la cabecera del chat y ruta
