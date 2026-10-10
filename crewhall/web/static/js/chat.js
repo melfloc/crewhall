@@ -46,6 +46,7 @@ function chatOn(){
   chatApplyLayout();
   chatRenderHead();
   chatLoadList();
+  chatLoadOffice();
   chatStartPoll();
 }
 function chatOff(){
@@ -142,6 +143,7 @@ async function chatSelect(id){
     CHAT.info = r.conversation;
   } catch(e){ CHAT.info = null; flash(e.message); }
   chatRenderHead();
+  chatRenderAsks();
   chatLoadHistory(true);
   chatLoadArtifacts();
 }
@@ -196,6 +198,25 @@ function chatRenderHead(){
     : st === "starting" ? "Agent starting…"
     : (st === "exited" || st === "error") ? "Send a message to start the agent again…"
     : "Message the agent…";
+}
+
+/* ---------- pending interactions (permissions / questions) in chat mode ----------
+   Reuses the exact cards Cowork shows (agent.js askCard); answering posts the same
+   interaction_respond op, so the chat can clear an agent that is waiting on you. */
+function chatAgent(){ return CHAT.info && CHAT.info.agent_id ? agentById(CHAT.info.agent_id) : null; }
+function chatRenderAsks(){
+  const box = $("chat-asks"); if(!box) return;
+  const a = chatAgent();
+  const items = (a && a.interactions) || [];
+  const key = items.map(i=>i.id).join("|");
+  if(box.dataset.key === key) return;
+  box.dataset.key = key;
+  if(!items.length){ box.classList.add("init-hidden"); box.replaceChildren(); return; }
+  box.classList.remove("init-hidden");
+  box.replaceChildren(
+    el("div", {className:"chat-asks-head"}, ic("shield","sm"),
+      items.length === 1 ? "The agent needs your answer" : `${items.length} answers pending`),
+    ...items.map(askCard));
 }
 
 /* Make sure the chat's agent is usable, reviving it if it exited. */
@@ -426,6 +447,8 @@ function chatStartPoll(){
     if(CHAT.active) chatLoadHistory(false);
     CHAT.lastArtifacts = (CHAT.lastArtifacts + 1) % 4;
     if(CHAT.active && CHAT.lastArtifacts === 0) chatLoadArtifacts();
+    CHAT.osTick = ((CHAT.osTick || 0) + 1) % 10;
+    if(CHAT.osTick === 0) chatLoadOffice();
   }, 1600);
 }
 function chatStopPoll(){ if(CHAT.poll){ clearInterval(CHAT.poll); CHAT.poll = null; } }
@@ -434,7 +457,7 @@ function chatStopPoll(){ if(CHAT.poll){ clearInterval(CHAT.poll); CHAT.poll = nu
 function chatOnState(){
   if(!CHAT.open) return;
   chatLoadList();
-  if(CHAT.active && CHAT.info) chatRenderHead();
+  if(CHAT.active && CHAT.info){ chatRenderHead(); chatRenderAsks(); }
 }
 
 /* ---------- artifact panel: show/hide, drag-resize and parallel ---------- */
@@ -477,12 +500,68 @@ function chatParallel(){
   split.addEventListener("pointercancel", stop);
 })();
 
+/* ---------- OnlyOffice status button (artifacts head) ----------
+   Shows at a glance whether Docker / the Document Server are up, and lets the
+   service be started, restarted or stopped without leaving the chat. */
+const OS = {status:null, busy:false};
+async function chatLoadOffice(){
+  try { const r = await op("office_status"); OS.status = r.status || null; }
+  catch(e){ OS.status = null; }
+  chatRenderOffice();
+}
+function chatRenderOffice(){
+  const b = $("chatOffice"); if(!b) return;
+  const s = OS.status;
+  let state = "unknown";
+  if(s) state = !s.docker ? "nodocker" : s.healthy ? "ok" : (s.running ? "starting" : "off");
+  b.dataset.state = state;
+  const label = {ok:"OnlyOffice", starting:"OnlyOffice…", off:"OnlyOffice off",
+                 nodocker:"No Docker", unknown:"OnlyOffice ?"}[state];
+  const title = {ok:"OnlyOffice is healthy — click for actions",
+                 starting:"OnlyOffice is starting… click for actions",
+                 off:"OnlyOffice is not running — click to start it",
+                 nodocker:"Docker is not reachable — click for options",
+                 unknown:"OnlyOffice status unknown — click to re-check"}[state];
+  b.querySelector(".os-lbl").textContent = label;
+  b.title = title;
+}
+function chatOfficeMenu(anchor){
+  const s = OS.status || {};
+  const items = [];
+  if(s.docker === false){
+    items.push({label:"How to install Docker…", icon:"alert", run:()=>toast("Install Docker, add your user to the 'docker' group, then re-login.", "info", 7000)});
+  } else if(s.healthy){
+    items.push({label:"Restart OnlyOffice", icon:"refresh", run:()=>chatOfficeAction("restart")});
+  } else {
+    items.push({label: s.running ? "Restart OnlyOffice" : "Start OnlyOffice", icon:"refresh",
+      run:()=>chatOfficeAction(s.running ? "restart" : "start")});
+  }
+  if(s.running) items.push({label:"Stop OnlyOffice", icon:"stop", danger:true, run:()=>chatOfficeAction("stop")});
+  items.push("-");
+  items.push({label:"Refresh status", icon:"refresh", run:chatLoadOffice});
+  items.push({label:"Copy diagnostics", icon:"copy",
+    run:()=>copyText(JSON.stringify(OS.status || {}, null, 2), "OnlyOffice status copied")});
+  openMenu(anchor, items);
+}
+async function chatOfficeAction(action){
+  if(OS.busy) return;
+  OS.busy = true;
+  toast(action === "stop" ? "Stopping OnlyOffice…"
+        : "Starting OnlyOffice… (the first run pulls the image and can take a while)", "info", 6000);
+  try { await op("office_start", {action}); }
+  catch(e){ flash(e.message); }
+  OS.busy = false;
+  [1500, 4000, 8000, 15000, 25000].forEach(ms => setTimeout(chatLoadOffice, ms));
+}
+
 /* ---------- wiring ---------- */
 $("chatExit").onclick = () => setInterface("cowork");
 $("chatNew").onclick = chatNew;
 $("chatSend").onclick = chatSend;
 $("chatTools").onclick = (e) => { e.stopPropagation(); openMenu($("chatTools"), [
   {label:"Attach a file…", icon:"paperclip", run:() => $("chat-file").click()},
+  ...(CHAT.info && CHAT.info.agent_id ? [{label:"Send a key… (Esc, Ctrl+C…)", icon:"terminal",
+    run:() => openKeysMenu($("chatTools"), CHAT.info.agent_id)}] : []),
   {label: chatArtifactsShown() ? "Hide artifacts" : "Show artifacts", icon:"file",
    run:() => chatSetArtifacts(!chatArtifactsShown())},
   {label:"Parallel view (50/50)", icon:"columns", run:chatParallel},
@@ -491,6 +570,7 @@ $("chat-file").onchange = (e) => { chatAddFiles([...e.target.files]); e.target.v
 $("chatArtWide").onclick = chatParallel;
 $("chatArtRefresh").onclick = chatLoadArtifacts;
 $("chatArtClose").onclick = () => chatSetArtifacts(false);
+$("chatOffice").onclick = (e) => { e.stopPropagation(); chatOfficeMenu($("chatOffice")); };
 $("chat-office-close").onclick = chatCloseOffice;
 $("chat-q").oninput = (e) => { CHAT.q = e.target.value; chatRenderList(); };
 $("chat-input").addEventListener("input", chatGrow);
@@ -501,6 +581,11 @@ $("chat-input").addEventListener("keydown", (e) => {
 $("chat-feed").addEventListener("scroll", () => {
   const f = $("chat-feed");
   CHAT.follow = f.scrollHeight - f.scrollTop - f.clientHeight < 80;
+});
+$("chat-feed").addEventListener("contextmenu", (e) => {
+  if(!CHAT.info || !CHAT.info.agent_id) return;
+  e.preventDefault();
+  openAgentMenu(e, CHAT.info.agent_id);
 });
 document.addEventListener("keydown", (e) => {
   if(e.key === "Escape" && CHAT.open && CHAT.office){ e.stopPropagation(); chatCloseOffice(); }

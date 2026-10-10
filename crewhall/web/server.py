@@ -173,6 +173,7 @@ ALLOWED_OPS = {
     "office_collab_insert", "office_collab_close", "office_collab_list",
     "office_collab_users", "office_collab_chat", "office_collab_say",
     "office_collab_comments", "office_collab_comment_add", "office_collab_save",
+    "office_status", "office_start",
 }
 
 

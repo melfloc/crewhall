@@ -751,6 +751,42 @@ class Server:
         return {"result": office_collab.REGISTRY.add_comment(
             str(request["id"]), str(request.get("path") or ""), str(request.get("text") or ""))}
 
+    def _op_office_status(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Report the OnlyOffice infrastructure state (for the Web UI button)."""
+        from . import office_setup
+
+        try:
+            return {"status": office_setup.status()}
+        except Exception as exc:  # noqa: BLE001 - a broken probe must not break the UI
+            return {"status": {"docker": False, "compose": False, "healthy": False,
+                               "error": str(exc)}}
+
+    def _op_office_start(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Start/restart/stop the Document Server from the Web UI.
+
+        ``start``/``restart`` run in the background (they may pull an image and take
+        a while); the caller polls ``office_status`` until it turns healthy. ``stop``
+        is quick and runs inline.
+        """
+        from . import office_setup
+
+        action = str(request.get("action") or "start")
+        if action == "stop":
+            return {"result": office_setup.stop()}
+        if action not in ("start", "restart"):
+            raise ValueError(f"unknown office action: {action}")
+
+        def work() -> None:
+            try:
+                if action == "restart":
+                    office_setup.restart()
+                office_setup.start(wait=False, log=lambda *a: log.info("office: %s", " ".join(map(str, a))))
+            except Exception:  # noqa: BLE001 - a failed background start must not crash the daemon
+                log.exception("office %s failed", action)
+
+        threading.Thread(target=work, name=f"office-{action}", daemon=True).start()
+        return {"started": True, "action": action}
+
     def _op_frontend_status(self, request: dict[str, Any]) -> dict[str, Any]:
         return self.frontends.status()
 

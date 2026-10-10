@@ -91,6 +91,8 @@ class _Browser(unittest.TestCase):
     teams: list = []
     messages: list = []
     hosts: list = []
+    conversations: list = []
+    office = None
     viewport = {"width": 1300, "height": 800}
 
     def setUp(self):
@@ -103,6 +105,8 @@ class _Browser(unittest.TestCase):
         self.web_sessions: list = []
         self.bundles: list = []
         self.archived: list = []
+        self.conversations = list(type(self).conversations)
+        self.office_started: list = []
         self.pw = sync_playwright().start()
         self.addCleanup(self.pw.stop)
         browser = self.pw.chromium.launch(executable_path=CHROMIUM, args=["--no-sandbox"])
@@ -190,6 +194,18 @@ class _Browser(unittest.TestCase):
             return {"ok": True, "hosts": self.hosts}
         if op in ("host_set", "host_remove"):
             return {"ok": True, "host": self.hosts[0] if self.hosts else {}}
+        if op == "conversation_list":
+            return {"ok": True, "conversations": self.conversations}
+        if op == "conversation_info":
+            cid = body.get("id")
+            convs = self.conversations
+            conv = next((c for c in convs if c.get("id") == cid), convs[0] if convs else {})
+            return {"ok": True, "conversation": conv}
+        if op == "office_status":
+            return {"ok": True, "status": self.office}
+        if op == "office_start":
+            self.office_started.append(body.get("action"))
+            return {"ok": True, "started": True, "action": body.get("action")}
         if op == "host_test":
             return {"ok": True, "tmux": True, "git": True, "claude": False, "opencode": False,
                     "crewhall": False}
@@ -1385,6 +1401,116 @@ class Composer(_Browser):
         self.page.locator("#dlg .btn.primary").click()
         self.page.wait_for_selector("#dlg", state="hidden")
         self.assertEqual(self.page.evaluate("JSON.parse(localStorage.getItem('at.tpl')).length"), 0)
+
+
+class SpecialKeysAndMenu(_Browser):
+    """Keys palette, composer Tools entry and the right-click agent menu."""
+    agents = [ATTN]
+
+    def test_shortcuts_palette_lists_keys_and_sends_one(self):
+        self.page.keyboard.press("Control+Shift+K")
+        self.page.wait_for_selector("#palette", state="visible")
+        self.assertIn("Ctrl+C", self.page.locator("#palette-list").inner_text())
+        self.page.locator("#palette-list button", has_text="Ctrl+C").first.click()
+        self.assertIn("agent_key", self.calls)
+        payloads = [p for p in self.payloads if p.get("op") == "agent_key"]
+        self.assertEqual(payloads[-1]["key"], "CTRL_C")
+
+    def test_palette_can_open_the_keys_palette_from_a_command(self):
+        self.page.keyboard.press("Control+k")
+        self.page.wait_for_selector("#palette", state="visible")
+        self.page.locator("#palette-list button", has_text="Send a key").first.click()
+        self.page.wait_for_selector("#palette", state="visible")
+        self.assertIn("Ctrl+B", self.page.locator("#palette-list").inner_text())
+
+    def test_composer_tools_offers_send_a_key(self):
+        self.page.click("#toolsBtn")
+        self.page.wait_for_selector(".menu")
+        self.assertIn("Send a key", self.page.locator(".menu").inner_text())
+
+    def test_right_click_on_the_viewport_opens_the_agent_menu(self):
+        self.page.locator("#hist").click(button="right", position={"x": 60, "y": 60})
+        self.page.wait_for_selector(".menu")
+        text = self.page.locator(".menu").inner_text()
+        self.assertIn("Interrupt the turn", text)
+        self.assertIn("Send a key", text)
+        self.assertIn("/help", text)                 # claude slash commands
+
+    def test_agent_menu_can_send_a_slash_command_to_the_composer(self):
+        self.page.locator("#hist").click(button="right", position={"x": 60, "y": 60})
+        self.page.wait_for_selector(".menu")
+        self.page.locator(".menu button", has_text="/help").first.click()
+        self.assertEqual(self.page.input_value("#input"), "/help")
+
+
+CHAT_CONV = {"id": "c-1", "title": "Report", "agent_id": "sess_attn",
+             "outputs": [], "inputs": [], "created_at": 0, "updated_at": 0}
+
+
+class _ChatBase(_Browser):
+    agents = [ATTN]
+    conversations = [CHAT_CONV]
+    office = {"docker": True, "healthy": True, "running": True, "office_enabled": True,
+              "office_public_url": "http://office.local:8081",
+              "office_base_url": "http://crewhall.local:8765"}
+
+    def _open_chat(self):
+        self.page.evaluate("setInterface('chat')")
+        self.page.wait_for_selector("#chat:not(.init-hidden)")
+        self.page.evaluate("chatSelect('c-1'); chatSetArtifacts(true)")
+        self.page.wait_for_function("typeof CHAT !== 'undefined' && CHAT.info && CHAT.info.id === 'c-1'")
+
+
+class ChatMode(_ChatBase):
+    """Chat mode: pending questions, keys and the OnlyOffice status button."""
+
+    def test_pending_questions_appear_and_can_be_answered(self):
+        self._open_chat()
+        self.page.wait_for_selector("#chat-asks .ask")
+        self.assertEqual(self.page.locator("#chat-asks .ask").count(), 2)
+        self.page.locator("#chat-asks .ask").first.get_by_role("button", name="Allow once").click()
+        self.assertIn("interaction_respond", self.calls)
+
+    def test_office_status_button_reflects_health_and_can_restart(self):
+        self._open_chat()
+        self.page.wait_for_selector("#chatOffice[data-state='ok']")
+        self.page.click("#chatOffice")
+        self.page.wait_for_selector(".menu")
+        self.page.locator(".menu button", has_text="Restart OnlyOffice").click()
+        self.assertIn("office_start", self.calls)
+        self.assertEqual(self.office_started[-1], "restart")
+
+    def test_right_click_on_the_chat_feed_opens_the_agent_menu(self):
+        self._open_chat()
+        self.page.locator("#chat-feed").click(button="right", position={"x": 40, "y": 40})
+        self.page.wait_for_selector(".menu")
+        self.assertIn("Send a key", self.page.locator(".menu").inner_text())
+
+    def test_chat_tools_offers_send_a_key(self):
+        self._open_chat()
+        self.page.click("#chatTools")
+        self.page.wait_for_selector(".menu")
+        self.assertIn("Send a key", self.page.locator(".menu").inner_text())
+
+
+class ChatOfficeDown(_ChatBase):
+    office = {"docker": True, "healthy": False, "running": False}
+
+    def test_off_state_offers_start(self):
+        self._open_chat()
+        self.page.wait_for_selector("#chatOffice[data-state='off']")
+        self.page.click("#chatOffice")
+        self.page.wait_for_selector(".menu")
+        self.page.locator(".menu button", has_text="Start OnlyOffice").click()
+        self.assertEqual(self.office_started[-1], "start")
+
+
+class ChatOfficeNoDocker(_ChatBase):
+    office = {"docker": False, "healthy": False, "running": False}
+
+    def test_no_docker_state_is_flagged(self):
+        self._open_chat()
+        self.page.wait_for_selector("#chatOffice[data-state='nodocker']")
 
 
 class CommandPalette(_Browser):

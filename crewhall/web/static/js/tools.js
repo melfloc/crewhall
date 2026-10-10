@@ -59,12 +59,13 @@ function openComposerTools(anchor){
   const a = agentById(S.selected);
   const items = [];
   if(a && SLASH[a.kind]) items.push({label:"Slash commands…", icon:"terminal", run:() => openSlash(anchor)});
-  items.push({label:"Prompt templates…", icon:"list", run:() => openTemplates(anchor)});
+  if(a) items.push({label:"Send a key… (Esc, Ctrl+C…)", icon:"terminal", run: () => openKeysMenu(anchor, a.agent_id)});
+  items.push({label:"Prompt templates…", icon:"list", run: () => openTemplates(anchor)});
   items.push("-");
   items.push({label:"Attach a file…", icon:"paperclip", run:() => { S.uploadMode = ""; $("fileInput").click(); }});
   items.push({label:"Attach to permanent storage…", icon:"folder", run:() => { S.uploadMode = "permanent"; $("fileInput").click(); }});
   items.push({label:"Insert a server path…", icon:"folder", run:insertServerPath});
-  if(a) items.push("-", {label:`Change model… (${modelOf(a) || "n/d"})`, icon:"activity", run:() => openModelPicker(a)});
+  if(a) items.push("-", {label:`Change model… (${modelOf(a) || "n/d"})`, icon:"activity", run: () => openModelPicker(a)});
   openMenu(anchor, items);
 }
 $("toolsBtn").onclick = (e) => { e.stopPropagation(); openComposerTools($("toolsBtn")); };
@@ -158,6 +159,90 @@ function openSlash(anchor){
 function agentKey(id, key){
   return op("agent_key", {target:id, key}).catch(e => flash(e.message));
 }
+
+/* ---------- special keys (Esc, Ctrl+*…) as commands, for any agent ----------
+   The agent's TUI listens on a raw terminal: these named keys go straight to it.
+   Exposed three ways: the shortcuts palette (Ctrl+Shift+K), the composer Tools
+   menu, and the right-click menu on the agent viewport. */
+const KEY_DEFS = [
+  {key:"ESC", label:"Esc — close a dialog / cancel"},
+  {key:"CTRL_C", label:"Ctrl+C — interrupt", danger:true},
+  {key:"CTRL_D", label:"Ctrl+D — end of input (EOF)"},
+  {key:"CTRL_B", label:"Ctrl+B"},
+  {key:"CTRL_O", label:"Ctrl+O — full transcript (Claude)"},
+  {key:"CTRL_L", label:"Ctrl+L — clear screen"},
+  {key:"CTRL_R", label:"Ctrl+R — history / search"},
+  {key:"CTRL_U", label:"Ctrl+U — clear the line"},
+  {key:"CTRL_W", label:"Ctrl+W — delete the previous word"},
+  {key:"TAB", label:"Tab"},
+  {key:"SHIFT_TAB", label:"Shift+Tab — cycle mode (Claude)"},
+  {key:"ENTER", label:"Enter — submit"},
+  {key:"UP", label:"↑ Previous"},
+  {key:"DOWN", label:"↓ Next"},
+  {key:"LEFT", label:"← Left"},
+  {key:"RIGHT", label:"→ Right"},
+  {key:"HOME", label:"Home"},
+  {key:"END", label:"End"},
+  {key:"PAGE_UP", label:"PgUp"},
+  {key:"PAGE_DOWN", label:"PgDn"},
+];
+function sendAgentKey(id, key){ return agentKey(id, key); }
+function keyCommands(id){
+  return KEY_DEFS.map(k => ({label:k.label, icon:k.danger ? "stop" : "terminal",
+    danger:k.danger, run:()=>sendAgentKey(id, k.key)}));
+}
+function openKeysMenu(anchor, targetId){
+  const id = targetId || (typeof paletteTarget === "function" ? paletteTarget() : S.selected);
+  if(!id){ toast("Select an agent first", "info"); return; }
+  openMenu(anchor, keyCommands(id));
+}
+
+/* The composer of the interface that is on screen (Cowork or Chat). */
+function activeComposer(){
+  const chat = typeof currentInterface === "function" && currentInterface() === "chat";
+  return chat ? $("chat-input") : $("input");
+}
+function insertInComposer(text){
+  const b = activeComposer(); if(!b || b.disabled) return;
+  b.value = b.value.trim() ? b.value.replace(/\s*$/, "") + "\n" + text : text;
+  b.dispatchEvent(new Event("input", {bubbles:true}));
+  b.focus();
+}
+/* Commands that can be sent to an agent, plus quick actions and keys. */
+function agentMenuItems(id){
+  const a = agentById(id) || {};
+  const items = [];
+  items.push({label:"Interrupt the turn (Ctrl+C)", icon:"stop", danger:true,
+    run:()=>sendAgentKey(id, "CTRL_C")});
+  if(a.state === "exited" || a.state === "error")
+    items.push({label:"Start the agent", icon:"refresh", run:()=>restartAgent(id)});
+  items.push({label:"New session", icon:"refresh", run:()=>newSession(id)});
+  if(a.kind === "claude")
+    items.push({label:"Cycle permission mode (Shift+Tab)", icon:"shield",
+      run:()=>sendAgentKey(id, "SHIFT_TAB")});
+  items.push({label:"Change model…", icon:"activity", run:()=>{ if(a.agent_id) openModelPicker(a); }});
+  items.push("-");
+  items.push({label:"Send a key… (Esc, Ctrl+C, arrows…)", icon:"terminal",
+    run:()=>openKeysMenu(paletteAnchor(), id)});
+  const cmds = SLASH[a.kind];
+  if(cmds){
+    items.push("-");
+    cmds.forEach(([cmd, label]) => items.push({label:`Insert ${cmd} — ${label}`, icon:"terminal",
+      run:()=>insertInComposer(cmd)}));
+  }
+  return items;
+}
+/* Open the agent menu at the cursor (right-click on the viewport). */
+function openAgentMenu(ev, id){
+  openMenu(null, agentMenuItems(id), {x:ev.clientX, y:ev.clientY});
+}
+/* A stable anchor for menus opened from the palette (which has no element to
+   point at): the bottom-center of the viewport. */
+function paletteAnchor(){
+  const x = window.innerWidth / 2, y = window.innerHeight - 90;
+  return {getBoundingClientRect: () => ({left:x, right:x, top:y, bottom:y}), focus(){}};
+}
+
 function quickActionsBtn(a){
   const btn = el("button", {className:"btn", type:"button", id:"agent-more", title:"Quick actions"},
     ic("bolt", "sm"), el("span", {className:"lbl"}, "More"));

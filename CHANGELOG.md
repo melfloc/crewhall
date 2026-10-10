@@ -5,6 +5,24 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.78.0] — 2026-10-10
+
+- **El modo Chat ya responde a los agentes.** Las tarjetas de **permisos y preguntas**
+  (interactions) aparecen sobre el compositor del chat y se contestan igual que en Cowork
+  (misma op `interaction_respond`), así que un agente que espera tu respuesta ya no queda
+  bloqueado.
+- **Paleta de teclas (shortcuts).** `Ctrl+Shift+K` abre una paleta para enviar teclas
+  especiales al agente (Esc, Ctrl+C/D/B/O/L/R/U/W, Tab/Shift+Tab, flechas, PgUp/PgDn…), con
+  el mismo buscador que `Ctrl+K`; también hay un comando «Send a key…» en la paleta normal,
+  en el menú **+ Tools** del compositor (Cowork y Chat).
+- **Menú contextual del agente.** Clic derecho sobre el viewport (conversación, vista Live o
+  el feed del chat) abre un menú para **interrumpir**, nueva sesión, cambiar de modelo,
+  cambiar el modo de permisos, **enviar teclas** e **insertar comandos** (`/…`) en el compositor.
+- **Botón de estado de OnlyOffice en los artefactos.** Un indicador (verde/arrancando/apagado/
+  sin Docker) con menú para **iniciar, reiniciar, apagar**, refrescar y copiar el diagnóstico.
+  Nuevas ops del daemon `office_status` y `office_start` (start/restart corren en segundo
+  plano; el botón sondea hasta que queda sano) y comandos `crewhall office stop|restart`.
+
 ## [0.77.2] — 2026-10-10
 
 - **OnlyOffice alcanzable desde el navegador con UFW.** El puerto publicado del

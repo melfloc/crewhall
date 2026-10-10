@@ -1,10 +1,17 @@
 "use strict";
-/* ---------- command palette (Ctrl+K) ---------- */
-const P = { open:false, items:[], all:[], i:0 };
+/* ---------- command palette (Ctrl+K) and shortcuts palette (Ctrl+Shift+K) ---------- */
+const P = { open:false, items:[], all:[], i:0, kind:"commands" };
+/* The agent the palette acts on: the chat's agent in Chat mode, else the selection. */
+function paletteTarget(){
+  if(typeof currentInterface === "function" && currentInterface() === "chat")
+    return (typeof CHAT !== "undefined" && CHAT.info && CHAT.info.agent_id) || null;
+  return S.selected || null;
+}
 function paletteCommands(){
   const cmds = [
     {label:"Interface: Chat", icon:"msg", run:()=>setInterface("chat")},
     {label:"Interface: Cowork", icon:"users", run:()=>setInterface("cowork")},
+    {label:"Send a key… (Esc, Ctrl+C, arrows…)", icon:"terminal", run:()=>openPalette("keys")},
     {label:"New agent", icon:"plus", run:()=>openNewAgent()},
     {label:"New team", icon:"users", run:()=>newTeam()},
   ];
@@ -32,6 +39,12 @@ function paletteCommands(){
   });
   return cmds;
 }
+/* The shortcuts palette: every named key the agent's TUI understands. */
+function paletteKeys(){
+  const id = paletteTarget();
+  if(!id || typeof KEY_DEFS === "undefined") return [];
+  return keyCommands(id);
+}
 function paletteFilter(){
   const q = $("palette-q").value.trim().toLowerCase();
   P.items = q ? P.all.filter(c => c.label.toLowerCase().includes(q)) : P.all.slice();
@@ -40,7 +53,8 @@ function paletteFilter(){
 }
 function renderPalette(){
   const list = $("palette-list");
-  if(!P.items.length){ list.replaceChildren(el("div", {className:"palette-empty"}, "No matching commands")); return; }
+  if(!P.items.length){ list.replaceChildren(el("div", {className:"palette-empty"},
+    P.kind === "keys" ? "Select an agent to send keys to." : "No matching commands")); return; }
   list.replaceChildren(...P.items.map((c, i) => el("button", {className:"palette-item" + (i===P.i ? " on" : "") + (c.danger ? " danger" : ""),
     type:"button", role:"option", "aria-selected":i===P.i, onclick:()=>paletteRun(c)}, ic(c.icon, "sm"), c.label)));
 }
@@ -51,10 +65,15 @@ function paletteMove(d){
   const on = $("palette-list").querySelector(".palette-item.on"); if(on) on.scrollIntoView({block:"nearest"});
 }
 function paletteRun(c){ closePalette(); if(c && c.run) c.run(); }
-function openPalette(){
-  if(P.open) return;
-  P.open = true; P.all = paletteCommands();
-  $("palette-q").value = ""; paletteFilter();
+function openPalette(kind){
+  if(P.open){ if(P.kind === (kind || "commands")) return; closePalette(); }
+  P.open = true; P.kind = kind === "keys" ? "keys" : "commands";
+  P.all = P.kind === "keys" ? paletteKeys() : paletteCommands();
+  $("palette-q").value = "";
+  $("palette-q").placeholder = P.kind === "keys"
+    ? "Send a key to the agent…  (Esc to close)"
+    : "Type a command…  (Esc to close)";
+  paletteFilter();
   $("palette").style.display = "flex"; $("palette-q").focus();
 }
 function closePalette(){
@@ -64,7 +83,11 @@ function closePalette(){
 $("palette").addEventListener("click", e => { if(e.target === $("palette")) closePalette(); });
 $("palette-q").addEventListener("input", paletteFilter);
 document.addEventListener("keydown", (e) => {
-  if(e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && (e.key === "k" || e.key === "K")){ e.preventDefault(); P.open ? closePalette() : openPalette(); return; }
+  if(e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "k"){
+    e.preventDefault();
+    if(P.open){ closePalette(); } else { openPalette(e.shiftKey ? "keys" : "commands"); }
+    return;
+  }
   if(!P.open) return;
   if(e.key === "Escape"){ e.preventDefault(); closePalette(); }
   else if(e.key === "ArrowDown"){ e.preventDefault(); paletteMove(1); }

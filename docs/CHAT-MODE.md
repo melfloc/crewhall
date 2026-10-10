@@ -139,6 +139,19 @@ La **subida** y el **servido/descarga** de archivos viven en la capa web
   Es el botón **Export** de la cabecera del chat.
 - Guardas: Host/Origin/auth, `nosniff`, sin traversal, tamaño máximo.
 
+## Controles del chat
+
+- **Preguntas y permisos del agente**: las *interactions* pendientes se dibujan con las
+  mismas tarjetas que Cowork y se responden por la op `interaction_respond`, sin salir
+  del chat.
+- **Teclas especiales**: `Ctrl+Shift+K` abre la paleta de teclas (Esc, Ctrl+C/D/B/O/L/R/U/W,
+  Tab/Shift+Tab, flechas, PgUp/PgDn…). También en el menú **+ Tools** y con clic derecho
+  sobre el viewport (menú del agente: interrumpir, nueva sesión, modelo, permisos, teclas y
+  comandos `/…`).
+- **Estado de OnlyOffice**: botón en la cabecera de *Artifacts* con el estado (verde /
+  arrancando / apagado / sin Docker) y menú para iniciar, reiniciar o apagar el servicio.
+  Ops del daemon: `office_status` (estado) y `office_start` (`action: start|restart|stop`).
+
 ## OnlyOffice (contenedor por host)
 
 URLs distintas (el error histórico del NAS); en crewhall:

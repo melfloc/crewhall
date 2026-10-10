@@ -74,7 +74,7 @@ function toast(msg, kind = "info", ms = 4000){
 function flash(msg){ toast(msg, "err", 6000); }
 
 function closeMenu(){ if(S.menu){ S.menu.remove(); S.menu = null; } }
-function openMenu(anchor, items){
+function openMenu(anchor, items, point){
   closeMenu();
   const m = el("div", {className:"menu", role:"menu"});
   items.forEach(it => it === "-" ? m.append(el("hr")) : m.append(el("button",
@@ -90,12 +90,18 @@ function openMenu(anchor, items){
     else if(e.key === "ArrowUp"){ e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
     else if(e.key === "Home"){ e.preventDefault(); btns[0].focus(); }
     else if(e.key === "End"){ e.preventDefault(); btns[btns.length - 1].focus(); }
-    else if(e.key === "Escape"){ e.preventDefault(); closeMenu(); anchor.focus(); }
+    else if(e.key === "Escape"){ e.preventDefault(); closeMenu(); if(anchor && anchor.focus) anchor.focus(); }
   });
   document.body.append(m); S.menu = m;
-  const r = anchor.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
-  m.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + "px";
-  m.style.top = (r.bottom + 4 + h > innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+  const w = m.offsetWidth, h = m.offsetHeight;
+  if(point){                              // opened at the cursor (right-click)
+    m.style.left = Math.max(8, Math.min(point.x, innerWidth - w - 8)) + "px";
+    m.style.top = (point.y + 4 + h > innerHeight ? Math.max(8, point.y - h - 4) : point.y + 4) + "px";
+  } else {                                // opened under the element that was clicked
+    const r = anchor.getBoundingClientRect();
+    m.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + "px";
+    m.style.top = (r.bottom + 4 + h > innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+  }
   const f = m.querySelector("button"); if(f) f.focus();
 }
 document.addEventListener("mousedown", e => { if(S.menu && !S.menu.contains(e.target)) closeMenu(); });

@@ -1396,6 +1396,10 @@ def build_parser() -> argparse.ArgumentParser:
     o.set_defaults(func=cmd_office)
     o = osub.add_parser("status", help="show the OnlyOffice setup and container status")
     o.set_defaults(func=cmd_office)
+    o = osub.add_parser("stop", help="stop the Document Server container (keeps its data)")
+    o.set_defaults(func=cmd_office)
+    o = osub.add_parser("restart", help="restart the Document Server container")
+    o.set_defaults(func=cmd_office)
     o = osub.add_parser("list", help="documents the agent is co-editing")
     o.set_defaults(func=cmd_office)
     o = osub.add_parser("open", help="open the headless co-editor for an artifact")
@@ -1793,6 +1797,16 @@ def cmd_office(args: argparse.Namespace) -> int:
         from . import office_setup
 
         print(_json.dumps(office_setup.status(), indent=2))
+        return 0
+    if action in ("stop", "restart"):
+        from . import office_setup
+
+        try:
+            res = (office_setup.stop if action == "stop" else office_setup.restart)()
+        except office_setup.SetupError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(_json.dumps(res, indent=2))
         return 0
 
     cid = getattr(args, "conversation", None) or os.environ.get("CREWHALL_CONVERSATION")

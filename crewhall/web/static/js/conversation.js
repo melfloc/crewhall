@@ -404,6 +404,17 @@ $("term").addEventListener("scroll", ()=>{ const t=$("term");
   const atBottom = t.scrollHeight - t.scrollTop - t.clientHeight < 8;
   if(!atBottom && S.follow){ S.follow=false; setFollowUi(); } });
 
+// Right-click on the agent's viewport (conversation or live) opens a menu with
+// the keys and slash commands we can send to that agent.
+["hist", "term"].forEach(id => {
+  const box = $(id); if(!box) return;
+  box.addEventListener("contextmenu", (e) => {
+    if(!S.selected) return;
+    e.preventDefault();
+    openAgentMenu(e, S.selected);
+  });
+});
+
 
 /* Keep only the latest activity (tool / sub-agent / result) expanded: when a new
    one appears, the one we auto-opened closes and the new one opens. Blocks the user

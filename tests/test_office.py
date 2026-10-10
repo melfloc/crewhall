@@ -167,5 +167,59 @@ class ExternalSetup(unittest.TestCase):
         self.assertTrue(settings.get("office.enabled"))
 
 
+class Lifecycle(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="at-office-life-")
+        self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
+        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self.d, "XDG_STATE_HOME": self.d})
+        env.start(); self.addCleanup(env.stop)
+
+    def _docker(self):
+        return mock.patch("crewhall.office_setup.shutil.which", return_value="/usr/bin/docker")
+
+    def test_stop_without_setup_raises(self):
+        with self._docker(), mock.patch.object(office_setup, "_docker_prefix", return_value=["docker"]):
+            with self.assertRaises(office_setup.SetupError):
+                office_setup.stop()
+
+    def test_stop_and_restart_shell_out_to_compose(self):
+        with open(office_setup._compose_file(), "w") as fh:
+            fh.write("services: {}\n")
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append(argv)
+            return mock.Mock(returncode=0, stdout="")
+
+        with self._docker(), \
+                mock.patch.object(office_setup, "_docker_prefix", return_value=["docker"]), \
+                mock.patch.object(office_setup, "_run", side_effect=fake_run):
+            self.assertEqual(office_setup.stop(), {"stopped": True})
+            self.assertEqual(office_setup.restart(), {"restarted": True})
+        self.assertTrue(any("stop" in c for c in calls))
+        self.assertTrue(any("restart" in c for c in calls))
+
+    def test_status_reports_running_and_healthy(self):
+        def fake_run(argv, **kw):
+            if argv[-2:] == ["--format", "{{.Status}}"]:
+                return mock.Mock(returncode=0, stdout="Up 2 minutes (healthy)\n")
+            return mock.Mock(returncode=0, stdout="172.17.0.1\n")
+
+        with mock.patch.object(office_setup, "_docker_reachable", side_effect=lambda p: p == ["docker"]), \
+                mock.patch.object(office_setup, "_run", side_effect=fake_run), \
+                mock.patch.object(office_setup, "_tailscale_ip", return_value=None), \
+                mock.patch.object(office_setup, "_healthcheck", return_value=True):
+            info = office_setup.status()
+        self.assertTrue(info["docker"])
+        self.assertTrue(info["running"])
+        self.assertTrue(info["healthy"])
+
+    def test_web_ops_are_allowlisted(self):
+        from crewhall.web.server import ALLOWED_OPS
+
+        self.assertIn("office_status", ALLOWED_OPS)
+        self.assertIn("office_start", ALLOWED_OPS)
+
+
 if __name__ == "__main__":
     unittest.main()

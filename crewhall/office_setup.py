@@ -444,8 +444,50 @@ def status() -> dict[str, Any]:
         info["bridge_gateway"] = gw
     info["tailscale_ip"] = _tailscale_ip()
     info["office_enabled"] = bool(settings.get("office.enabled"))
+    info["collab_enabled"] = bool(settings.get("office.collab_enabled"))
     info["office_base_url"] = settings.get("office.base_url")
     info["office_public_url"] = settings.get("office.public_url")
     public = str(info["office_public_url"] or "")
     info["healthy"] = _healthcheck(public) if public else False
+    info["running"] = bool(info.get("container"))
     return info
+
+
+def _compose(prefix: list[str], *args: str) -> subprocess.CompletedProcess:
+    return _run([*prefix, "compose", "-f", _compose_file(), "--env-file", _env_file(), *args],
+                cwd=setup_dir(), check=False)
+
+
+def stop() -> dict[str, Any]:
+    """Stop the Document Server container (keeps its data). Idempotent."""
+    prefix = _docker_prefix() if shutil.which("docker") else None
+    if prefix is None:
+        raise SetupError("Docker is not reachable")
+    if not os.path.exists(_compose_file()):
+        raise SetupError("OnlyOffice is not set up yet (run `crewhall office setup`)")
+    result = _compose(prefix, "stop")
+    if result.returncode != 0:
+        raise SetupError("docker compose stop failed:\n" + (result.stdout or ""))
+    return {"stopped": True}
+
+
+def restart() -> dict[str, Any]:
+    """Restart the Document Server container (picks up compose/settings changes)."""
+    prefix = _docker_prefix() if shutil.which("docker") else None
+    if prefix is None:
+        raise SetupError("Docker is not reachable")
+    if not os.path.exists(_compose_file()):
+        raise SetupError("OnlyOffice is not set up yet (run `crewhall office setup`)")
+    result = _compose(prefix, "restart")
+    if result.returncode != 0:
+        raise SetupError("docker compose restart failed:\n" + (result.stdout or ""))
+    return {"restarted": True}
+
+
+def start(*, wait: bool = False, log=print) -> dict[str, Any]:
+    """Bring the Document Server up (and wire settings/frontends). Idempotent.
+
+    Used by the Web UI's status button, so ``wait`` defaults to False: the request
+    returns at once and the caller polls :func:`status` until it is healthy.
+    """
+    return setup(wait=wait, log=log)

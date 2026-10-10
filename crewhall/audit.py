@@ -46,6 +46,7 @@ AUDITED = {
     "conversation_artifact_delete", "conversation_artifact_download", "conversation_export",
     "office_collab_open", "office_collab_close", "office_collab_command",
     "office_collab_insert", "office_collab_say", "office_collab_comment_add",
+    "office_start",
 }
 
 
@@ -253,6 +254,8 @@ def summarize(op: str, request: dict[str, Any], result: dict[str, Any] | None = 
     if op in ("office_collab_insert", "office_collab_say", "office_collab_comment_add"):
         text = str(request.get("text") or "")
         return f"id={request.get('id')} path={request.get('path')} bytes={len(text.encode('utf-8'))}"
+    if op == "office_start":
+        return f"action={request.get('action') or 'start'}"
     if op.startswith("web_token") or op.startswith("web_session"):
         return op
     if op.startswith("terminal_"):
