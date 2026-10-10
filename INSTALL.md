@@ -257,7 +257,8 @@ crewhall office setup
 Hace, de forma idempotente: instala/arranca Docker si falta, levanta el
 Document Server (contenedor `crewhall-onlyoffice`, imagen **fijada** a una
 versión concreta para que no cambie entre despliegues, JWT y healthcheck),
-abre el firewall del bridge (`docker0`) si usas UFW, apunta `office.*` a él y
+abre el firewall (bridge `docker0` **y** el forwarding hacia el contenedor) si
+usas UFW, apunta `office.*` a él y
 activa los frontends que el contenedor necesita. Se puede lanzar ya desde el
 instalador (`scripts/install.sh --office`). Comprueba el estado con:
 

@@ -101,18 +101,28 @@ Sin Chromium, la op falla con un mensaje claro y sigue disponible el **Nivel 1**
 
 ## Firewall (UFW)
 
-El Document Server vive en un contenedor y necesita **alcanzar crewhall** para
-descargar el documento (`document.url`) y guardar cambios (`callbackUrl`). Si
-tienes **UFW** activo, su política INPUT por defecto descarta el tráfico que
-llega por `docker0`, y verás `ETIMEDOUT` en los logs del DS. `crewhall office
-setup` añade la regla automáticamente; si lo haces a mano:
+Hay **dos** direcciones y UFW rompe cada una por un motivo distinto:
+
+1. **Contenedor → crewhall** (descargar el documento y guardar cambios por
+   `callbackUrl`). La política INPUT por defecto descarta el tráfico que llega por
+   `docker0`; lo verás como `ETIMEDOUT` en los logs del DS.
+2. **Navegador → contenedor** (el editor). El puerto publicado (`8081`) es tráfico
+   *forwarded* y la política FORWARD por defecto lo descarta: crewhall (8765)
+   entra por la tailnet pero el editor no. Hay que permitir el forwarding.
+
+`crewhall office setup` añade ambas reglas automáticamente (idempotente). A mano:
 
 ```bash
 sudo ufw allow in on docker0
+sudo ufw route allow in on tailscale0 out on docker0    # navegador por Tailscale
+sudo ufw route allow in on <iface-lan> out on docker0   # navegador por LAN (opcional)
 ```
 
 ## Problemas conocidos
 
+- **El editor no carga en el navegador / 8081 no responde desde la tailnet**: falta
+  la regla de *forwarding* de UFW (punto 2 arriba); `crewhall office setup`
+  interactivo la añade (necesita `sudo`).
 - **El editor muestra la versión anterior**: el `document.key` no cambió.
   crewhall lo deriva de `path:mtime:size`, así que cambia al guardar.
 - **El callback da 403**: el `office.jwt_secret` no coincide con el del DS.
