@@ -128,6 +128,23 @@ class SetupPlan(unittest.TestCase):
             self.assertEqual(office_setup._probe_host(wildcard), "127.0.0.1")
 
 
+class FirewallIngress(unittest.TestCase):
+    def test_ingress_ifaces_tailscale_first_then_default(self):
+        with mock.patch.object(office_setup.os.path, "exists", return_value=True), \
+                mock.patch.object(office_setup.subprocess, "run") as run:
+            run.return_value = mock.Mock(
+                stdout="default via 192.168.200.1 dev enp4s0 proto dhcp metric 100\n",
+                returncode=0)
+            ifaces = office_setup._ingress_ifaces()
+        self.assertEqual(ifaces, ["tailscale0", "enp4s0"])
+
+    def test_ingress_ifaces_dedupes_tailscale_default(self):
+        with mock.patch.object(office_setup.os.path, "exists", return_value=False), \
+                mock.patch.object(office_setup.subprocess, "run") as run:
+            run.return_value = mock.Mock(stdout="default via 100.0.0.1 dev tailscale0\n", returncode=0)
+            self.assertEqual(office_setup._ingress_ifaces(), ["tailscale0"])
+
+
 class ExternalSetup(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="at-office-ext-")

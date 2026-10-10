@@ -5,6 +5,15 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.77.2] — 2026-10-10
+
+- **OnlyOffice alcanzable desde el navegador con UFW.** El puerto publicado del
+  contenedor (8081) es tráfico *forwarded* y UFW lo descartaba con su política
+  FORWARD por defecto: crewhall (8765) entraba por la tailnet pero el editor no.
+  `crewhall office setup` ahora añade, además de `allow in on docker0`, las reglas
+  `route allow in on <ingress> out on docker0` (Tailscale y la interfaz de la ruta
+  por defecto), de forma idempotente.
+
 ## [0.77.1] — 2026-10-10
 
 - **Corrección**: `crewhall office setup` daba por fallido el arranque cuando el

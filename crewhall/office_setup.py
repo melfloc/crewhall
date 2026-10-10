@@ -173,20 +173,59 @@ def _ufw_active() -> bool:
         return False
 
 
-def _allow_docker_firewall(prefix: list[str], log=print) -> None:
-    """Let the container reach the host (Docker bridge) through the firewall.
+def _ingress_ifaces() -> list[str]:
+    """Interfaces a browser can reach the host on (the DS port is published there).
 
-    UFW's default INPUT policy drops traffic arriving on ``docker0``, which
-    makes the Document Server unable to fetch documents or post callbacks to
-    crewhall. Allow the bridge interface (idempotent).
+    The Tailscale interface first (the recommended path), then whatever carries
+    the default route. Used to let UFW forward browser -> container traffic.
+    """
+    ifaces: list[str] = []
+    if os.path.exists("/sys/class/net/tailscale0"):
+        ifaces.append("tailscale0")
+    try:
+        out = subprocess.run(["ip", "route", "show", "default"], capture_output=True,
+                             text=True, timeout=5)
+        for line in out.stdout.splitlines():
+            parts = line.split()
+            if "dev" in parts:
+                iface = parts[parts.index("dev") + 1]
+                if iface not in ifaces:
+                    ifaces.append(iface)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ifaces
+
+
+def _allow_docker_firewall(prefix: list[str], log=print) -> None:
+    """Open the firewall for both directions of the OnlyOffice integration.
+
+    Two different UFW policies get in the way:
+
+    - the default INPUT policy drops traffic arriving on ``docker0``, so the
+      Document Server cannot fetch documents or post callbacks to crewhall
+      (``ufw allow in on docker0``);
+    - the default FORWARD policy drops the *published* port, so a browser can
+      reach crewhall on 8765 but not the container on 8081. Forwarding from the
+      ingress interface to ``docker0`` must be allowed explicitly.
+
+    All rules are idempotent.
     """
     if not shutil.which("ufw") or not _ufw_active():
         return
     root = [] if os.geteuid() == 0 else ["sudo"]
-    result = _run([*root, "ufw", "allow", "in", "on", "docker0"], check=False)
-    text = (result.stdout or "").lower()
-    if "skipping" not in text and "already exists" not in text:
+
+    def ufw(*args: str) -> subprocess.CompletedProcess:
+        return _run([*root, "ufw", *args], check=False)
+
+    def changed(result: subprocess.CompletedProcess) -> bool:
+        text = (result.stdout or "").lower()
+        return result.returncode == 0 and "skipping" not in text and "already exists" not in text
+
+    if changed(ufw("allow", "in", "on", "docker0")):
         log("Allowed the Docker bridge in UFW (container -> crewhall).")
+    for iface in _ingress_ifaces():
+        if changed(ufw("route", "allow", "in", "on", iface, "out", "on", "docker0")):
+            log(f"Allowed UFW forwarding {iface} -> docker0 (browser -> OnlyOffice).")
 
 
 def _bridge_gateway(prefix: list[str]) -> str:
