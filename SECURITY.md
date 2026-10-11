@@ -17,8 +17,30 @@ crewhall runs coding-agent TUIs on **your** machine and exposes a small
 control plane (a 0600 UNIX socket and an optional Web UI). The invariants we
 care about:
 
-- **Local control plane**: the daemon socket is `0600`; anything that can reach
-  it can already run code as you.
+- **Local control plane**: the daemon socket is `0600`. Reaching the socket is not
+  enough to drive it: every operation that is **not** an agent operation (see below)
+  requires a **control token** kept in a `0600` file under the state directory
+  (`control-token`), which the CLI, the Web UI and the in-process UI read
+  automatically. The token is **never** injected into an agent's environment.
+- **The agent is a partial adversary**: an agent runs as the same Unix user as the
+  daemon, so filesystem permissions alone cannot separate them. The daemon therefore
+  also checks the caller's process credentials (`SO_PEERCRED`) and walks `/proc`:
+  a process that **descends from an agent session** may only use the agent operations
+  (`agent.identity`, `team.send`, `request.*`, `agent.new_session`/`team.new_session`,
+  lifecycle/permission hooks, `team.members`, `ping`, publishing to and co-editing
+  the chat it leads or crews). The same applies to a process whose environment still
+  carries a live agent's `CREWHALL_TOKEN` (e.g. a double-forked child reparented away
+  from the agent). Such a caller is refused the control plane even with a valid
+  control token. This stops an agent that merely *uses* `crewhall` (or a careless
+  tool it runs) from approving its own permission prompts, writing to an unrelated
+  agent, or killing sessions.
+- **Limit (read this)**: this is **defence in depth, not an isolation boundary**.
+  An agent that deliberately escapes both checks (`setsid`/double fork *and* a
+  scrubbed environment) runs as you and can read the `control-token` file. Real
+  isolation requires sandboxing the agent away from crewhall's state directory
+  (a different Unix user, or the agent CLI's own filesystem sandbox denying
+  `$XDG_STATE_HOME/crewhall`). Until then, treat Team limits as a coordination
+  guardrail against confused agents, not as protection against a hostile one.
 - **Web UI**: authenticated (token/session) unless bound to localhost and the
   token requirement is off; Host/Origin allow-lists; strict security headers and
   CSP; per-IP login throttling; no inline scripts/styles.

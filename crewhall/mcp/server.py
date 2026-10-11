@@ -74,6 +74,18 @@ TOOLS = [
         "description": "Start a fresh conversation for yourself only.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
+    {
+        "name": "publish_artifact",
+        "description": ("Publish a file you produced into a chat conversation's artifacts "
+                        "(its outputs). Use the conversation id from the handoff."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"conversation": {"type": "string"}, "path": {"type": "string"},
+                           "name": {"type": "string"}},
+            "required": ["conversation", "path"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -197,6 +209,17 @@ def call_tool(session: Session, name: str, arguments: Any) -> dict[str, Any]:
         result = session.call("team_new_session", sender=agent_id, token=token, target=agent_id)
         return _text({"conversation_id": result.get("conversation_id"),
                       "previous": result.get("previous"), "confirmed": result.get("confirmed")})
+    if name == "publish_artifact":
+        conversation = args.get("conversation")
+        path = args.get("path")
+        if not isinstance(conversation, str) or not conversation.strip():
+            raise McpError(-32602, "conversation is required")
+        if not isinstance(path, str) or not path.strip():
+            raise McpError(-32602, "path is required")
+        result = session.call("conversation_publish", sender=agent_id, token=token,
+                              id=conversation.strip(), source=path.strip(),
+                              name=args.get("name"))
+        return _text(result)
     raise McpError(-32601, f"unknown tool {name!r}")
 
 

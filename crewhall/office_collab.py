@@ -442,6 +442,57 @@ class CoEditor:
         shutil.rmtree(self.profile, ignore_errors=True)
 
 
+# Ids of the OnlyOffice comments already forwarded to the agent, per artifact,
+# kept in the conversation's folder so they survive a reopen or a restart.
+_FORWARDED_FILE = ".office-forwarded.json"
+_FORWARDED_LOCK = threading.Lock()
+
+
+def _forwarded_path(conversation_id: str) -> str | None:
+    from . import conversations
+
+    try:
+        return os.path.join(conversations.conversation_dir(conversation_id), _FORWARDED_FILE)
+    except Exception:  # noqa: BLE001 - unknown conversation: memory only
+        return None
+
+
+def _load_forwarded(conversation_id: str, path: str) -> set[str]:
+    file = _forwarded_path(conversation_id)
+    if not file:
+        return set()
+    try:
+        with open(file, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return set()
+    ids = data.get(path) if isinstance(data, dict) else None
+    return {str(i) for i in ids} if isinstance(ids, list) else set()
+
+
+def _save_forwarded(conversation_id: str, path: str, ids: set[str]) -> None:
+    file = _forwarded_path(conversation_id)
+    if not file:
+        return
+    with _FORWARDED_LOCK:
+        try:
+            with open(file, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data[path] = sorted(ids)
+        tmp = file + ".tmp"
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+            os.replace(tmp, file)
+        except OSError:
+            pass
+
+
 class CollabRegistry:
     """The live headless editors, one per conversation/artifact."""
 
@@ -501,7 +552,11 @@ class CollabRegistry:
             comments = editor.comments()
         except Exception:  # noqa: BLE001
             return 0
-        seen = self._seen_comments.get(key, set())
+        seen = self._seen_comments.get(key)
+        if seen is None:
+            # Comments live in the document: after a reopen or a daemon restart
+            # they are all listed again. Start from what was already forwarded.
+            seen = _load_forwarded(conversation_id, path)
         new_ids: set[str] = set()
         count = 0
         for comment in comments:
@@ -524,8 +579,9 @@ class CollabRegistry:
                     count += 1
                 except Exception:  # noqa: BLE001
                     pass
+        self._seen_comments[key] = seen | new_ids
         if new_ids:
-            self._seen_comments[key] = seen | new_ids
+            _save_forwarded(conversation_id, path, seen | new_ids)
         return count
 
     @staticmethod

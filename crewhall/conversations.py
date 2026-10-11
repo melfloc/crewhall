@@ -301,13 +301,15 @@ def ensure_global_rules() -> None:
             continue
 
 
-def create(title: str = "", agent_id: str | None = None, host: str | None = None) -> dict[str, Any]:
+def create(title: str = "", agent_id: str | None = None, host: str | None = None,
+           team: str | None = None) -> dict[str, Any]:
     cid = "c-" + secrets.token_hex(8)
     now = time.time()
     meta = {
         "id": cid,
         "title": (str(title).strip()[:200] or "New chat"),
         "agent_id": agent_id or None,
+        "team": team or None,
         "host": host or os.uname().nodename,
         "created_at": now,
         "updated_at": now,
@@ -339,6 +341,24 @@ def set_agent(conversation_id: str, agent_id: str | None) -> dict[str, Any]:
         if not meta:
             raise ConversationError("conversation not found")
         meta["agent_id"] = agent_id or None
+        meta["updated_at"] = time.time()
+        _save(data)
+        return dict(meta)
+
+
+def set_team(conversation_id: str, team: str | None) -> dict[str, Any]:
+    """Attach (or detach) a Cowork Team to a chat conversation.
+
+    The chat's lead agent keeps its isolated cwd; joining the Team only grants it
+    ``team.send``/``request``/``handoff`` to delegate work.
+    """
+    cid = _valid_id(conversation_id)
+    with _LOCK:
+        data = _load()
+        meta = data["conversations"].get(cid)
+        if not meta:
+            raise ConversationError("conversation not found")
+        meta["team"] = (str(team).strip() or None) if team is not None else None
         meta["updated_at"] = time.time()
         _save(data)
         return dict(meta)
@@ -407,6 +427,41 @@ def agent_ids() -> set[str]:
             if m.get("agent_id")}
 
 
+def crew_conversations(team: str) -> list[dict[str, Any]]:
+    """Conversations whose crew is ``team`` (for Mission Control / Cowork)."""
+    team = str(team or "")
+    return [dict(m) for m in _load()["conversations"].values() if m.get("team") == team]
+
+
+# -- artifact producers -------------------------------------------------------
+# Which agent produced each artifact, so a comment on it can be routed to that
+# agent (not only the chat's lead) and the panel can show a "producer" badge.
+
+def _producers_path(conversation_id: str) -> str:
+    return os.path.join(conversation_dir(conversation_id, create=True), "producers.json")
+
+
+def producers(conversation_id: str) -> dict[str, Any]:
+    try:
+        with open(_producers_path(conversation_id), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def set_producer(conversation_id: str, relpath: str, producer: str) -> None:
+    cid = _valid_id(conversation_id)
+    rel = str(relpath or "")
+    if not rel or rel.startswith(("/", "\\")) or ".." in rel.replace("\\", "/").split("/"):
+        raise ConversationError("invalid artifact path")
+    with _LOCK:
+        data = producers(cid)
+        data[rel] = {"producer": str(producer or ""), "at": time.time()}
+        _atomic_write(_producers_path(cid),
+                      json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
+
+
 # -- files --------------------------------------------------------------------
 
 def store_input(conversation_id: str, name: str, data: bytes) -> dict[str, Any]:
@@ -427,6 +482,7 @@ def store_artifact(conversation_id: str, name: str, data: bytes) -> dict[str, An
         raise ConversationError("file too large")
     conversation_dir(conversation_id, create=True)
     info = _write_new(_section_dir(conversation_id, "outputs"), name, bytes(data))
+    info["relpath"] = info["name"]
     touch(conversation_id)
     return info
 
@@ -494,7 +550,12 @@ def info(conversation_id: str) -> dict[str, Any]:
     meta = get(conversation_id)
     meta = dict(meta)
     meta["inputs"] = list_files(conversation_id, "inputs")
-    meta["outputs"] = list_files(conversation_id, "outputs")
+    outputs = list_files(conversation_id, "outputs")
+    produced = producers(conversation_id)
+    for item in outputs:
+        record = produced.get(item["relpath"])
+        item["producer"] = (record or {}).get("producer") or None
+    meta["outputs"] = outputs
     return meta
 
 

@@ -168,7 +168,8 @@ ALLOWED_OPS = {
     "terminal_key", "terminal_capture", "terminal_resize", "terminal_close",
     "conversation_create", "conversation_list", "conversation_info",
     "conversation_rename", "conversation_set_agent", "conversation_delete",
-    "conversation_artifact_delete",
+    "conversation_artifact_delete", "conversation_set_team",
+    "conversation_activity", "conversation_crew",
     "office_collab_open", "office_collab_read", "office_collab_command",
     "office_collab_insert", "office_collab_close", "office_collab_list",
     "office_collab_users", "office_collab_chat", "office_collab_say",
@@ -199,9 +200,15 @@ def _snapshot(client: Client, *, include_terminals: bool = False) -> dict[str, A
             terminals = client.call("terminal_list")["terminals"]
         except RpcError:
             terminals = []
+    # Chats with a crew show up in Mission Control as nodes (an older daemon
+    # without the op simply has none).
+    try:
+        conversations = client.call("conversation_crew")["conversations"]
+    except Exception:  # noqa: BLE001 - an optional field must never break the push
+        conversations = []
     return {"agents": agents, "teams": teams, "messages": messages,
             "requests": requests, "hosts": hosts, "terminals": terminals,
-            "version": __version__}
+            "conversations": conversations, "version": __version__}
 
 
 class Handler(BaseHTTPRequestHandler):

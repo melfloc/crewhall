@@ -25,10 +25,10 @@ from . import processes as procs
 from .opencode_link import OpenCodeLink, free_port
 from .messaging import Delivery, Messaging, MessagingError
 from .requests import OPEN_STATES, RequestBoard, RequestError
-from .persistence import StateStore
+from .persistence import PendingQueueStore, StateStore
 from .remote_link import RemoteLinks
 from .session import InteractiveSession
-from .team import Team, TeamRegistry
+from .team import Team, TeamError, TeamRegistry
 from .types import SessionSpec, Status, new_session_id, parse_agent_args
 
 log = logging.getLogger("crewhall.controller")
@@ -200,7 +200,10 @@ class Controller:
         self._agent_locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._store = StateStore() if persist else None
-        self.messaging = Messaging(self.agents, revive=self._revive_agent)
+        self._pending_store = PendingQueueStore() if persist else None
+        self.messaging = Messaging(
+            self.agents, revive=self._revive_agent, store=self._pending_store,
+        )
         self.requests = RequestBoard(
             max_open_per_agent=int(settings.get("requests.max_open_per_agent")),
             max_depth=int(settings.get("requests.max_depth")),
@@ -1271,6 +1274,13 @@ class Controller:
                     self.teams.add_member(team["team_id"], agent_id)
                 except Exception:
                     pass
+        # Resume messages that were still queued when the daemon stopped. The
+        # recipients exist as EXITED entities; the queue worker revives them.
+        if self._pending_store is not None:
+            try:
+                self.messaging.load(self._pending_store.load())
+            except Exception:  # noqa: BLE001 - a bad queue must not stop startup
+                log.exception("could not resume the pending message queue")
 
     def _restore_agent(self, agent: dict[str, Any]) -> None:
         agent_id = agent["agent_id"]
@@ -1515,6 +1525,40 @@ class Controller:
         ]
 
     # -- the shells an agent runs ------------------------------------------
+    def agent_root_pids(self) -> set[int]:
+        """PIDs of the live agent TUIs (the roots of their process trees).
+
+        The daemon uses this to recognise a caller that descends from an agent
+        (via ``SO_PEERCRED`` + the ``/proc`` ancestry) and lock it out of the
+        control plane, whatever credentials it presents.
+        """
+        pids: set[int] = set()
+        for harness in self.agents.all():
+            try:
+                if harness.session.status.alive and harness.session.pid:
+                    pids.add(int(harness.session.pid))
+            except Exception:  # noqa: BLE001 - a broken session must not hide the rest
+                continue
+        return pids
+
+    def agent_tokens(self) -> list[str]:
+        """Live agent identity tokens (the daemon matches a caller's environ)."""
+        return [t for t in self._agent_tokens.values() if t]
+
+    def agent_in_conversation(
+        self, sender: str, token: str | None, conversation_id: str,
+    ) -> bool:
+        """Whether an authenticated agent leads ``conversation_id`` or is in its crew."""
+        from . import conversations
+
+        sender_h = self.agents.resolve(sender)
+        self._check_token(sender_h.agent_id, token)
+        conv = conversations.get(conversation_id)
+        members = self._team_members(conv.get("team"))
+        if conv.get("agent_id"):
+            members.add(str(conv["agent_id"]))
+        return sender_h.agent_id in members
+
     def _agent_root(self, harness: Harness) -> int:
         if self._agent_hosts.get(harness.agent_id):
             raise HarnessError(
@@ -1669,7 +1713,8 @@ class Controller:
         return result
 
     def send_message_as(
-        self, sender: str, token: str | None, recipient: str, body: str
+        self, sender: str, token: str | None, recipient: str, body: str,
+        idempotency_key: str | None = None, message_id: str | None = None,
     ) -> Delivery:
         """Agent-to-agent send: identity from token + Team boundary enforced."""
         sender_harness = self.agents.resolve(sender)
@@ -1677,6 +1722,7 @@ class Controller:
         return self.messaging.send(
             sender_harness.agent_id, recipient, body,
             authorize=self._authorize_team, prefix_sender=True,
+            idempotency_key=idempotency_key, message_id=message_id,
             # Agents are told not to wait for answers: when the recipient is busy, hand over to the
             # bounded retry queue quickly instead of blocking the sender's turn for up to 30 s.
             wait=AGENT_SEND_WAIT,
@@ -1797,8 +1843,134 @@ class Controller:
     def list_agents(self) -> list[dict[str, Any]]:
         return [self.agent_summary(harness) for harness in self.agents.all()]
 
-    def send_message(self, sender: str, recipient: str, body: str) -> Delivery:
-        return self.messaging.send(sender, recipient, body, prefix_sender=True)
+    def send_message(self, sender: str, recipient: str, body: str,
+                     idempotency_key: str | None = None,
+                     message_id: str | None = None) -> Delivery:
+        return self.messaging.send(
+            sender, recipient, body, prefix_sender=True,
+            idempotency_key=idempotency_key, message_id=message_id,
+        )
+
+    # -- chat <-> cowork bridge --------------------------------------------
+    def _team_members(self, team: str | None) -> set[str]:
+        if not team:
+            return set()
+        try:
+            return set(self.teams.get(team).agent_ids)
+        except Exception:  # noqa: BLE001 - a unknown team is simply empty
+            return set()
+
+    def _cowork_roots(self) -> list[str]:
+        """Directories a publish source may come from (no arbitrary reads)."""
+        roots: list[str] = []
+        try:
+            roots += [str(r) for r in (settings.get("security.fs_roots") or []) if r]
+        except Exception:  # noqa: BLE001
+            pass
+        for team in self.teams.list():
+            if team.workspace:
+                roots.append(team.workspace)
+        for harness in self.agents.all():
+            spec = getattr(harness.session, "spec", None)
+            if spec is not None and spec.cwd:
+                roots.append(spec.cwd)
+        return roots
+
+    def publish_artifact(
+        self, sender: str, token: str | None, conversation_id: str,
+        source: str, name: str | None = None,
+    ) -> dict[str, Any]:
+        """Copy a cowork deliverable into a chat's outputs, tagged with producer.
+
+        The acting agent must be the chat's own lead or a member of its crew. The
+        source is read (never run) and must live under a known Cowork root, so a
+        compromised worker cannot exfiltrate files outside its scope.
+        """
+        import os as _os
+
+        from . import conversations
+
+        sender_h = self.agents.resolve(sender)
+        if not self.agent_in_conversation(sender_h.agent_id, token, conversation_id):
+            raise MessagingError("permission denied: not a member of this chat's crew")
+        src = _os.path.abspath(_os.path.expanduser(str(source or "")))
+        if not _os.path.isfile(src) or _os.path.islink(src):
+            raise conversations.ConversationError("source file not found")
+        real = _os.path.realpath(src)
+        roots = [_os.path.realpath(r) for r in self._cowork_roots() if r]
+        if not any(real == r or real.startswith(r + _os.sep) for r in roots):
+            raise conversations.ConversationError(
+                "the source is outside the allowed directories")
+        if _os.path.getsize(real) > conversations.max_bytes():
+            raise conversations.ConversationError("file too large")
+        with open(real, "rb") as fh:
+            data = fh.read()
+        info = conversations.store_artifact(
+            conversation_id, name or _os.path.basename(real), data)
+        conversations.set_producer(conversation_id, info["relpath"], sender_h.agent_id)
+        return {"artifact": info, "producer": sender_h.agent_id}
+
+    def set_conversation_team(
+        self, conversation_id: str, team: str | None,
+    ) -> dict[str, Any]:
+        """Attach/detach a chat's crew and move its live lead accordingly.
+
+        Without this the stored ``team`` and the lead's real membership drift:
+        an existing lead could not delegate until it was recreated.
+        """
+        from . import conversations
+
+        conv = conversations.get(conversation_id)
+        new_team = None
+        if team:
+            team_obj = self.teams.get(str(team))  # unknown team -> error
+            if team_obj.host:
+                raise conversations.ConversationError(
+                    "a remote team cannot be a chat's crew")
+            new_team = team_obj.team_id
+        lead = conv.get("agent_id")
+        old_team = self._team_or_none(conv.get("team"))
+        if lead and old_team is not None and old_team.team_id != new_team:
+            try:
+                self.teams.remove_member(old_team.team_id, str(lead))
+            except Exception:  # noqa: BLE001 - not a member anymore
+                pass
+        if lead and new_team:
+            try:
+                if str(lead) not in self.teams.get(new_team).agent_ids:
+                    self.teams.add_member(new_team, str(lead))
+            except (KeyError, TeamError):
+                pass  # the lead is not running here; it joins when created
+        meta = conversations.set_team(conversation_id, new_team)
+        self._persist()
+        return meta
+
+    def conversation_activity(
+        self, conversation_id: str, limit: int = 50
+    ) -> dict[str, Any]:
+        """The crew's in-flight handoffs/requests for a chat's activity strip."""
+        from . import conversations
+
+        conv = conversations.get(conversation_id)
+        members = self._team_members(conv.get("team"))
+        if conv.get("agent_id"):
+            members.add(str(conv["agent_id"]))
+        messages = [
+            m for m in self.messaging.history(limit=None)
+            if m.get("sender") in members or m.get("recipient") in members
+        ]
+        requests = [
+            r for r in self.list_requests(open_only=False)
+            if r.get("sender") in members or r.get("recipient") in members
+        ]
+        return {
+            "conversation_id": conversation_id,
+            "agent_id": conv.get("agent_id"),
+            "team": conv.get("team"),
+            "members": sorted(members),
+            "messages": messages[-limit:],
+            "requests": requests[-limit:],
+        }
 
     def message_history(
         self, *, agent: str | None = None, limit: int | None = None

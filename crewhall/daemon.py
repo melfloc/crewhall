@@ -7,6 +7,7 @@ import logging
 import os
 import signal
 import socket
+import struct
 import sys
 import threading
 import time
@@ -35,6 +36,26 @@ PERMISSION_WAIT_MAX = 540.0
 PERMISSION_GRACE = 30.0
 # How recently a Web UI must have polled to count as "watching".
 VIEWER_FRESH = 30.0
+
+# Ops an agent (or one of its tool subprocesses) is allowed to call. Everything
+# else is the *control plane*: it needs the control token and a caller that does
+# not descend from an agent session. ``request_cancel`` is special-cased: its
+# agent-authenticated form is an agent op, its operator form (no ``agent`` field)
+# is control plane.
+AGENT_OPS = frozenset({
+    "ping",
+    "agent_identity",
+    "team_send",
+    "team_members",
+    "team_new_session",
+    "agent_new_session",
+    "agent_hook",
+    "agent_permission_request",
+    "request_create",
+    "request_reply",
+    "request_cancel",
+    "conversation_publish",
+})
 
 log = logging.getLogger("crewhall.daemon")
 
@@ -73,6 +94,19 @@ def _dim(value: Any, name: str) -> int:
         raise ValueError(f"{name} must be between {MIN_DIM} and {MAX_DIM}")
     return number
 
+
+def _peer_pid(conn: socket.socket) -> int | None:
+    """PID of the process on the other end of a UNIX socket (Linux SO_PEERCRED)."""
+    so_peercred = getattr(socket, "SO_PEERCRED", None)
+    if so_peercred is None:
+        return None
+    try:
+        raw = conn.getsockopt(socket.SOL_SOCKET, so_peercred, struct.calcsize("3i"))
+        pid, _uid, _gid = struct.unpack("3i", raw)
+    except (OSError, struct.error):
+        return None
+    return pid or None
+
 class Server:
     def __init__(self, controller: Controller, socket_path: str) -> None:
         self.controller = controller
@@ -91,6 +125,11 @@ class Server:
         # Last time a Web UI was showing the agents (its live loop polls agent_list).
         self._viewer_seen = 0.0
         self._sock_ino: int | None = None
+        try:
+            self._control_token = paths.ensure_control_token()
+        except OSError:
+            log.exception("could not create the control token")
+            self._control_token = paths.load_control_token() or ""
 
     def _acquire_singleton_lock(self) -> bool:
         self._lock_fd = open(paths.lock_path(), "w")
@@ -246,19 +285,33 @@ class Server:
         from . import conversations
 
         try:
-            agent_id = conversations.get(conversation_id).get("agent_id")
+            meta = conversations.get(conversation_id)
         except Exception:  # noqa: BLE001
             return
+        # Route to the artifact's producer (a crew worker) when known, else to
+        # the conversation's own lead. Owner/group are not part of the segment.
+        agent_id = meta.get("agent_id")
+        try:
+            record = conversations.producers(conversation_id).get(path) or {}
+            agent_id = record.get("producer") or agent_id
+        except Exception:  # noqa: BLE001
+            pass
         if not agent_id:
             return
         label = "comentario" if kind == "comment" else "chat"
+        body = f"[OnlyOffice {label} · {user or 'user'} · {path}] {text}"
+        # No content-based idempotency key: the co-editor already forwards each
+        # chat message / comment id once (comment ids persist across reopens),
+        # and two identical texts ("ok", "sí") are two legitimate messages.
         try:
             harness = self.controller.get_agent(agent_id)
-            if not harness.state().usable:
+            if not harness.session.status.alive:
                 # The chat agent may be EXITED after a daemon restart: revive it
                 # so the user's message is not lost.
-                harness = self.controller.restart_agent(agent_id)
-            harness.send(f"[OnlyOffice {label} · {user or 'user'} · {path}] {text}")
+                self.controller.restart_agent(agent_id)
+            # Never inject directly: a WORKING agent, or one whose input holds a
+            # human draft, must queue the comment instead of dropping it.
+            self.controller.messaging.send_system(agent_id, body, origin="office")
         except Exception as exc:  # noqa: BLE001 - a busy/stopped agent must not crash the loop
             log.info("could not forward OnlyOffice %s to %s: %s", kind, agent_id, exc)
 
@@ -271,6 +324,7 @@ class Server:
                 pass
 
     def _handle(self, conn: socket.socket) -> None:
+        peer_pid = _peer_pid(conn)
         try:
             f = conn.makefile("rwb")
             for raw in f:
@@ -281,13 +335,106 @@ class Server:
                 except json.JSONDecodeError as exc:
                     response = {"ok": False, "error": f"bad json: {exc}"}
                 else:
-                    response = self.dispatch(request)
+                    denied = self._guard_origin(request, peer_pid)
+                    response = denied if denied is not None else self.dispatch(request)
                 f.write((json.dumps(response) + "\n").encode("utf-8"))
                 f.flush()
         except OSError:
             pass
         finally:
             conn.close()
+
+    def _caller_is_agent(self, peer_pid: int | None) -> bool:
+        """Whether the peer process looks like an agent or one of its tools.
+
+        Agents run as the same Unix user as the daemon, so file permissions alone
+        cannot separate them. Two signals are combined: the ``/proc`` ancestry
+        (the caller descends from a live agent TUI) and the caller's environment
+        (it still carries a live agent's ``CREWHALL_TOKEN``, which survives a
+        double fork that reparents it away from the agent).
+
+        This is **defense in depth, not an isolation boundary**: a process that
+        deliberately both escapes the tree (``setsid``/double fork) and scrubs
+        its environment can still read the 0600 control-token file, because it
+        runs as the same user. Real isolation needs the agent sandboxed away
+        from the state directory (see SECURITY.md).
+        """
+        if not peer_pid:
+            return False
+        try:
+            roots = self.controller.agent_root_pids()
+        except Exception:  # noqa: BLE001 - a broken registry is not proof
+            roots = set()
+        if roots:
+            from .processes import ancestors
+
+            if set(ancestors(peer_pid)) & roots:
+                return True
+        return self._environ_has_agent_token(peer_pid)
+
+    def _environ_has_agent_token(self, pid: int) -> bool:
+        try:
+            tokens = set(self.controller.agent_tokens())
+        except Exception:  # noqa: BLE001
+            return False
+        if not tokens:
+            return False
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as fh:
+                env = fh.read().split(b"\0")
+        except OSError:
+            return False
+        for entry in env:
+            name, _, value = entry.partition(b"=")
+            if name in (b"CREWHALL_TOKEN", b"AGENT_TERMINAL_TOKEN") and \
+                    value.decode("utf-8", "replace") in tokens:
+                return True
+        return False
+
+    # Office co-editing ops an agent may drive for its *own* chat (or a chat
+    # whose crew it belongs to). ``office_collab_list`` is excluded: it spans
+    # every conversation.
+    AGENT_OFFICE_OPS = frozenset({
+        "office_collab_open", "office_collab_read", "office_collab_command",
+        "office_collab_insert", "office_collab_save", "office_collab_close",
+        "office_collab_users", "office_collab_chat", "office_collab_say",
+        "office_collab_comments", "office_collab_comment_add",
+    })
+
+    def _agent_office_allowed(self, request: dict[str, Any]) -> bool:
+        """An agent drives OnlyOffice only for a chat it leads or crews."""
+        sender = request.get("sender")
+        conversation_id = request.get("id")
+        if not sender or not conversation_id:
+            return False
+        try:
+            return self.controller.agent_in_conversation(
+                str(sender), request.get("token"), str(conversation_id))
+        except Exception:  # noqa: BLE001 - bad identity/conversation: deny
+            return False
+
+    def _guard_origin(self, request: dict[str, Any], peer_pid: int | None) -> dict[str, Any] | None:
+        """Return a refusal, or None to let the request reach the dispatcher."""
+        op = request.get("op")
+        if not isinstance(op, str):
+            return None  # unknown op is reported by the dispatcher
+        allowed_for_agent = op in AGENT_OPS and not (
+            op == "request_cancel" and not request.get("agent")
+        )
+        if allowed_for_agent:
+            return None
+        if op in self.AGENT_OFFICE_OPS and request.get("sender"):
+            # Agent-authenticated co-editing (``crewhall office`` inside a chat).
+            if self._agent_office_allowed(request):
+                return None
+            return {"ok": False, "error": "permission denied: not this chat's agent or crew"}
+        if self._caller_is_agent(peer_pid):
+            return {"ok": False, "error": "the control plane is not available to agents"}
+        token = request.get("_control_token")
+        if not self._control_token or token != self._control_token:
+            return {"ok": False, "error": "control plane requires a valid control token"}
+        return None
+
 
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         from . import audit
@@ -307,6 +454,14 @@ class Server:
 
     def _dispatch(self, request: dict[str, Any], op: Any) -> dict[str, Any]:
         try:
+            # The co-editing ops are only registered when OnlyOffice is enabled;
+            # with it off they answer a stable "disabled" instead of loading the
+            # office stack at all.
+            if isinstance(op, str) and op.startswith("office_collab"):
+                from . import office
+
+                if not office.enabled():
+                    return {"ok": True, "disabled": True}
             handler = getattr(self, f"_op_{op}", None)
             if handler is None:
                 return {"ok": False, "error": f"unknown op {op!r}"}
@@ -495,12 +650,26 @@ class Server:
         return {"closed": closed}
 
     def _op_agent_create(self, request: dict[str, Any]) -> dict[str, Any]:
+        team = request.get("team")
+        if request.get("conversation") and not team:
+            # A chat with a crew: its lead joins the Team (isolation of its cwd is
+            # preserved by the controller). A remote team is not attached to a
+            # chat: its agent must run locally to keep the conversation workspace.
+            from . import conversations
+
+            try:
+                team = conversations.get(str(request["conversation"])).get("team")
+                team_obj = self.controller._team_or_none(team)
+                if team_obj is not None and team_obj.host:
+                    team = None
+            except Exception:  # noqa: BLE001 - unknown conversation/team: no crew
+                team = None
         harness = self.controller.create_agent(
             request["kind"],
             name=request.get("name"),
             backend=request.get("backend"),
             cwd=request.get("cwd"),
-            team=request.get("team"),
+            team=team,
             cols=_dim(request.get("cols", 120), "cols"),
             rows=_dim(request.get("rows", 40), "rows"),
             wait_ready=bool(request.get("wait_ready", False)),
@@ -604,8 +773,18 @@ class Server:
     def _op_conversation_create(self, request: dict[str, Any]) -> dict[str, Any]:
         from . import conversations
 
+        team = request.get("team") or None
+        if team:
+            # Store the stable team_id (a name can be renamed) and refuse a
+            # remote team: a chat's lead runs locally with its own workspace.
+            team_obj = self.controller.teams.get(str(team))
+            if team_obj.host:
+                raise conversations.ConversationError(
+                    "a remote team cannot be a chat's crew")
+            team = team_obj.team_id
         meta = conversations.create(
-            str(request.get("title") or ""), agent_id=request.get("agent_id"))
+            str(request.get("title") or ""), agent_id=request.get("agent_id"),
+            team=team)
         env = conversations.env(meta["id"])
         meta = {**meta, "dir": env["CREWHALL_CONVERSATION_DIR"],
                 "outputs": env["CREWHALL_OUTPUTS"], "inputs": env["CREWHALL_INPUTS"],
@@ -615,21 +794,26 @@ class Server:
     def _op_conversation_list(self, request: dict[str, Any]) -> dict[str, Any]:
         from . import conversations
 
-        items: list[dict[str, Any]] = []
-        for meta in conversations.list_all():
-            row = dict(meta)
-            row["inputs"] = len(conversations.list_files(meta["id"], "inputs"))
-            row["outputs"] = len(conversations.list_files(meta["id"], "outputs"))
-            agent = None
-            if meta.get("agent_id"):
-                try:
-                    agent = self.controller.agent_summary(
-                        self.controller.get_agent(meta["agent_id"]))
-                except Exception:  # noqa: BLE001 - a gone agent must not hide the chat
-                    agent = None
-            row["agent"] = agent
-            items.append(row)
-        return {"conversations": items}
+        return {"conversations": [self._conversation_row(m) for m in conversations.list_all()]}
+
+    def _conversation_row(self, meta: dict[str, Any]) -> dict[str, Any]:
+        """A conversation as list views show it: file counts, live agent, crew name."""
+        from . import conversations
+
+        row = dict(meta)
+        row["inputs"] = len(conversations.list_files(meta["id"], "inputs"))
+        row["outputs"] = len(conversations.list_files(meta["id"], "outputs"))
+        agent = None
+        if meta.get("agent_id"):
+            try:
+                agent = self.controller.agent_summary(
+                    self.controller.get_agent(meta["agent_id"]))
+            except Exception:  # noqa: BLE001 - a gone agent must not hide the chat
+                agent = None
+        row["agent"] = agent
+        team = self.controller._team_or_none(meta.get("team"))
+        row["team_name"] = team.name if team is not None else None
+        return row
 
     def _op_conversation_info(self, request: dict[str, Any]) -> dict[str, Any]:
         from . import conversations
@@ -656,6 +840,30 @@ class Server:
 
         return {"conversation": conversations.set_agent(
             str(request["id"]), request.get("agent_id"))}
+
+    def _op_conversation_set_team(self, request: dict[str, Any]) -> dict[str, Any]:
+        return {"conversation": self.controller.set_conversation_team(
+            str(request["id"]), request.get("team"))}
+
+    def _op_conversation_activity(self, request: dict[str, Any]) -> dict[str, Any]:
+        return self.controller.conversation_activity(
+            str(request["id"]), limit=int(request.get("limit", 50) or 50))
+
+    def _op_conversation_crew(self, request: dict[str, Any]) -> dict[str, Any]:
+        from . import conversations
+
+        team = str(request.get("team") or "")
+        if team:
+            metas = conversations.crew_conversations(self.controller.teams.get(team).team_id)
+        else:
+            metas = [m for m in conversations.list_all() if m.get("team")]
+        return {"conversations": [self._conversation_row(m) for m in metas]}
+
+    def _op_conversation_publish(self, request: dict[str, Any]) -> dict[str, Any]:
+        result = self.controller.publish_artifact(
+            request["sender"], request.get("token"), str(request["id"]),
+            str(request.get("source") or ""), request.get("name"))
+        return result
 
     def _op_conversation_delete(self, request: dict[str, Any]) -> dict[str, Any]:
         from . import conversations
@@ -881,6 +1089,8 @@ class Server:
         delivery = self.controller.send_message_as(
             request["sender"], request.get("token"),
             request["recipient"], request["body"],
+            idempotency_key=request.get("idempotency_key"),
+            message_id=request.get("message_id"),
         )
         return {"delivery": delivery.to_dict()}
 
@@ -955,7 +1165,9 @@ class Server:
 
     def _op_message_send(self, request: dict[str, Any]) -> dict[str, Any]:
         delivery = self.controller.send_message(
-            request["sender"], request["recipient"], request["body"]
+            request["sender"], request["recipient"], request["body"],
+            idempotency_key=request.get("idempotency_key"),
+            message_id=request.get("message_id"),
         )
         return {"delivery": delivery.to_dict()}
 
