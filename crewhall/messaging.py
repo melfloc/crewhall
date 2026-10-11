@@ -337,6 +337,10 @@ class Messaging:
         dedup_key: str | None,
     ) -> Delivery:
         delivery.queued = True
+        # A retryable first attempt (busy, human draft) is not an error: the
+        # message is waiting, so do not report the transient failure.
+        delivery.error = None
+        delivery.retryable = False
         delivery.expires_at = time.time() + ttl if ttl and ttl > 0 else None
         agent_id = recipient.agent_id
         with self._lock:

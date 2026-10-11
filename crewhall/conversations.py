@@ -264,6 +264,17 @@ usuario te escribió **dentro del editor**. Responde con:
 Los **comentarios** anclados llegan como `[OnlyOffice comentario · …] sobre
 "texto": …`; haz el cambio pedido sobre ese texto y responde por el chat o con
 un comentario.
+
+## Si este chat tiene crew (un Team de Cowork)
+`crewhall agent identity` muestra tu Team y tus compañeros. Puedes delegar con
+`crewhall message send --to <compañero> --message "…"`. Cuando delegues un
+entregable, incluye el id de esta conversación (`$CREWHALL_CONVERSATION`) y pide
+que lo publiquen aquí con:
+
+    crewhall chat publish --conversation <id> <archivo>
+
+Así aparece en los artefactos con su autor, y los comentarios del usuario sobre
+ese archivo le llegan directamente a quien lo produjo.
 """
 # The professional OnlyOffice SOP is appended so every chat agent reads it on
 # each turn; the full reference lives next to it as ONLYOFFICE.md (see below).

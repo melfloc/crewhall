@@ -369,11 +369,16 @@ function chatRenderTray(){
    Shows the handoffs/requests the chat's Cowork team is working on, so the user
    sees the team "behind" the chat without switching to Cowork. Tolerates
    system:* senders (OnlyOffice comments routed to the team). */
-function crewName(id){
+function crewName(id, name){
   if(!id) return "";
   if(String(id).startsWith("system:")) return String(id).slice(7);
+  // The chat's own lead is not in the Cowork agent list (chat agents are scoped out).
+  if(CHAT.info && id === CHAT.info.agent_id){
+    const lead = (CHAT.list.find(c => c.id === CHAT.active) || {}).agent;
+    return (lead && lead.name) || name || "lead";
+  }
   const a = (typeof agentById === "function") && agentById(id);
-  return (a && a.name) || id;
+  return (a && a.name) || name || id;
 }
 async function chatLoadActivity(force){
   const id = CHAT.active;
@@ -401,7 +406,7 @@ function chatRenderActivity(data){
     el("span", {className:"crew-status", textContent:status || ""}),
     el("span", {className:"crew-body", title:body || "", textContent:body || ""}));
   const rows = [
-    ...msgs.slice(-8).map(m => row(`${crewName(m.sender)} → ${crewName(m.recipient)}`, m.status, m.body)),
+    ...msgs.slice(-8).map(m => row(`${crewName(m.sender, m.sender_name)} → ${crewName(m.recipient, m.recipient_name)}`, m.status, m.body)),
     ...reqs.slice(-8).map(r => row(`${crewName(r.sender)} → ${crewName(r.recipient)}`, r.state, r.task)),
   ];
   box.replaceChildren(
@@ -438,10 +443,12 @@ function chatRenderArtifacts(){
       el("div", {className:"chat-art-sec-t"}, title, el("span", {className:"chip"}, String(files.length))),
       ...files.map(f => chatArtRow(f, isOutput)));
   };
-  body.replaceChildren(
-    ...([section("Outputs", outputs, true), section("Inputs", inputs, false)].filter(Boolean)),
+  // replaceChildren() renders a null argument as the text "null": filter it out.
+  body.replaceChildren(...[
+    section("Outputs", outputs, true), section("Inputs", inputs, false),
     !outputs.length && !inputs.length ? el("div", {className:"chat-empty"},
-      "No files yet. Ask the agent to create one — it lands in the outputs folder.") : null);
+      "No files yet. Ask the agent to create one — it lands in the outputs folder.") : null,
+  ].filter(Boolean));
 }
 function chatArtRow(f, isOutput){
   const url = `/api/conversation/artifact?id=${encodeURIComponent(CHAT.active)}&path=${encodeURIComponent(f.relpath)}`;

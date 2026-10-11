@@ -43,6 +43,7 @@ AUDITED = {
     "terminal_ws_open", "terminal_ws_close", "terminal_ws_mode",
     "web_terminal_token_issue", "web_terminal_token_revoke",
     "conversation_create", "conversation_rename", "conversation_delete",
+    "conversation_publish", "conversation_set_team",
     "conversation_artifact_delete", "conversation_artifact_download", "conversation_export",
     "office_collab_open", "office_collab_close", "office_collab_command",
     "office_collab_insert", "office_collab_say", "office_collab_comment_add",
@@ -215,6 +216,10 @@ def summarize(op: str, request: dict[str, Any], result: dict[str, Any] | None = 
         return f"target={request.get('target')}"
     if op == "agent_set_model":
         return f"target={request.get('target')} model={request.get('model') or 'picker'}"
+    if op == "conversation_publish":
+        return f"id={request.get('id')} sender={request.get('sender')} name={request.get('name') or '-'}"
+    if op == "conversation_set_team":
+        return f"id={request.get('id')} team={request.get('team') or '-'}"
     if op in ("message_send", "team_send"):
         return f"sender={request.get('sender')} recipient={request.get('recipient')}"
     if op.startswith("team_") and op not in ("team_send",):

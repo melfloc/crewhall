@@ -1416,6 +1416,16 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("target")
     t.set_defaults(func=cmd_terminal_attach)
 
+    p = sub.add_parser("chat", help="chat conversations (agent side)")
+    csub = p.add_subparsers(dest="chat_command", required=True)
+    c = csub.add_parser("publish", help="publish a file you produced as an artifact of a chat "
+                        "(you must lead it or be in its crew)")
+    c.add_argument("path", help="file to publish (copied, never moved)")
+    c.add_argument("--conversation", default=None,
+                   help="conversation id (default: $CREWHALL_CONVERSATION)")
+    c.add_argument("--name", default=None, help="artifact file name (default: the file's)")
+    c.set_defaults(func=cmd_chat_publish)
+
     p = sub.add_parser("office", help="OnlyOffice: install the Document Server and co-edit artifacts")
     osub = p.add_subparsers(dest="office_command", required=True)
     o = osub.add_parser("setup", help="install + run OnlyOffice and wire it to crewhall")
@@ -1801,6 +1811,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_ui)
 
     return parser
+
+
+def cmd_chat_publish(args: argparse.Namespace) -> int:
+    """Publish a file as an artifact of a chat (lead or crew member only)."""
+    sender = brand.env("AGENT_ID")
+    token = brand.env("TOKEN")
+    if not sender:
+        print("not inside an crewhall agent (CREWHALL_AGENT_ID unset)", file=sys.stderr)
+        return 2
+    cid = args.conversation or os.environ.get("CREWHALL_CONVERSATION")
+    if not cid:
+        print("error: --conversation is required (no $CREWHALL_CONVERSATION)", file=sys.stderr)
+        return 2
+    try:
+        res = _client(args).call(
+            "conversation_publish", sender=sender, token=token, id=cid,
+            source=os.path.abspath(args.path), name=args.name)
+    except RpcError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    artifact = res.get("artifact") or {}
+    print(f"published {artifact.get('relpath')} in {cid}")
+    return 0
 
 
 def cmd_office(args: argparse.Namespace) -> int:

@@ -82,6 +82,9 @@ class QueueOrdering(unittest.TestCase):
         delivery = messaging.send(a.agent_id, b.agent_id, "queued body", wait=0.2)
         self.assertTrue(delivery.queued, delivery.to_dict())
         self.assertFalse(delivery.delivered)
+        # Waiting behind a draft is not an error (the CLI printed one before).
+        self.assertIsNone(delivery.to_dict()["error"])
+        self.assertEqual(delivery.status, "queued")
         self.assertEqual(b.draft, "human is typing this")
         self.assertEqual(b.session.writes, [])  # nothing typed over the draft
         # The human finishes: the queue then delivers untouched.

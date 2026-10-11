@@ -116,6 +116,43 @@ class ChatCrew(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.controller.set_conversation_team(conv["id"], "nope")
 
+    def test_cli_chat_publish_uses_the_agent_identity(self) -> None:
+        import argparse
+
+        from crewhall import cli
+
+        src = os.path.join(self.workspace, "informe.md")
+        with open(src, "w") as fh:
+            fh.write("Informe de prueba\n")
+        calls = []
+
+        class _Client:
+            def call(self, op, **params):
+                calls.append((op, params))
+                return {"artifact": {"relpath": "informe.md"}}
+
+        env = {"CREWHALL_AGENT_ID": "worker-1", "CREWHALL_TOKEN": "tok",
+               "CREWHALL_CONVERSATION": self.conv["id"]}
+        args = argparse.Namespace(path=src, conversation=None, name=None, socket=None)
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(cli, "_client", lambda _a: _Client()):
+            self.assertEqual(cli.cmd_chat_publish(args), 0)
+        op, params = calls[0]
+        self.assertEqual(op, "conversation_publish")
+        self.assertEqual((params["sender"], params["token"], params["id"]),
+                         ("worker-1", "tok", self.conv["id"]))
+        self.assertEqual(params["source"], src)
+
+    def test_publish_and_crew_changes_are_audited(self) -> None:
+        from crewhall import audit
+
+        self.assertIn("conversation_publish", audit.AUDITED)
+        self.assertIn("conversation_set_team", audit.AUDITED)
+        summary = audit.summarize("conversation_publish", {
+            "id": "c-1", "sender": "w", "token": "SECRET", "source": "/x"})
+        self.assertIn("sender=w", summary)
+        self.assertNotIn("SECRET", summary)
+
 
 if __name__ == "__main__":
     unittest.main()
