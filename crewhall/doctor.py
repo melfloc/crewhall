@@ -128,6 +128,25 @@ def check_daemon() -> Check:
         return _res("daemon", "warn", f"unreachable: {exc}")
 
 
+def check_daemon_log() -> Check:
+    """Report the daemon log size and whether rotation is in effect."""
+    import glob
+
+    path = paths.log_path()
+    try:
+        total = os.path.getsize(path)
+    except OSError:
+        return _res("log", "ok", "no daemon.log yet")
+    rotated = glob.glob(path + ".*")
+    total += sum(os.path.getsize(p) for p in rotated if os.path.isfile(p))
+    size = f"{total / (1024 * 1024):.1f} MiB"
+    detail = f"{size} ({len(rotated)} rotated file(s))"
+    if len(rotated) == 0 and total > 64 * 1024 * 1024:
+        return _res("log", "warn", detail,
+                    "daemon.log looks unrotated; it rotates automatically at the configured size.")
+    return _res("log", "ok", detail)
+
+
 def check_web(port: int = 8765) -> list[Check]:
     from .client import Client, ping
     from .web import auth
@@ -346,7 +365,7 @@ def check_office() -> Check:
 CHECKS: list[Callable[[], Check | list[Check]]] = [
     check_python, check_install, check_tmux, check_agent_clis, check_agent_version_ranges,
     check_command_on_path, check_dirs,
-    check_tmpdir, check_hooks, check_daemon, check_web, check_office, check_security,
+    check_tmpdir, check_hooks, check_daemon, check_daemon_log, check_web, check_office, check_security,
     check_agent_configs, check_systemd, check_tailscale,
 ]
 

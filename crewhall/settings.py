@@ -152,6 +152,10 @@ def _static_schema() -> list[dict[str, Any]]:
           restart=True),
         s("maintenance.keep_backups", "maintenance", "int", 5, "Backups to keep",
           "Pre-update and pre-reset backups kept in the state directory.", min=1, max=100),
+        s("maintenance.log_max_mb", "maintenance", "int", 5, "Daemon log: size cap (MB)",
+          "daemon.log rotates once it reaches this size.", min=1, max=1024),
+        s("maintenance.log_backups", "maintenance", "int", 3, "Daemon log: rotated files",
+          "How many rotated daemon.log.N files are kept.", min=0, max=50),
         s("audit.retention_days", "audit", "int", 90, "Audit retention (days)",
           "Audit entries older than this are pruned as new ones are written (0 = keep forever).",
           min=0, max=3650),
@@ -621,7 +625,7 @@ def provider_risks(kind: str) -> list[str]:
     try:
         risks.extend(get_harness(kind).config_risks())
     except Exception:  # noqa: BLE001 - a broken provider must not hide the settings page
-        pass
+        pass  # noqa: BLE001 - justified boundary guard (B1)
     return risks
 
 
