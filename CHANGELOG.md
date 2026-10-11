@@ -5,6 +5,21 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.79.1] — 2026-10-11
+
+- **Validación de documentos OOXML (evita el “archivo corrupto” en MS Office).**
+  El callback guardaba sin comprobar lo que devolvía el Document Server, y al abrir
+  no se validaba el archivo. Ahora `office.py` **valida** que `.docx/.xlsx/.pptx`
+  (y `.odt/.ods/.odp`) sean un paquete ZIP real con `[Content_Types].xml`, su parte
+  principal y sin entradas corruptas (`.doc/.xls/.ppt` legacy deben ser OLE; `.pdf`
+  debe empezar por `%PDF`):
+  - **Al abrir** (config del editor / co-editor): un artefacto inválido se rechaza
+    con un aviso claro (HTTP 422 / error de op) en vez de corromperlo al editarlo.
+  - **Al guardar** (callback): si los bytes no son un documento válido se rechazan
+    **sin sobreescribir** la versión buena.
+  - La guía de agentes (`ONLYOFFICE.md`) documenta el error y su causa (crear
+    siempre con librería, nunca renombrar texto a `.docx`).
+
 ## [0.79.0] — 2026-10-11
 
 - **Agentes de chat profesionales con OnlyOffice.** Cada conversación recibe ahora,

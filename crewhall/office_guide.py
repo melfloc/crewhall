@@ -51,7 +51,7 @@ Para que un documento salga bien y se pueda co-editar sin sorpresas:
 GUIDE = """# OnlyOffice para agentes de crewhall — guía profesional
 
 > Léela antes de producir o editar un artefacto. Describe **cómo funciona esta
-> integración** y cómo sacarle el máximo partido con calidad de oficina.
+> integración** y cómo sacarle el máximo partido con calidad profesional.
 
 ## 1. Qué es OnlyOffice (y qué no)
 
@@ -250,6 +250,15 @@ pandoc informe.md -o "$CREWHALL_OUTPUTS/informe.docx"
   el cursor del agente. Para contenido formateado, escribe el archivo.
 - **“El DS no descarga el archivo.”** `office.base_url` debe ser alcanzable desde
   el contenedor (Tailscale o el gateway Docker); `crewhall doctor` lo verifica.
+- **“Microsoft Office dice que el archivo está corrupto.”** Un `.docx`/`.xlsx`/
+  `.pptx` **debe ser un paquete OOXML real**: un ZIP con `[Content_Types].xml` y su
+  parte principal (`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`).
+  Si creaste un archivo con extensión de Office pero con contenido que no lo es
+  (p. ej. Markdown renombrado a `.docx`), cualquier suite lo rechazará. crewhall
+  **valida al abrir y al guardar**: si el artefacto no es OOXML válido, abrirlo
+  falla con aviso (HTTP 422) y el guardado que devuelve el editor se **rechaza**
+  sin sobreescribir la versión buena. Crea siempre el archivo con una librería
+  real (paso 6), nunca renombrando texto.
 
 ## 11. Flujo recomendado, de principio a fin
 

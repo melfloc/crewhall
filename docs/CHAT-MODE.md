@@ -175,8 +175,13 @@ callbackUrl        = office.base_url  + /api/office/callback?id=..&path=..      
   - DS en otro host / Tailscale → la URL del tailnet de crewhall.
 - `document.key = md5(path:mtime:size)` para invalidar caché al guardar.
 - Config firmada con JWT HS256 (`office.jwt_secret`).
-- Callback: status 2/6 → descargar `body.url` → escribir en la ruta del
-  artefacto → 200 `{"error":0}`.
+- Callback: status 2/6 → descargar `body.url` → **validar OOXML** →
+  escribir en la ruta del artefacto → 200 `{"error":0}`. Si la validación falla
+  (error page, descarga truncada, texto renombrado a `.docx`), se responde
+  `{"error":1}` **sin sobreescribir** la versión buena.
+- Al abrir para editar, el artefacto también se valida (`.docx/.xlsx/.pptx` deben
+  ser ZIP con `[Content_Types].xml` y su parte principal; `.pdf` el magic `%PDF`);
+  si no, se rechaza con aviso en vez de corromperlo. (`office.validate_document`.)
 - Composición: `scripts/onlyoffice/docker-compose.yml` + documentación.
 
 ## Colaboración Nivel 3 (agente co-editor)

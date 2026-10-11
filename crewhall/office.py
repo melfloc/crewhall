@@ -14,9 +14,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import io
 import json
 import os
 import time
+import zipfile
 from typing import Any
 
 from . import settings
@@ -165,6 +167,87 @@ def document_type(name: str) -> tuple[str, str, bool]:
     doc_type = DOCUMENT_TYPES.get(ext, "word")
     file_type = FILE_TYPES.get(ext, "txt")
     return doc_type, file_type, ext in VIEW_ONLY
+
+
+# OOXML packages are ZIP containers with a content-types stream and one main part.
+# Legacy binary Office files are OLE/CFB compound files; PDFs have their own magic.
+_OOXML_MAIN = {
+    ".docx": "word/document.xml", ".docm": "word/document.xml",
+    ".xlsx": "xl/workbook.xml", ".xlsm": "xl/workbook.xml",
+    ".pptx": "ppt/presentation.xml", ".pptm": "ppt/presentation.xml",
+}
+_ODF = {".odt", ".ods", ".odp"}
+_OLE = {".doc", ".xls", ".ppt"}
+_ZIP_MAGIC = b"PK\x03\x04"
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+_PDF_MAGIC = b"%PDF-"
+
+
+def validate_document(name: str, data: bytes) -> tuple[bool, str]:
+    """Verify a saved/downloaded document is a well-formed file for its extension.
+
+    Guards against the classic failure where a non-OOXML payload (an error page, a
+    half-written download, or text renamed to ``.docx``) is stored and Microsoft
+    Office later reports the file as corrupt. Returns ``(ok, reason)``.
+
+    Text/CSV/other formats have nothing reliable to assert and pass through.
+    """
+    ext = os.path.splitext(str(name))[1].lower()
+    if not data:
+        return False, "empty file"
+    if ext in _OOXML_MAIN:
+        if not data.startswith(_ZIP_MAGIC):
+            return False, "not a ZIP/OOXML container"
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                names = set(zf.namelist())
+                if "[Content_Types].xml" not in names:
+                    return False, "missing [Content_Types].xml"
+                if _OOXML_MAIN[ext] not in names:
+                    return False, f"missing {_OOXML_MAIN[ext]}"
+                bad = zf.testzip()
+                if bad:
+                    return False, f"corrupt entry: {bad}"
+        except zipfile.BadZipFile:
+            return False, "unreadable ZIP"
+        return True, ""
+    if ext in _ODF:
+        if not data.startswith(_ZIP_MAGIC):
+            return False, "not a ZIP/ODF container"
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                names = set(zf.namelist())
+                if "content.xml" not in names:
+                    return False, "missing content.xml"
+                if zf.testzip():
+                    return False, "corrupt ODF entry"
+        except zipfile.BadZipFile:
+            return False, "unreadable ZIP"
+        return True, ""
+    if ext in _OLE:
+        # Legacy binary Office (.doc/.xls/.ppt): OLE/CFB compound file.
+        return (data.startswith(_OLE_MAGIC), "not an OLE document")
+    if ext == ".pdf":
+        return (data.startswith(_PDF_MAGIC), "not a PDF")
+    return True, ""  # text/csv/other formats: nothing reliable to assert
+
+
+def validate_file(path: str, max_bytes: int = 512 * 1024 * 1024) -> tuple[bool, str]:
+    """Validate the file on disk for its extension (bounded read)."""
+    try:
+        if os.path.getsize(path) > max_bytes:
+            return False, "file too large to validate"
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        return False, str(exc)
+    return validate_document(os.path.basename(path), data)
+
+
+def is_validatable(name: str) -> bool:
+    """Whether ``validate_document`` makes a meaningful assertion for this name."""
+    ext = os.path.splitext(str(name))[1].lower()
+    return ext in _OOXML_MAIN or ext in _ODF or ext in _OLE or ext == ".pdf"
 
 
 def download_token(conversation_id: str, relpath: str, *, ttl: float = DOWNLOAD_TTL) -> str:

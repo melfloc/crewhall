@@ -20,6 +20,21 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _minimal_docx() -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("[Content_Types].xml",
+                    '<?xml version="1.0"?><Types '
+                    'xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        zf.writestr("word/document.xml",
+                    '<?xml version="1.0"?><w:document '
+                    'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>')
+    return buf.getvalue()
+
+
 class ArtifactRoutes(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -79,7 +94,7 @@ class ArtifactRoutes(unittest.TestCase):
 
     def test_office_config_for_artifact(self):
         cid = conversations.create("chat")["id"]
-        conversations.write_artifact(cid, "doc.docx", b"x")
+        conversations.write_artifact(cid, "doc.docx", _minimal_docx())
         with urllib.request.urlopen(self._url(
                 f"/api/office/config?id={cid}&path=doc.docx")) as resp:
             import json
@@ -90,6 +105,50 @@ class ArtifactRoutes(unittest.TestCase):
         self.assertEqual(cfg["documentType"], "word")
         self.assertIn("/api/office/callback", cfg["editorConfig"]["callbackUrl"])
         self.assertTrue(cfg["document"]["url"].startswith("http://127.0.0.1"))
+
+    def test_office_config_refuses_a_non_ooxml_docx(self):
+        # A file named .docx that is not OOXML would corrupt/annoy any suite: refuse
+        # to open it instead of letting the editor save garbage.
+        cid = conversations.create("chat")["id"]
+        conversations.write_artifact(cid, "bad.docx", b"# not a zip at all")
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(self._url(f"/api/office/config?id={cid}&path=bad.docx"))
+        self.assertEqual(ctx.exception.code, 422)
+
+    def test_callback_keeps_the_good_file_when_the_saved_bytes_are_corrupt(self):
+        import json
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class Bad(BaseHTTPRequestHandler):
+            def log_message(self, *a):  # noqa: N802
+                pass
+
+            def do_GET(self):  # noqa: N802
+                body = b"<html>not a document</html>"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), Bad)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+
+        cid = conversations.create("chat")["id"]
+        good = _minimal_docx()
+        conversations.write_artifact(cid, "doc.docx", good)
+        body = json.dumps({
+            "status": 2, "url": f"http://127.0.0.1:{srv.server_address[1]}/out.docx",
+            "token": office.jwt_encode({"t": "cb"}),
+        }).encode()
+        req = urllib.request.Request(self._url(f"/api/office/callback?id={cid}&path=doc.docx"),
+                                     data=body, method="POST")
+        with urllib.request.urlopen(req) as resp:
+            out = json.loads(resp.read())
+        self.assertEqual(out.get("error"), 1)  # refused
+        saved = conversations.resolve(cid, "outputs", "doc.docx")
+        with open(saved, "rb") as fh:
+            self.assertEqual(fh.read(), good)  # the good artifact is intact
 
     def test_conversation_upload_route(self):
         cid = conversations.create("chat")["id"]

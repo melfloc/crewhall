@@ -622,6 +622,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(str(exc), 404)
         if not os.path.isfile(path):
             return self._error("artifact not found", 404)
+        ok, why = office.validate_file(path)
+        if not ok:
+            ext = os.path.splitext(path)[1]
+            return self._error(
+                f"this artifact is not a valid {ext} file ({why}); regenerate it before "
+                "opening it in the editor", 422)
         base = office.base_url(self._request_base())
         if not base:
             return self._error("office.base_url is not configured", 409)
@@ -667,12 +673,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": 1})
         if len(data) > cap:
             return self._json({"error": 1})
+        # Never overwrite a good artifact with a corrupt one: OnlyOffice can return
+        # an error page or a truncated file instead of the document. A valid OOXML
+        # is required so Microsoft Office (and any other suite) can open it.
+        name = os.path.basename(path)
+        ok, why = office.validate_document(name, data)
+        if not ok:
+            audit.record("conversation_artifact_download", actor="onlyoffice", result="rejected",
+                         summary=f"id={cid} saved={name} reason={why}")
+            return self._json({"error": 1})
         try:
             conversations.write_artifact(cid, rel, data)
         except conversations.ConversationError:
             return self._json({"error": 1})
         audit.record("conversation_artifact_download", actor="onlyoffice", result="ok",
-                     summary=f"id={cid} saved={os.path.basename(path)}")
+                     summary=f"id={cid} saved={name}")
         return self._json({"error": 0})
 
     def _office_token_ok(self, body: dict[str, Any]) -> bool:

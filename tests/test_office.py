@@ -221,5 +221,60 @@ class Lifecycle(unittest.TestCase):
         self.assertIn("office_start", ALLOWED_OPS)
 
 
+class Validate(unittest.TestCase):
+    @staticmethod
+    def _docx() -> bytes:
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("[Content_Types].xml", "<Types/>")
+            zf.writestr("word/document.xml", "<w:document/>")
+        return buf.getvalue()
+
+    def test_valid_ooxml_passes(self):
+        ok, why = office.validate_document("a.docx", self._docx())
+        self.assertTrue(ok, why)
+        self.assertFalse(office.validate_document("a.docx", self._docx())[1])
+
+    def test_markdown_renamed_docx_is_refused(self):
+        ok, why = office.validate_document("a.docx", b"# just markdown")
+        self.assertFalse(ok)
+        self.assertIn("ZIP", why)
+
+    def test_missing_main_part_is_refused(self):
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("[Content_Types].xml", "<Types/>")
+        ok, why = office.validate_document("a.xlsx", buf.getvalue())
+        self.assertFalse(ok)
+        self.assertIn("xl/workbook.xml", why)
+
+    def test_empty_is_refused(self):
+        self.assertFalse(office.validate_document("a.docx", b"")[0])
+
+    def test_pdf_and_legacy_office_magic(self):
+        self.assertTrue(office.validate_document("a.pdf", b"%PDF-1.7\n")[0])
+        self.assertFalse(office.validate_document("a.pdf", self._docx())[0])
+        ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 8
+        self.assertTrue(office.validate_document("a.doc", ole)[0])
+        self.assertFalse(office.validate_document("a.doc", b"not ole")[0])
+
+    def test_text_and_unknown_formats_pass(self):
+        self.assertTrue(office.validate_document("a.txt", b"hello")[0])
+        self.assertTrue(office.validate_document("a.csv", b"a,b\n1,2\n")[0])
+        self.assertTrue(office.validate_document("a.xyz", b"\x00\x01")[0])
+
+    def test_is_validatable(self):
+        for name in ("a.docx", "a.xlsx", "a.pptx", "a.odt", "a.doc", "a.pdf"):
+            self.assertTrue(office.is_validatable(name), name)
+        for name in ("a.txt", "a.md", "a.csv", "a.png"):
+            self.assertFalse(office.is_validatable(name), name)
+
+
 if __name__ == "__main__":
     unittest.main()

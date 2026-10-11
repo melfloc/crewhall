@@ -678,6 +678,10 @@ class Server:
         cid = str(request["id"])
         rel = str(request.get("path") or "")
         path = conversations.resolve(cid, "outputs", rel)
+        ok, why = office.validate_file(path)
+        if not ok:
+            raise ValueError(f"the artifact is not a valid {os.path.splitext(path)[1]} file "
+                             f"({why}); regenerate it before co-editing it")
         base = office.base_url(str(request.get("base") or ""))
         if not base:
             raise ValueError("office.base_url (or web.public_url) must be set "
