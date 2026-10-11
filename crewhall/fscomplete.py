@@ -52,10 +52,10 @@ def _resolve_roots(roots: list[str] | None) -> list[str] | None:
 
 def _within(path: str, roots: list[str]) -> bool:
     real = os.path.realpath(path)
-    for root in roots:
-        if real == root or real.startswith(root.rstrip(os.sep) + os.sep):
-            return True
-    return False
+    return any(
+        real == root or real.startswith(root.rstrip(os.sep) + os.sep)
+        for root in roots
+    )
 
 
 def complete(prefix: str | None, *, roots: list[str] | None = None,

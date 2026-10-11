@@ -16,6 +16,7 @@ Steps (any failure leaves the running installation untouched):
 """
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -237,10 +238,8 @@ def backup_before_update() -> str | None:
     dest = os.path.join(d, f"pre-update-{time.strftime('%Y%m%d-%H%M%S')}.tar.gz")
     out = bundle.export_bundle(dest, with_state=True)
     for name in sorted(n for n in os.listdir(d) if n.startswith("pre-update-"))[:-_keep()]:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(os.path.join(d, name))
-        except OSError:
-            pass
     return dest if out["files"] else None
 
 
@@ -300,12 +299,10 @@ def restart_daemon(prefix: str, expect_version: str, *, force: bool, log: Log) -
     check_restart_allowed(force)
     if ping():
         log("stopping the daemon…")
-        try:
+        with contextlib.suppress(Exception):
             # Never kill tmux-backed agents: the new daemon re-adopts them, so an
             # update stops the control plane without losing the running work.
             Client(autostart=False).call("shutdown", kill_agents=False)
-        except Exception:  # noqa: BLE001
-            pass  # noqa: BLE001 - justified boundary guard (B1)
         deadline = time.monotonic() + 20
         while ping() and time.monotonic() < deadline:
             time.sleep(0.2)
@@ -389,10 +386,8 @@ def apply(source: str, *, restart: bool = False, force: bool = False,
             except UpdateError as exc:
                 log(f"restart failed ({exc}); rolling back")
                 _swap_back(prefix)
-                try:
+                with contextlib.suppress(UpdateError):
                     restart_daemon(prefix, __version__, force=True, log=log)
-                except UpdateError:
-                    pass
                 raise UpdateError(f"update rolled back to {__version__}: {exc}") from exc
         else:
             result["restart_pending"] = bool(daemon_version() and daemon_version() != manifest["version"])

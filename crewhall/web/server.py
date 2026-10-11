@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import secrets
 import socket
@@ -14,6 +15,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from ..client import Client, RpcError, ensure_daemon
 from . import auth, terminal_tokens, totp, webauthn, ws
+import contextlib
 
 # Terminal ops that need a write scope vs a read scope.
 TERMINAL_WRITE_OPS = {
@@ -1299,10 +1301,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", accept)
         self.end_headers()
-        try:
+        with contextlib.suppress(OSError, ValueError):
             self._ws_loop()
-        except (OSError, ValueError):
-            pass
 
     # -- terminal WebSocket ------------------------------------------------
     def _terminal_context(self, terminal_id: str):
@@ -1455,10 +1455,8 @@ class Handler(BaseHTTPRequestHandler):
                              "terminal_id": terminal_id, "host": info.get("host"),
                              "token_id": token_id, "duration": round(time.time() - started, 1),
                              "in_bytes": counters["in"], "out_bytes": counters["out"]}, {}))
-            try:
+            with contextlib.suppress(OSError):
                 self.connection.close()
-            except OSError:
-                pass
 
     def _consume_ticket(self, ticket: str, terminal_id: str, session: str | None,
                         origin: str) -> dict[str, Any] | None:
@@ -1510,10 +1508,8 @@ class Handler(BaseHTTPRequestHandler):
         last_activity = time.monotonic()
 
         def close_with(code: int) -> None:
-            try:
+            with contextlib.suppress(OSError):
                 send_raw(ws.encode_close(code))
-            except OSError:
-                pass
 
         while True:
             if idle_timeout and time.monotonic() - last_activity >= idle_timeout:
@@ -1635,10 +1631,8 @@ class Handler(BaseHTTPRequestHandler):
                 except (ValueError, IndexError):
                     opcode, payload = None, b""
                 if opcode == 8:
-                    try:
+                    with contextlib.suppress(OSError):
                         sock.sendall(ws.encode_close())
-                    except OSError:
-                        pass
                     return
                 if opcode == 1:
                     try:
@@ -1745,7 +1739,6 @@ class _TrackingHTTPServer(ThreadingHTTPServer):
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         """A client vanishing mid-request is routine: one log line, not a traceback."""
-        import logging
         import sys
 
         exc = sys.exc_info()[1]
@@ -1758,14 +1751,10 @@ class _TrackingHTTPServer(ThreadingHTTPServer):
         with self._clients_lock:
             clients, self._clients = list(self._clients), set()
         for sock in clients:
-            try:
+            with contextlib.suppress(OSError):
                 sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            try:
+            with contextlib.suppress(OSError):
                 sock.close()
-            except OSError:
-                pass
 
 
 class WebServer:

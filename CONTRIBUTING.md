@@ -19,7 +19,16 @@ The rules below are the project's contract; they are enforced by review and CI.
 
 - Python ≥ 3.11, no runtime dependencies (`dependencies = []`).
 - Tests: `python -m unittest discover` **from the repository root**.
-- Lint: `ruff check crewhall tests scripts` (must pass).
+- Lint: `ruff check crewhall tests scripts` (must pass). Install it with
+  `python -m pip install ruff` (or `pipx install ruff`). The active rule set is
+  in `pyproject.toml` (`E`, `F`, `W`, `B` bugbear, `UP`, `BLE` blind-except,
+  `SIM`). A new blind `except Exception` needs an explicit `# noqa: BLE001`
+  with a reason.
+- Types: `mypy` runs in CI (`python -m pip install mypy`); the strict scope is
+  `messaging`, `team`, `requests`, `harness/*` and `persistence`, the rest of
+  the package is checked non-strict.
+- Coverage: `coverage run -m unittest discover && coverage report` (CI enforces
+  the thresholds in `.github/workflows/ci.yml`; `python -m pip install coverage`).
 - Agents/adapters: read `ADAPTERS.md`; a new adapter is not done until the
   **contract kit** (`tests/adapter_contract.py`) passes and a real run is
   documented in `ADAPTERS.md` §8. Scaffold with

@@ -21,6 +21,7 @@ import time
 from typing import Any
 
 from . import office_guide, paths, settings
+import contextlib
 
 # An artifact/input name is reduced to a safe basename; an oversized extension
 # is not an extension.
@@ -97,10 +98,8 @@ def _save(data: dict[str, Any]) -> None:
             os.fsync(fh.fileno())
         os.replace(tmp, path)
     except OSError as exc:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise ConversationError(str(exc)) from exc
 
 
@@ -194,10 +193,8 @@ def _write_new(directory: str, name: str, data: bytes) -> dict[str, Any]:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
     except OSError as exc:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(path)
-        except OSError:
-            pass
         raise ConversationError(str(exc)) from exc
     return {"name": os.path.basename(path), "size": len(data),
             "kind": kind_of(path), "path": path}
@@ -215,10 +212,8 @@ def _atomic_write(path: str, data: bytes) -> None:
             os.fsync(fh.fileno())
         os.replace(tmp, path)
     except OSError as exc:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise ConversationError(str(exc)) from exc
 
 

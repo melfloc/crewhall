@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from . import paths
+import contextlib
 
 FILENAME = "audit.jsonl"
 MAX_BYTES = 5 * 1024 * 1024
@@ -70,14 +71,10 @@ def _rotate_locked() -> None:
     for index in range(KEEP - 1, 0, -1):
         src, dst = f"{path}.{index}", f"{path}.{index + 1}"
         if os.path.exists(src):
-            try:
+            with contextlib.suppress(OSError):
                 os.replace(src, dst)
-            except OSError:
-                pass
-    try:
+    with contextlib.suppress(OSError):
         os.replace(path, f"{path}.1")
-    except OSError:
-        pass
 
 
 def _prune_locked() -> None:

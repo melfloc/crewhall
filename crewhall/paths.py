@@ -3,13 +3,12 @@ from __future__ import annotations
 import os
 
 from . import brand
+import contextlib
 
 
 def _makedirs(path: str) -> None:
-    try:
+    with contextlib.suppress(FileExistsError):
         os.makedirs(path, mode=0o700, exist_ok=True)
-    except FileExistsError:
-        pass
 
 
 def _dir_writable(path: str) -> bool:
@@ -211,7 +210,7 @@ def control_token_path() -> str:
 def load_control_token() -> str | None:
     """Read the control token, or None if it has not been created yet."""
     try:
-        with open(control_token_path(), "r", encoding="utf-8") as fh:
+        with open(control_token_path(), encoding="utf-8") as fh:
             token = fh.read().strip()
     except OSError:
         return None
@@ -248,10 +247,8 @@ def ensure_control_token() -> str:
             os.replace(tmp, path)
         return load_control_token() or ""
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
 
 
 def project_root() -> str:

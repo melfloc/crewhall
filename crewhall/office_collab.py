@@ -27,6 +27,7 @@ import urllib.request
 from typing import Any
 
 from . import settings
+import contextlib
 
 CANDIDATES = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
               "chrome", "brave-browser", "microsoft-edge")
@@ -170,10 +171,8 @@ class _WsClient:
                 raise CollabError("CDP connection closed")
 
     def close(self) -> None:
-        try:
+        with contextlib.suppress(OSError):
             self.sock.close()
-        except OSError:
-            pass
 
 
 class CoEditor:
@@ -434,10 +433,8 @@ class CoEditor:
                 self.proc.terminate()
                 self.proc.wait(timeout=5)
             except (subprocess.TimeoutExpired, OSError):
-                try:
+                with contextlib.suppress(OSError):
                     self.proc.kill()
-                except OSError:
-                    pass
         self.proc = None
         shutil.rmtree(self.profile, ignore_errors=True)
 

@@ -112,10 +112,8 @@ def _exclusive(path: str) -> Iterator[None]:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:
-        try:
+        with contextlib.suppress(OSError):
             fcntl.flock(fd, fcntl.LOCK_UN)
-        except OSError:
-            pass
         fd.close()
 
 

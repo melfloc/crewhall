@@ -5,6 +5,7 @@ import time
 from .control import ControlPort
 from .model import AppModel, translate_sequence
 from .view import render, session_viewport
+import contextlib
 
 _PAIRS = {
     "title": ("yellow", True),
@@ -108,10 +109,8 @@ def run(
                     if column >= width - 1:
                         break
                     chunk = text[: width - 1 - column]
-                    try:
+                    with contextlib.suppress(curses.error):
                         stdscr.addstr(index, column, chunk, attrs.get(style, 0))
-                    except curses.error:
-                        pass
                     column += len(chunk)
             stdscr.refresh()
 

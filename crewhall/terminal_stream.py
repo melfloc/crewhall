@@ -26,6 +26,7 @@ import threading
 import time
 
 from .web import ws as wsmod
+import contextlib
 
 log = logging.getLogger("crewhall.terminal_stream")
 
@@ -194,14 +195,10 @@ class LocalPipeSource(_PipeSource):
             self._run("pipe-pane", "-t", self.pane)
         except Exception:  # noqa: BLE001 - closing a dead source is a no-op
             log.debug("could not stop pipe-pane for %s", self.pane, exc_info=True)
-        try:
+        with contextlib.suppress(OSError):
             os.close(self.fd)
-        except OSError:
-            pass
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(self.fifo)
-        except OSError:
-            pass
 
 
 REMOTE_SCRIPT = r'''

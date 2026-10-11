@@ -7,6 +7,7 @@ import sys
 from typing import Any
 
 from . import brand, paths
+import contextlib
 
 UNIT_NAME, WEB_UNIT_NAME = brand.SYSTEMD_UNITS
 
@@ -62,10 +63,8 @@ def install_web(*, host: str = "127.0.0.1", port: int = 8765, tailscale: bool = 
 
 def uninstall_web() -> dict[str, Any]:
     _systemctl("disable", "--now", WEB_UNIT_NAME)
-    try:
+    with contextlib.suppress(FileNotFoundError):
         os.unlink(web_unit_path())
-    except FileNotFoundError:
-        pass
     _systemctl("daemon-reload")
     return {"unit_path": web_unit_path(), "removed": True}
 
@@ -111,10 +110,8 @@ def _retire_legacy_units() -> None:
         path = os.path.join(unit_dir(), name)
         if os.path.exists(path):
             _systemctl("disable", "--now", name)
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(path)
-            except OSError:
-                pass
 
 
 def install() -> dict[str, Any]:
@@ -134,10 +131,8 @@ def install() -> dict[str, Any]:
 
 def uninstall() -> dict[str, Any]:
     _systemctl("disable", "--now", UNIT_NAME)
-    try:
+    with contextlib.suppress(FileNotFoundError):
         os.unlink(unit_path())
-    except FileNotFoundError:
-        pass
     _systemctl("daemon-reload")
     return {"unit_path": unit_path(), "removed": True}
 

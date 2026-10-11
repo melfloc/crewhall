@@ -83,9 +83,9 @@ def claude_snapshot(session_id: str | None, host: dict[str, Any] | None = None) 
         except ValueError:
             continue
         message = entry.get("message") or {}
-        if entry.get("type") == "assistant":
-            if message.get("model") and not str(message["model"]).startswith("<"):
-                model = message["model"]
+        if entry.get("type") == "assistant" and message.get("model") \
+                and not str(message["model"]).startswith("<"):
+            model = message["model"]
         content = message.get("content")
         if not isinstance(content, list):
             continue

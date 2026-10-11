@@ -8,6 +8,7 @@ import sys
 import tempfile
 
 from .. import paths
+import contextlib
 
 
 def mcp_command() -> list[str]:
@@ -17,10 +18,8 @@ def mcp_command() -> list[str]:
 def _private_dir() -> str:
     path = os.path.join(paths.state_dir(), "mcp")
     os.makedirs(path, mode=0o700, exist_ok=True)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(path, 0o700)
-    except OSError:
-        pass
     return path
 
 
@@ -48,7 +47,5 @@ def codex_args() -> list[str]:
 def cleanup(path: str | None) -> None:
     if not path:
         return
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(path)
-    except OSError:
-        pass

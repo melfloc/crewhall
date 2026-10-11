@@ -1307,10 +1307,10 @@ def cmd_demo(args: argparse.Namespace) -> int:
     from .backends import get_backend
 
     backend_name = args.backend
-    if backend_name == "all":
-        names = [b for b in available() if b != "ssh-tmux"]
-    else:
-        names = [backend_name]
+    names = (
+        [b for b in available() if b != "ssh-tmux"]
+        if backend_name == "all" else [backend_name]
+    )
     for name in names:
         print(f"=== backend: {name} ===")
         session = None

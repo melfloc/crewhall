@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from . import paths
+import contextlib
 
 log = logging.getLogger("crewhall.persistence")
 
@@ -225,10 +226,8 @@ class HistoryStore:
             try:
                 os.makedirs(os.path.dirname(self.path), exist_ok=True)
                 with open(self.path, "a", encoding="utf-8") as fh:
-                    try:
+                    with contextlib.suppress(OSError):
                         os.fchmod(fh.fileno(), 0o600)
-                    except OSError:
-                        pass
                     fh.write(line + "\n")
                 self._lines += 1
             except OSError as exc:

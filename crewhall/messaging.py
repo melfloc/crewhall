@@ -10,6 +10,7 @@ from typing import Any
 
 from .harness import AgentState, Harness
 from .harness.base import HarnessNotReady
+import contextlib
 
 log = logging.getLogger("crewhall.messaging")
 
@@ -442,11 +443,9 @@ class Messaging:
                     try:
                         self._revive(harness)
                     except Exception:  # noqa: BLE001
-                        pass  # noqa: BLE001 - justified boundary guard (B1)
-                    try:
+                        log.debug("ignored exception in a boundary guard", exc_info=True)
+                    with contextlib.suppress(KeyError):
                         harness = self._registry.resolve(agent_id)
-                    except KeyError:
-                        pass
                 if self._terminal(harness):
                     self._drop(agent_id, delivery, error="recipient not usable")
                     continue
@@ -654,7 +653,7 @@ class Messaging:
             try:
                 self._history_store.append(delivery.to_dict())
             except Exception:  # noqa: BLE001 - history must never break delivery
-                pass  # noqa: BLE001 - justified boundary guard (B1)
+                log.debug("ignored exception in a boundary guard", exc_info=True)
 
     def _lock_for(self, agent_id: str) -> threading.Lock:
         with self._lock:
@@ -679,7 +678,7 @@ class Messaging:
         """Queue contents, in order, for persistence across a daemon restart."""
         with self._lock:
             items = []
-            for agent_id, queue in self._queues.items():
+            for queue in self._queues.values():
                 for delivery in queue:
                     items.append({
                         "message_id": delivery.message.message_id,
@@ -705,7 +704,7 @@ class Messaging:
             try:
                 self._store.save(self.snapshot())
             except Exception:  # noqa: BLE001 - persistence must never break delivery
-                pass  # noqa: BLE001 - justified boundary guard (B1)
+                log.debug("ignored exception in a boundary guard", exc_info=True)
 
     def load(self, items: list[dict[str, Any]], now: float | None = None) -> int:
         """Resume persisted pending messages (drops those already expired)."""

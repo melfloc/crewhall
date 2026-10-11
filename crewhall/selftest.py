@@ -16,6 +16,7 @@ from typing import Any
 from collections.abc import Callable
 
 from .client import Client, RpcError, ping
+import contextlib
 
 Log = Callable[[str], None]
 
@@ -97,15 +98,11 @@ def run(cwd: str, kinds: list[str] | None = None, quick: bool = False, log: Log 
     finally:
         with report.step("cleanup (agents and team removed)"):
             for name in created:
-                try:
+                with contextlib.suppress(RpcError):
                     client.call("agent_stop", target=name)
-                except RpcError:
-                    pass
             for tid in team_id:
-                try:
+                with contextlib.suppress(RpcError):
                     client.call("team_remove", target=tid)
-                except RpcError:
-                    pass
             left = [a["name"] for a in client.call("agent_list")["agents"] if a["name"] in created]
             _expect(not left, f"agents left behind: {left}")
             teams_left = [t["name"] for t in client.call("team_list")["teams"] if t["name"] == team]

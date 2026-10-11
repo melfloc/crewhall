@@ -23,6 +23,7 @@ import time
 from typing import Any
 
 from . import bundle, paths, settings
+import contextlib
 
 LEVELS = ("clean", "services", "full")
 CONFIRM_WORD = "RESET"
@@ -86,10 +87,8 @@ def _backup() -> str | None:
     out = bundle.export_bundle(dest, with_state=True)
     keep = int(settings.get("maintenance.keep_backups"))
     for name in sorted(n for n in os.listdir(d) if n.startswith("pre-reset-"))[:-keep]:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(os.path.join(d, name))
-        except OSError:
-            pass
     return dest if out["files"] else None
 
 

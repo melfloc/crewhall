@@ -22,6 +22,7 @@ import re
 import signal as _signal
 import time
 from typing import Any
+import contextlib
 
 class ProcessError(ValueError):
     pass
@@ -182,10 +183,8 @@ def agent_processes(root: int, *, running_tools: dict[str, dict[str, Any]] | Non
         task = _TASK_FILE.search(info["stdout"] or "")
         if task:
             entry["output"] = {"kind": "file", "task": task.group(1)}
-            try:
+            with contextlib.suppress(OSError):
                 entry["last_output_ago"] = round(wall - os.stat(info["stdout"]).st_mtime, 1)
-            except OSError:
-                pass
         entries.append(entry)
     if running_tools is not None:
         _match_tools([e for e in entries if "output" not in e], running_tools)

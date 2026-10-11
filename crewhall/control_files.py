@@ -30,6 +30,7 @@ import time
 from dataclasses import dataclass
 
 from . import brand, paths
+import contextlib
 
 log = logging.getLogger("crewhall.control_files")
 
@@ -187,10 +188,8 @@ def _backup(real: str, data: bytes) -> None:
         fh.write(data)
     olds = sorted(os.listdir(d))
     for name in olds[:-KEEP_BACKUPS]:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(os.path.join(d, name))
-        except OSError:
-            pass
 
 
 def _atomic_replace(real: str, data: bytes) -> None:
@@ -209,10 +208,8 @@ def _atomic_replace(real: str, data: bytes) -> None:
             pass
         os.replace(tmp, real)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 
@@ -306,10 +303,7 @@ def _ensure_locked(path: str, real: str, exists: bool) -> ControlFileResult | No
         return ControlFileResult(path, created=False, updated=True, unchanged=False)
 
     # First injection: strictly append at the end of the file.
-    if original.endswith(nl) or not original:
-        sep = nl if original else b""
-    else:
-        sep = nl + nl
+    sep = (nl if original else b"") if (original.endswith(nl) or not original) else nl + nl
     addition = sep + section + nl
     _backup(real, original)
     with open(real, "ab") as fh:  # O_APPEND: existing bytes are never rewritten

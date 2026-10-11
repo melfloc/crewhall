@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from .. import brand
+import contextlib
 
 # Access token + optional session cookies for the Web UI. Secrets live in a
 # dedicated credentials file (0600), never in StateStore, logs, AgentInfo or
@@ -26,10 +27,8 @@ COOKIE_NAME = "at_session"
 def _config_dir() -> str:
     path = brand.config_dir()
     os.makedirs(path, mode=0o700, exist_ok=True)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(path, 0o700)
-    except OSError:
-        pass
     return path
 
 
@@ -44,10 +43,8 @@ def _write_private(path: str, data: str) -> None:
         os.write(fd, data.encode("utf-8"))
     finally:
         os.close(fd)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(path, 0o600)
-    except OSError:
-        pass
     _ = directory
 
 
@@ -309,9 +306,8 @@ def verify_session(value: str | None) -> bool:
 def authenticate(headers: Any) -> bool:
     """Validate an incoming request: Bearer token OR signed session cookie."""
     auth = headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        if verify_token(auth[7:].strip()):
-            return True
+    if auth.startswith("Bearer ") and verify_token(auth[7:].strip()):
+        return True
     cookie = headers.get("Cookie", "")
     for part in cookie.split(";"):
         name, _, value = part.strip().partition("=")

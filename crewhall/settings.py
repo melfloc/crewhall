@@ -26,6 +26,7 @@ import time
 from typing import Any
 
 from . import brand
+import contextlib
 
 log = logging.getLogger("crewhall.settings")
 
@@ -439,10 +440,8 @@ def _normalize(raw: Any) -> dict[str, Any]:
         group, _, name = item["key"].partition(".")
         node = raw.get(group)
         if isinstance(node, dict) and name in node:
-            try:
+            with contextlib.suppress(SettingsError):
                 data.setdefault(group, {})[name] = _validate(item, node[name])
-            except SettingsError:
-                pass
     providers = raw.get("providers") if isinstance(raw.get("providers"), dict) else {}
     for kind in _kinds():
         node = providers.get(kind)
@@ -450,10 +449,8 @@ def _normalize(raw: Any) -> dict[str, Any]:
             continue
         for field in provider_defaults(kind):
             if field in node:
-                try:
+                with contextlib.suppress(SettingsError):
                     data.setdefault("providers", {}).setdefault(kind, {})[field] = _provider_value(field, node[field], kind)
-                except SettingsError:
-                    pass
     hosts_raw = raw.get("hosts")
     if isinstance(hosts_raw, dict):
         for name, body in hosts_raw.items():
@@ -625,7 +622,7 @@ def provider_risks(kind: str) -> list[str]:
     try:
         risks.extend(get_harness(kind).config_risks())
     except Exception:  # noqa: BLE001 - a broken provider must not hide the settings page
-        pass  # noqa: BLE001 - justified boundary guard (B1)
+        log.debug("ignored exception in a boundary guard", exc_info=True)
     return risks
 
 

@@ -25,6 +25,7 @@ from .messaging import MessagingError
 from .session import SessionTimeout
 from .team import TeamError, TeamNotFound
 from .types import SessionSpec
+import contextlib
 
 # How long a Claude permission dialog waits for a Web UI answer before Claude
 # shows it in the TUI (the hook's own timeout is hooks.PERMISSION_HOOK_TIMEOUT).
@@ -163,10 +164,8 @@ class Server:
         except OSError:
             return False
         old, self._lock_fd = self._lock_fd, fresh
-        try:
+        with contextlib.suppress(OSError):
             old.close()
-        except OSError:
-            pass
         return True
 
     def serve_forever(self) -> None:
@@ -179,10 +178,8 @@ class Server:
                      self.socket_path)
             return
         if os.path.exists(self.socket_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(self.socket_path)
-            except OSError:
-                pass
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             self._sock.bind(self.socket_path)
@@ -251,22 +248,16 @@ class Server:
         except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
             log.exception("error during controller shutdown")
         if self._sock is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._sock.close()
-            except OSError:
-                pass
         # Only the process that actually bound the socket may remove it.
         if self._owns_socket:
             for path in (self.socket_path, paths.pid_path()):
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(path)
-                except OSError:
-                    pass
         if self._lock_fd is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._lock_fd.close()
-            except OSError:
-                pass
 
     def _collab_watcher(self) -> None:
         """Forward new OnlyOffice chat messages into the agent's conversation.
@@ -299,7 +290,7 @@ class Server:
             record = conversations.producers(conversation_id).get(path) or {}
             agent_id = record.get("producer") or agent_id
         except Exception:  # noqa: BLE001
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+            log.debug("ignored exception in a boundary guard", exc_info=True)
         if not agent_id:
             return
         label = "comentario" if kind == "comment" else "chat"
@@ -322,10 +313,8 @@ class Server:
     def stop(self) -> None:
         self._stop.set()
         if self._sock is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._sock.close()
-            except OSError:
-                pass
 
     def _handle(self, conn: socket.socket) -> None:
         peer_pid = _peer_pid(conn)
@@ -694,10 +683,8 @@ class Server:
         if request.get("conversation"):
             from . import conversations
 
-            try:
+            with contextlib.suppress(conversations.ConversationError):
                 conversations.set_agent(str(request["conversation"]), harness.agent_id)
-            except conversations.ConversationError:
-                pass
         return {"agent": self.controller.agent_summary(harness)}
 
     def _op_agent_list(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -1362,11 +1349,11 @@ class Server:
         try:
             roots += [t["workspace"] for t in self.controller.list_teams() if t.get("workspace")]
         except Exception:  # noqa: BLE001 - missing teams must not break completion
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+            log.debug("ignored exception in a boundary guard", exc_info=True)
         try:
             roots += [a["cwd"] for a in self.controller.list_agents() if a.get("cwd")]
         except Exception:  # noqa: BLE001
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+            log.debug("ignored exception in a boundary guard", exc_info=True)
         actor = request.get("_actor") if isinstance(request.get("_actor"), dict) else {}
         return fscomplete.complete(
             request.get("prefix"), roots=roots, actor=(actor.get("label") or actor.get("ip") or "local"),

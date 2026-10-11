@@ -18,6 +18,7 @@ import secrets
 import time
 
 from . import paths, settings
+import contextlib
 
 # Filenames longer than this (including the unique suffix) are truncated.
 MAX_NAME = 120
@@ -99,10 +100,8 @@ def store(name: str, data: bytes, *, storage: str | None = None) -> dict[str, ob
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
     except OSError as exc:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(path)
-        except OSError:
-            pass
         raise UploadError(str(exc)) from exc
     return {"path": path, "name": os.path.basename(path), "size": len(data),
             "mode": chosen}

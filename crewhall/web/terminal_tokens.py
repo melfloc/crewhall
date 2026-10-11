@@ -24,6 +24,7 @@ import uuid
 from typing import Any
 
 from .. import brand
+import contextlib
 
 TOKEN_BYTES = 32
 DEFAULT_TTL = 8 * 3600
@@ -36,10 +37,8 @@ _LOCK = threading.RLock()
 def _config_dir() -> str:
     path = brand.config_dir()
     os.makedirs(path, mode=0o700, exist_ok=True)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(path, 0o700)
-    except OSError:
-        pass
     return path
 
 
@@ -64,10 +63,8 @@ def _save(records: list[dict[str, Any]]) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump({"tokens": records}, fh, indent=2, sort_keys=True)
     os.replace(tmp, path)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(path, 0o600)
-    except OSError:
-        pass
 
 
 def _hash(token: str) -> str:

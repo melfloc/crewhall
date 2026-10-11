@@ -428,7 +428,7 @@ class Harness(ABC):
                 try:
                     self.session.send_key(key)
                 except Exception:  # noqa: BLE001
-                    pass  # noqa: BLE001 - justified boundary guard (B1)
+                    log.debug("ignored exception in a boundary guard", exc_info=True)
             time.sleep(poll)
         return self._input_is_clean()
 
@@ -536,10 +536,7 @@ class Harness(ABC):
         timeout: float = 30.0,
         interval: float = 0.1,
     ) -> AgentState:
-        if isinstance(targets, AgentState):
-            wanted = (targets,)
-        else:
-            wanted = tuple(targets)
+        wanted = (targets,) if isinstance(targets, AgentState) else tuple(targets)
         deadline = time.monotonic() + timeout
         state = self.state()
         while state not in wanted and not state.terminal:

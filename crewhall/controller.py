@@ -522,14 +522,14 @@ class Controller:
                 for event in link.events(should_stop):
                     self._on_opencode_event(harness, event)
             except Exception:  # noqa: BLE001
-                pass  # noqa: BLE001 - justified boundary guard (B1)
+                log.debug("ignored exception in a boundary guard", exc_info=True)
             if should_stop():
                 return
             if not harness.conversation_id:  # the creation event may have been missed
                 try:
                     self._discover_opencode_session(harness, link)
                 except Exception:  # noqa: BLE001
-                    pass  # noqa: BLE001 - justified boundary guard (B1)
+                    log.debug("ignored exception in a boundary guard", exc_info=True)
             stop.wait(1.0)
 
     def _on_opencode_event(self, harness: Harness, event: dict[str, Any]) -> None:
@@ -806,7 +806,7 @@ class Controller:
         try:
             ensure_managed_section(cwd, kind=kind)
         except Exception:  # noqa: BLE001 - never block an agent over a doc file
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+            log.debug("ignored exception in a boundary guard", exc_info=True)
 
     def _adopt_tmux(self) -> None:
         self._adopt_local_tmux()
@@ -1210,7 +1210,7 @@ class Controller:
                 try:
                     harness.accept_workspace_trust()
                 except Exception:  # noqa: BLE001 - best effort
-                    pass  # noqa: BLE001 - justified boundary guard (B1)
+                    log.debug("ignored exception in a boundary guard", exc_info=True)
 
             threading.Thread(target=_accept, name=f"trust-{session_id}", daemon=True).start()
         self._agent_tokens.setdefault(session_id, agent_env["CREWHALL_TOKEN"])
@@ -1273,7 +1273,7 @@ class Controller:
         try:
             self.requests.load(data.get("requests", []))
         except Exception:  # noqa: BLE001 - a bad row must not stop the daemon
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+            log.debug("ignored exception in a boundary guard", exc_info=True)
         # Terminals persist like agents: re-create any that is not already
         # adopted (its tmux session may have survived a crash, or not).
         for term in data.get("terminals", []):
@@ -1892,7 +1892,7 @@ class Controller:
         try:
             roots += [str(r) for r in (settings.get("security.fs_roots") or []) if r]
         except Exception:  # noqa: BLE001
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+            log.debug("ignored exception in a boundary guard", exc_info=True)
         for team in self.teams.list():
             if team.workspace:
                 roots.append(team.workspace)
@@ -1960,7 +1960,7 @@ class Controller:
             try:
                 self.teams.remove_member(old_team.team_id, str(lead))
             except Exception:  # noqa: BLE001 - not a member anymore
-                pass  # noqa: BLE001 - justified boundary guard (B1)
+                log.debug("ignored exception in a boundary guard", exc_info=True)
         if lead and new_team:
             try:
                 if str(lead) not in self.teams.get(new_team).agent_ids:
@@ -2266,7 +2266,7 @@ class Controller:
                 else:
                     add(item)
         except Exception:  # noqa: BLE001 - discovery is best effort
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+            log.debug("ignored exception in a boundary guard", exc_info=True)
         # The TUI often shows "<name> <provider>"; map it back to a catalog value
         # so the selector marks the real entry instead of inventing a new one.
         selected = current
@@ -2333,13 +2333,13 @@ class Controller:
             teams = [t.name for t in self.teams.list() if agent_id in t.agent_ids]
             self.archive_agent(harness, teams)
         except Exception:  # noqa: BLE001 — archiving must not block removal
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+            log.debug("ignored exception in a boundary guard", exc_info=True)
         harness.stop(force=force)
         self.agents.remove(agent_id)
         try:  # do not leave a dead session behind (it keeps the name ambiguous)
             self.registry.remove(agent_id)
         except Exception:  # noqa: BLE001
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+            log.debug("ignored exception in a boundary guard", exc_info=True)
         self._agent_args.pop(agent_id, None)
         self._mcp_cleanup(agent_id)
         self._cleanup_worktree(agent_id, force=force)

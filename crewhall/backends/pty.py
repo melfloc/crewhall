@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from ..backend import Backend
 from ..keys import pty_bytes
+import contextlib
 
 if TYPE_CHECKING:
     from ..types import SessionSpec
@@ -45,10 +46,8 @@ class PtyBackend(Backend):
         self._set_winsize_fd(master, spec.cols, spec.rows)
 
         def _preexec() -> None:
-            try:
+            with contextlib.suppress(OSError):
                 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
-            except OSError:
-                pass
 
         try:
             proc = subprocess.Popen(
@@ -108,10 +107,8 @@ class PtyBackend(Backend):
         code = self._poll_wait()
         if code is None:
             code = self._wait_blocking(timeout=2.0 if self._stop.is_set() else 5.0)
-        try:
+        with contextlib.suppress(OSError):
             os.close(master)
-        except OSError:
-            pass
         if self.master is master:
             self.master = None
         if self.session is not None:
@@ -171,10 +168,8 @@ class PtyBackend(Backend):
     def _signal(self, sig: int) -> None:
         if self._proc is None:
             return
-        try:
+        with contextlib.suppress(ProcessLookupError):
             os.killpg(self._proc.pid, sig)
-        except ProcessLookupError:
-            pass
 
     def interrupt(self) -> None:
         self._signal(signal.SIGINT)

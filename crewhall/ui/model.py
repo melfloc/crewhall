@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import threading
@@ -10,6 +11,8 @@ from collections.abc import Callable
 from .. import brand
 from ..types import parse_agent_args
 from .control import ControlPort
+
+log = logging.getLogger("crewhall.ui")
 
 HEADERS = {"header"}
 
@@ -856,8 +859,8 @@ class AppModel:
         self.status_kind = "info"
         try:
             self.refresh()
-        except Exception:  # noqa: BLE001
-            pass  # noqa: BLE001 - justified boundary guard (B1)
+        except Exception:  # noqa: BLE001 - a failed refresh must not break the UI
+            log.debug("view refresh failed", exc_info=True)
 
     def _forward(self, key: str) -> None:
         agent = self.selected_agent()

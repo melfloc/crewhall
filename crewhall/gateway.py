@@ -22,6 +22,7 @@ import socket
 import threading
 from typing import Any
 from collections.abc import Callable
+import contextlib
 
 log = logging.getLogger("crewhall.gateway")
 
@@ -85,10 +86,8 @@ class AgentGateway:
     def start(self) -> None:
         directory = os.path.dirname(self.path)
         os.makedirs(directory, mode=0o700, exist_ok=True)
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(self.path)
-        except FileNotFoundError:
-            pass
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         old_umask = os.umask(0o177)
         try:
@@ -106,14 +105,10 @@ class AgentGateway:
     def stop(self) -> None:
         self._stop.set()
         if self._sock is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._sock.close()
-            except OSError:
-                pass
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(self.path)
-        except OSError:
-            pass
 
     def _serve(self) -> None:
         assert self._sock is not None
@@ -159,7 +154,5 @@ class AgentGateway:
 
     @staticmethod
     def _reply(conn: socket.socket, response: dict[str, Any]) -> None:
-        try:
+        with contextlib.suppress(OSError):
             conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
-        except OSError:
-            pass

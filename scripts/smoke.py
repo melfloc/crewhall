@@ -18,6 +18,7 @@ agents cannot run).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shutil
 import sys
@@ -77,9 +78,9 @@ class Smoke:
         self.state.update(a=a, b=b)
 
     def step_message(self) -> None:
-        a, b = self.state["a"], self.state["b"]
+        a = self.state["a"]
         token = self.controller._agent_token(a.agent_id)
-        body = "smoke-message-%d" % int(time.time())
+        body = f"smoke-message-{int(time.time())}"
         delivery = self.controller.send_message_as("smoke-a", token, "smoke-b", body)
         assert delivery.delivered, delivery.error
         assert wait(lambda: body in self.controller.get_agent("smoke-b").capture(), 60), \
@@ -147,10 +148,8 @@ class Smoke:
         for controller in controllers:
             if controller is None:
                 continue
-            try:
+            with contextlib.suppress(Exception):  # cleanup is best effort
                 controller.shutdown(kill_agents=True)
-            except Exception:  # noqa: BLE001 - cleanup is best effort
-                pass
         shutil.rmtree(_ROOT, ignore_errors=True)
         cwd = self.state.get("cwd")
         if cwd:

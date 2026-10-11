@@ -23,6 +23,7 @@ import time
 from typing import Any
 
 from .. import brand
+import contextlib
 
 # -- base64url ---------------------------------------------------------------
 def b64u_encode(data: bytes) -> str:
@@ -321,10 +322,8 @@ _LOCK = threading.RLock()
 def _config_dir() -> str:
     path = brand.config_dir()
     os.makedirs(path, mode=0o700, exist_ok=True)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(path, 0o700)
-    except OSError:
-        pass
     return path
 
 
@@ -349,10 +348,8 @@ def _save(records: list[dict[str, Any]]) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump({"credentials": records}, fh, indent=2, sort_keys=True)
     os.replace(tmp, path)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(path, 0o600)
-    except OSError:
-        pass
 
 
 def add_credential(credential_id: bytes, cose_bytes: bytes, alg: Any, sign_count: int,

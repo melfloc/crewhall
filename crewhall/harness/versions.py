@@ -42,6 +42,4 @@ def is_supported(kind: str, text: str | None) -> bool | None:
     version = parse_version(text)
     if version is None:
         return None
-    if version < rng["min"] or version >= rng["max_exclusive"]:
-        return False
-    return True
+    return not (version < rng["min"] or version >= rng["max_exclusive"])
