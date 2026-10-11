@@ -2374,20 +2374,42 @@ class Controller:
                 removed += 1
         return removed
 
-    def shutdown(self) -> None:
+    # Backends whose processes outlive the daemon: a restart can re-adopt their
+    # live sessions instead of losing the agents (Fase A1).
+    SURVIVABLE_BACKENDS = ("tmux", "ssh-tmux")
+
+    @classmethod
+    def session_survives_restart(cls, session: InteractiveSession) -> bool:
+        """Whether ``session`` keeps running after the daemon process exits."""
+        return getattr(session.backend, "name", "") in cls.SURVIVABLE_BACKENDS
+
+    def shutdown(self, *, kill_agents: bool = True) -> None:
+        """Stop the control plane.
+
+        With ``kill_agents=True`` (the historical default) every agent process is
+        stopped too. With ``kill_agents=False`` agents on a survivable backend
+        (tmux / ssh-tmux) are left running so the next daemon adopts them — the
+        PTY backend cannot survive its parent and is always stopped. Either way
+        the control plane's own resources are released.
+        """
         self.remote_links.stop_all()
-        for agent_id in list(self._mcp_files):
-            self._mcp_cleanup(agent_id)
         for harness in self.agents.all():
+            if not kill_agents and self.session_survives_restart(harness.session):
+                continue
             try:
                 harness.stop()
             except Exception:
                 pass
         for session in self.registry.all():
+            if not kill_agents and self.session_survives_restart(session):
+                continue
             try:
                 session.close()
             except Exception:
                 pass
+        if kill_agents:
+            for agent_id in list(self._mcp_files):
+                self._mcp_cleanup(agent_id)
         try:
             paths.cleanup_tmpdir()
         except Exception:
