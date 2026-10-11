@@ -913,7 +913,20 @@ def _print_delivery(delivery: dict[str, Any]) -> None:
     recipient = delivery.get("recipient_name") or delivery["recipient"]
     print(f"{mark} {delivery['message_id']}  {sender} -> {recipient}: {delivery['body']!r}")
     if delivery.get("queued") and not delivery.get("delivered"):
-        print("    queued: recipient busy; will be delivered when it is ready")
+        reason = delivery.get("queue_reason")
+        if reason == "human draft":
+            print("    queued: the recipient has a human draft in its input; "
+                  "it will be delivered when the input is cleared")
+        elif reason == "starting":
+            print("    queued: the recipient is still starting; "
+                  "it will be delivered when it is ready")
+        elif reason == "stopped":
+            print("    queued: the recipient is stopped; "
+                  "it will be delivered when it is revived")
+        elif reason == "busy":
+            print("    queued: recipient busy; will be delivered when it is ready")
+        else:
+            print("    queued: will be delivered when the recipient is ready")
     if delivery.get("error"):
         print(f"    error: {delivery['error']}")
 

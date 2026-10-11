@@ -1865,6 +1865,10 @@ class Controller:
         return self.messaging.send(
             sender, recipient, body, prefix_sender=True,
             idempotency_key=idempotency_key, message_id=message_id,
+            # Control plane (CLI/Web): don't block for 30 s before queueing; a
+            # short grace is enough to deliver to a READY recipient, then the
+            # queue takes over and reports the real reason (Fase A3).
+            wait=AGENT_SEND_WAIT,
         )
 
     # -- chat <-> cowork bridge --------------------------------------------

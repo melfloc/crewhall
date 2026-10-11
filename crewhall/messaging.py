@@ -66,6 +66,8 @@ class Delivery:
     expires_at: float | None = None
     # Whether the queue worker already tried to revive the recipient once.
     revive_tried: bool = False
+    # Why the message is queued: busy | human draft | starting | stopped.
+    queue_reason: str | None = None
     # Insertion marker for history-ordered key pruning (internal).
     _seq: int = field(default=0, compare=False)
 
@@ -92,6 +94,7 @@ class Delivery:
             "queued": self.queued,
             "status": self.status,
             "acknowledged_at": self.acknowledged_at,
+            "queue_reason": self.queue_reason,
             "error": self.error,
         }
 
@@ -118,6 +121,7 @@ def delivery_from_dict(record: dict[str, Any]) -> Delivery | None:
     delivery.delivered_at = record.get("delivered_at")
     delivery.error = record.get("error")
     delivery.acknowledged_at = record.get("acknowledged_at")
+    delivery.queue_reason = record.get("queue_reason")
     return delivery
 
 
@@ -368,6 +372,9 @@ class Messaging:
         # message is waiting, so do not report the transient failure.
         delivery.error = None
         delivery.retryable = False
+        # Report the real cause so the control plane can say "human draft"
+        # instead of blaming a busy agent (Fase A3).
+        delivery.queue_reason = self._queue_reason(recipient)
         delivery.expires_at = time.time() + ttl if ttl and ttl > 0 else None
         agent_id = recipient.agent_id
         with self._lock:
@@ -524,6 +531,26 @@ class Messaging:
     def _terminal(self, harness: Harness) -> bool:
         return harness.state() in (AgentState.EXITED, AgentState.ERROR)
 
+    def _queue_reason(self, harness: Harness) -> str:
+        """Best-effort explanation of why a message had to be queued."""
+        try:
+            state = harness.state()
+        except Exception:  # noqa: BLE001 - never let the diagnosis hide the queueing
+            return "busy"
+        if state == AgentState.WORKING:
+            return "busy"
+        if state == AgentState.STARTING:
+            return "starting"
+        if state in (AgentState.EXITED, AgentState.ERROR):
+            return "stopped"
+        # Usable state but the input holds text we did not type: a human draft.
+        try:
+            if not harness.input_is_clean():
+                return "human draft"
+        except Exception:  # noqa: BLE001
+            return "busy"
+        return "busy"
+
     def history(
         self,
         *,
@@ -644,6 +671,7 @@ class Messaging:
                         "text": delivery.text,
                         "timestamp": delivery.message.timestamp,
                         "expires_at": delivery.expires_at,
+                        "queue_reason": delivery.queue_reason,
                     })
         return items
 
@@ -685,6 +713,7 @@ class Messaging:
                 recipient_name=item.get("recipient_name"),
                 text=str(item.get("text") or body),
                 expires_at=float(expires_at) if expires_at is not None else None,
+                queue_reason=item.get("queue_reason"),
             )
             with self._lock:
                 self._queues.setdefault(recipient, deque()).append(delivery)
