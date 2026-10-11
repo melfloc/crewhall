@@ -157,11 +157,13 @@ class Messaging:
         ack_timeout: float = 15.0,
         store: Any = None,
         history_store: Any = None,
+        workers: Any = None,
     ) -> None:
         self._registry = registry
         self._ack_timeout = ack_timeout
         self._store = store
         self._history_store = history_store
+        self._workers_reg = workers
         self._queues: dict[str, deque[Delivery]] = {}
         self._workers: dict[str, threading.Thread] = {}
         self._keys: dict[str, Delivery] = {}
@@ -363,6 +365,11 @@ class Messaging:
         with self._lock:
             return self._queues.get(agent_id, deque())
 
+    def queue_depth(self) -> dict[str, int]:
+        """Pending items per recipient (health/metrics)."""
+        with self._lock:
+            return {agent_id: len(q) for agent_id, q in self._queues.items() if q}
+
     def _enqueue(
         self,
         recipient: Harness,
@@ -388,6 +395,11 @@ class Messaging:
         return delivery
 
     def _ensure_worker(self, agent_id: str) -> None:
+        if self._workers_reg is not None:
+            self._workers_reg.spawn(
+                f"msg-queue-{agent_id}", self._drain, args=(agent_id,)
+            )
+            return
         with self._lock:
             worker = self._workers.get(agent_id)
             if worker is not None and worker.is_alive():
@@ -529,7 +541,12 @@ class Messaging:
                     return
                 time.sleep(0.25)
 
-        threading.Thread(target=watch, name="msg-ack", daemon=True).start()
+        if self._workers_reg is not None:
+            self._workers_reg.spawn(
+                f"msg-ack-{delivery.message.message_id}", watch
+            )
+        else:
+            threading.Thread(target=watch, name="msg-ack", daemon=True).start()
 
     def _terminal(self, harness: Harness) -> bool:
         return harness.state() in (AgentState.EXITED, AgentState.ERROR)

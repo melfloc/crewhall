@@ -128,6 +128,26 @@ def check_daemon() -> Check:
         return _res("daemon", "warn", f"unreachable: {exc}")
 
 
+def check_workers() -> Check:
+    """Report supervised background workers (crashes/restarts)."""
+    from .client import Client, ping
+
+    try:
+        if not ping():
+            return _res("workers", "ok", "daemon not running")
+        health = Client(autostart=False).call("health")
+    except Exception as exc:  # noqa: BLE001
+        return _res("workers", "warn", f"health unavailable: {exc}")
+    workers = health.get("workers", [])
+    restarts = sum(int(w.get("restarts", 0)) for w in workers)
+    dead = [w for w in workers if w.get("state") == "dead"]
+    detail = f"{len(workers)} worker(s), {restarts} restart(s)"
+    if dead:
+        return _res("workers", "warn", detail,
+                    "dead: " + ", ".join(str(w.get("name")) for w in dead))
+    return _res("workers", "ok", detail)
+
+
 def check_daemon_log() -> Check:
     """Report the daemon log size and whether rotation is in effect."""
     import glob
@@ -365,7 +385,7 @@ def check_office() -> Check:
 CHECKS: list[Callable[[], Check | list[Check]]] = [
     check_python, check_install, check_tmux, check_agent_clis, check_agent_version_ranges,
     check_command_on_path, check_dirs,
-    check_tmpdir, check_hooks, check_daemon, check_daemon_log, check_web, check_office, check_security,
+    check_tmpdir, check_hooks, check_daemon, check_workers, check_daemon_log, check_web, check_office, check_security,
     check_agent_configs, check_systemd, check_tailscale,
 ]
 

@@ -198,9 +198,10 @@ class Server:
         log.info("daemon listening on %s", self.socket_path)
         # Web interfaces chosen with `crewhall local|tailscale` come back up.
         self.frontends.begin_restore()
-        threading.Thread(target=self.frontends.restore, name="frontends-restore", daemon=True).start()
+        self.controller.workers.spawn(
+            "frontends-restore", self.frontends.restore, restart=False)
         # Deliver OnlyOffice co-authoring chat messages to the conversation's agent.
-        threading.Thread(target=self._collab_watcher, name="collab-watcher", daemon=True).start()
+        self.controller.workers.spawn("collab-watcher", self._collab_watcher)
         try:
             from . import conversations
 
@@ -497,6 +498,14 @@ class Server:
         info = build_info()
         return {"pid": os.getpid(), "sessions": len(self.controller.registry.all()),
                 "version": info["version"], "build": info.get("commit"), "channel": info["kind"]}
+
+    def _op_health(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Background-worker and queue health (surfaced by `doctor`)."""
+        return {
+            "workers": self.controller.workers.snapshot(),
+            "queues": self.controller.messaging.queue_depth(),
+            "pid": os.getpid(),
+        }
 
     def _op_meta_info(self, request: dict[str, Any]) -> dict[str, Any]:
         return meta_info()
@@ -1417,7 +1426,7 @@ class Server:
         self.stop()
 
 
-def _start_tmpdir_janitor(interval: float | None = None) -> None:
+def _start_tmpdir_janitor(workers: Any, interval: float | None = None) -> None:
     """Periodically prune the dedicated tmpdir (contains Bun's leaked .so)."""
 
     def loop() -> None:
@@ -1438,7 +1447,7 @@ def _start_tmpdir_janitor(interval: float | None = None) -> None:
             except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 log.exception("tmpdir janitor failed")
 
-    threading.Thread(target=loop, name="tmpdir-janitor", daemon=True).start()
+    workers.spawn("tmpdir-janitor", loop)
 
 
 def _start_terminals_janitor(controller: Controller, interval: float = 60.0) -> None:
@@ -1455,7 +1464,7 @@ def _start_terminals_janitor(controller: Controller, interval: float = 60.0) -> 
             except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 log.exception("terminals janitor failed")
 
-    threading.Thread(target=loop, name="terminals-janitor", daemon=True).start()
+    controller.workers.spawn("terminals-janitor", loop)
 
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(agent_id)s %(message)s"
@@ -1507,9 +1516,9 @@ def main(argv: list[str] | None = None) -> int:
         uploads.cleanup()
     except Exception:  # noqa: BLE001 - never block startup on cleanup
         log.exception("upload cleanup failed")
-    _start_tmpdir_janitor()
     controller = Controller(adopt=True, persist=True)
     controller.restore()
+    _start_tmpdir_janitor(controller.workers)
     _start_terminals_janitor(controller)
     server = Server(controller, args.socket or paths.socket_path())
 

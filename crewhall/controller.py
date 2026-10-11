@@ -30,6 +30,7 @@ from .remote_link import RemoteLinks
 from .session import InteractiveSession
 from .team import Team, TeamError, TeamRegistry
 from .types import SessionSpec, Status, new_session_id, parse_agent_args
+from .workers import WorkerRegistry
 
 log = logging.getLogger("crewhall.controller")
 
@@ -209,9 +210,13 @@ class Controller:
             history_store = HistoryStore(max_entries=entries, max_age_days=days or None)
             history_limit = entries or 1000
         self._history_store = history_store
+        # Every background worker (message queues, ack watchers, janitors…) is
+        # supervised here so a crash is recorded and the thread is relaunched.
+        self.workers = WorkerRegistry()
         self.messaging = Messaging(
             self.agents, revive=self._revive_agent, store=self._pending_store,
             history_limit=history_limit, history_store=history_store,
+            workers=self.workers,
         )
         self.requests = RequestBoard(
             max_open_per_agent=int(settings.get("requests.max_open_per_agent")),
@@ -2435,6 +2440,10 @@ class Controller:
             paths.cleanup_tmpdir()
         except Exception:  # noqa: BLE001 - a cleanup failure must not block shutdown
             log.debug("tmpdir cleanup failed during shutdown", exc_info=True)
+        try:
+            self.workers.stop_all()
+        except Exception:  # noqa: BLE001 - never block shutdown on a stuck worker
+            log.debug("could not stop all workers", exc_info=True)
 
     def summary(self, session: InteractiveSession) -> dict[str, Any]:
         session.poll()

@@ -132,9 +132,16 @@ def ensure_daemon(socket_path: str | None = None, start_timeout: float = 10.0) -
             return
         _spawn(path)
         deadline = time.monotonic() + start_timeout
+        proc = _SPAWNED[-1] if _SPAWNED else None
         while time.monotonic() < deadline:
             if ping(path):
                 return
+            # A spawned daemon can exit at once when the previous one is still
+            # releasing its lock (a graceful shutdown is not instantaneous).
+            # Respawn instead of failing the whole call.
+            if proc is not None and proc.poll() is not None:
+                _spawn(path)
+                proc = _SPAWNED[-1] if _SPAWNED else None
             time.sleep(0.05)
     raise RpcError(
         f"daemon did not start within {start_timeout}s (see {paths.log_path()})"
