@@ -301,7 +301,9 @@ def restart_daemon(prefix: str, expect_version: str, *, force: bool, log: Log) -
     if ping():
         log("stopping the daemon…")
         try:
-            Client(autostart=False).call("shutdown")
+            # Never kill tmux-backed agents: the new daemon re-adopts them, so an
+            # update stops the control plane without losing the running work.
+            Client(autostart=False).call("shutdown", kill_agents=False)
         except Exception:  # noqa: BLE001
             pass
         deadline = time.monotonic() + 20

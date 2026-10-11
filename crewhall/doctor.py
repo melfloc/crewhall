@@ -47,7 +47,9 @@ def check_tmux() -> Check:
     if not path:
         return _res("tmux", "fail", "not found",
                     "Install tmux (e.g. `sudo pacman -S tmux` / `sudo apt install tmux`). "
-                    "It is the default backend for agents.")
+                    "It is the default backend for agents. Without it agents use the "
+                    "PTY backend and do NOT survive a `crewhall daemon stop`/restart: "
+                    "their conversation is lost.")
     return _res("tmux", "ok", f"{_version_of(['tmux', '-V'])} ({path})")
 
 

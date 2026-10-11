@@ -25,7 +25,7 @@ from . import processes as procs
 from .opencode_link import OpenCodeLink, free_port
 from .messaging import Delivery, Messaging, MessagingError
 from .requests import OPEN_STATES, RequestBoard, RequestError
-from .persistence import PendingQueueStore, StateStore
+from .persistence import HistoryStore, PendingQueueStore, StateStore
 from .remote_link import RemoteLinks
 from .session import InteractiveSession
 from .team import Team, TeamError, TeamRegistry
@@ -201,8 +201,17 @@ class Controller:
         self._locks_guard = threading.Lock()
         self._store = StateStore() if persist else None
         self._pending_store = PendingQueueStore() if persist else None
+        history_store = None
+        history_limit = 1000
+        if persist:
+            entries = int(settings.get("messaging.history_entries"))
+            days = int(settings.get("messaging.history_days"))
+            history_store = HistoryStore(max_entries=entries, max_age_days=days or None)
+            history_limit = entries or 1000
+        self._history_store = history_store
         self.messaging = Messaging(
             self.agents, revive=self._revive_agent, store=self._pending_store,
+            history_limit=history_limit, history_store=history_store,
         )
         self.requests = RequestBoard(
             max_open_per_agent=int(settings.get("requests.max_open_per_agent")),
@@ -1281,6 +1290,13 @@ class Controller:
                 self.messaging.load(self._pending_store.load())
             except Exception:  # noqa: BLE001 - a bad queue must not stop startup
                 log.exception("could not resume the pending message queue")
+        # Restore the message history so the crew strip / Message flow survive
+        # the restart (Fase A2).
+        if self._history_store is not None:
+            try:
+                self.messaging.load_history()
+            except Exception:  # noqa: BLE001 - a bad history must not stop startup
+                log.exception("could not restore the message history")
 
     def _restore_agent(self, agent: dict[str, Any]) -> None:
         agent_id = agent["agent_id"]
@@ -1849,6 +1865,10 @@ class Controller:
         return self.messaging.send(
             sender, recipient, body, prefix_sender=True,
             idempotency_key=idempotency_key, message_id=message_id,
+            # Control plane (CLI/Web): don't block for 30 s before queueing; a
+            # short grace is enough to deliver to a READY recipient, then the
+            # queue takes over and reports the real reason (Fase A3).
+            wait=AGENT_SEND_WAIT,
         )
 
     # -- chat <-> cowork bridge --------------------------------------------
@@ -2374,20 +2394,42 @@ class Controller:
                 removed += 1
         return removed
 
-    def shutdown(self) -> None:
+    # Backends whose processes outlive the daemon: a restart can re-adopt their
+    # live sessions instead of losing the agents (Fase A1).
+    SURVIVABLE_BACKENDS = ("tmux", "ssh-tmux")
+
+    @classmethod
+    def session_survives_restart(cls, session: InteractiveSession) -> bool:
+        """Whether ``session`` keeps running after the daemon process exits."""
+        return getattr(session.backend, "name", "") in cls.SURVIVABLE_BACKENDS
+
+    def shutdown(self, *, kill_agents: bool = True) -> None:
+        """Stop the control plane.
+
+        With ``kill_agents=True`` (the historical default) every agent process is
+        stopped too. With ``kill_agents=False`` agents on a survivable backend
+        (tmux / ssh-tmux) are left running so the next daemon adopts them — the
+        PTY backend cannot survive its parent and is always stopped. Either way
+        the control plane's own resources are released.
+        """
         self.remote_links.stop_all()
-        for agent_id in list(self._mcp_files):
-            self._mcp_cleanup(agent_id)
         for harness in self.agents.all():
+            if not kill_agents and self.session_survives_restart(harness.session):
+                continue
             try:
                 harness.stop()
             except Exception:
                 pass
         for session in self.registry.all():
+            if not kill_agents and self.session_survives_restart(session):
+                continue
             try:
                 session.close()
             except Exception:
                 pass
+        if kill_agents:
+            for agent_id in list(self._mcp_files):
+                self._mcp_cleanup(agent_id)
         try:
             paths.cleanup_tmpdir()
         except Exception:

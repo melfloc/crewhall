@@ -913,7 +913,20 @@ def _print_delivery(delivery: dict[str, Any]) -> None:
     recipient = delivery.get("recipient_name") or delivery["recipient"]
     print(f"{mark} {delivery['message_id']}  {sender} -> {recipient}: {delivery['body']!r}")
     if delivery.get("queued") and not delivery.get("delivered"):
-        print("    queued: recipient busy; will be delivered when it is ready")
+        reason = delivery.get("queue_reason")
+        if reason == "human draft":
+            print("    queued: the recipient has a human draft in its input; "
+                  "it will be delivered when the input is cleared")
+        elif reason == "starting":
+            print("    queued: the recipient is still starting; "
+                  "it will be delivered when it is ready")
+        elif reason == "stopped":
+            print("    queued: the recipient is stopped; "
+                  "it will be delivered when it is revived")
+        elif reason == "busy":
+            print("    queued: recipient busy; will be delivered when it is ready")
+        else:
+            print("    queued: will be delivered when the recipient is ready")
     if delivery.get("error"):
         print(f"    error: {delivery['error']}")
 
@@ -1063,12 +1076,16 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         print(f"socket: {paths.socket_path()}")
         return 0
     if args.action == "stop":
+        kill_agents = bool(getattr(args, "kill_agents", False))
         try:
-            _client(args).call("shutdown")
+            _client(args).call("shutdown", kill_agents=kill_agents)
         except RpcError as exc:
             print(f"daemon: {exc}", file=sys.stderr)
             return 1
-        print("daemon: stopping")
+        if kill_agents:
+            print("daemon: stopping (agents stopped too)")
+        else:
+            print("daemon: stopping (agents keep running; use --kill-agents to stop them)")
         return 0
     if args.action == "logs":
         path = paths.log_path()
@@ -1683,6 +1700,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("daemon", help="manage the controller daemon")
     p.add_argument("action", choices=["run", "status", "stop", "logs"])
     p.add_argument("--socket")
+    p.add_argument(
+        "--kill-agents",
+        action="store_true",
+        help="also stop running agents (tmux agents otherwise survive a restart)",
+    )
     p.set_defaults(func=cmd_daemon)
 
     p = sub.add_parser("demo", help="run the built-in end-to-end demo")

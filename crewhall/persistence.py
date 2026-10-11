@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import tempfile
+import threading
+import time
 from typing import Any
 
 from . import paths
@@ -154,3 +156,130 @@ class PendingQueueStore:
             os.replace(tmp, self.path)
         except OSError as exc:
             log.warning("could not persist pending queue %s: %s", self.path, exc)
+
+
+class HistoryStore:
+    """Append-only JSONL history of agent messages, rotated on disk.
+
+    One JSON object per line, under the 0700 state directory. The file never
+    grows past ``max_entries`` (+ a small batch between rotations) and entries
+    older than ``max_age_days`` are dropped. It exists so the crew activity
+    strip and the Message flow still show what happened before a restart.
+    """
+
+    def __init__(
+        self,
+        path: str | None = None,
+        *,
+        max_entries: int = 2000,
+        max_age_days: float | None = 30,
+    ) -> None:
+        self.path = path or os.path.join(paths.state_dir(), "messages.jsonl")
+        self.max_entries = max(0, int(max_entries))
+        self.max_age_days = None if max_age_days is None else max(0.0, float(max_age_days))
+        self._lock = threading.Lock()
+        self._lines = 0
+
+    def _fresh_enough(self, record: dict[str, Any], now: float) -> bool:
+        if self.max_age_days is None or self.max_age_days <= 0:
+            return True
+        try:
+            ts = float(record.get("timestamp") or 0.0)
+        except (TypeError, ValueError):
+            return True
+        return (now - ts) <= self.max_age_days * 86400.0
+
+    def load(self) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(record, dict):
+                        records.append(record)
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            log.warning("could not read message history %s: %s", self.path, exc)
+            return []
+        now = time.time()
+        records = [r for r in records if self._fresh_enough(r, now)]
+        if self.max_entries and len(records) > self.max_entries:
+            records = records[-self.max_entries:]
+            self._rewrite(records)
+        with self._lock:
+            self._lines = len(records)
+        return records
+
+    def append(self, record: dict[str, Any]) -> None:
+        if self.max_entries == 0 and self.max_age_days in (None, 0):
+            return
+        line = json.dumps(record, separators=(",", ":"), sort_keys=True)
+        with self._lock:
+            try:
+                os.makedirs(os.path.dirname(self.path), exist_ok=True)
+                with open(self.path, "a", encoding="utf-8") as fh:
+                    try:
+                        os.fchmod(fh.fileno(), 0o600)
+                    except OSError:
+                        pass
+                    fh.write(line + "\n")
+                self._lines += 1
+            except OSError as exc:
+                log.warning("could not append message history %s: %s", self.path, exc)
+                return
+            over = self.max_entries and self._lines > self.max_entries + max(64, self.max_entries // 4)
+        if over:
+            # Reload (also applies the age cut), keep the newest and rewrite.
+            with self._lock:
+                records = self._read_lines()
+                now = time.time()
+                records = [r for r in records if self._fresh_enough(r, now)]
+                if self.max_entries and len(records) > self.max_entries:
+                    records = records[-self.max_entries:]
+                self._rewrite_locked(records)
+                self._lines = len(records)
+
+    def _read_lines(self) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(record, dict):
+                        records.append(record)
+        except OSError:
+            return []
+        return records
+
+    def _rewrite(self, records: list[dict[str, Any]]) -> None:
+        with self._lock:
+            self._rewrite_locked(records)
+            self._lines = len(records)
+
+    def _rewrite_locked(self, records: list[dict[str, Any]]) -> None:
+        directory = os.path.dirname(self.path)
+        try:
+            os.makedirs(directory, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=directory, prefix=".messages-", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                os.fchmod(fh.fileno(), 0o600)
+                for record in records:
+                    fh.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            log.warning("could not rotate message history %s: %s", self.path, exc)

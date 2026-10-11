@@ -621,7 +621,9 @@ agentes se reactivan on-demand. No hay auto-restart de agentes.
 | Evento | Efecto |
 |---|---|
 | UI/CLI/SSH disconnect | ninguno sobre el daemon ni los agentes |
-| daemon restart | agentes quedan lógicos (EXITED); mismo `agent_id` |
+| `daemon stop` (sin `--kill-agents`) | el control plane para; los agentes tmux/ssh-tmux **siguen vivos** y se readoptan al arrancar (mismo `agent_id`, conversación intacta) |
+| `daemon stop --kill-agents` | además para todos los agentes (comportamiento histórico) |
+| daemon restart (backend PTY) | el agente no puede sobrevivir: queda lógico (EXITED); mismo `agent_id` |
 | agent exit | entidad lógica persiste; reactivable |
 | machine reboot | estado lógico persiste; procesos no; sin autorestart |
 | systemd start/stop | arranca/para el control plane, no los agentes |

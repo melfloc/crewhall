@@ -66,6 +66,8 @@ class Delivery:
     expires_at: float | None = None
     # Whether the queue worker already tried to revive the recipient once.
     revive_tried: bool = False
+    # Why the message is queued: busy | human draft | starting | stopped.
+    queue_reason: str | None = None
     # Insertion marker for history-ordered key pruning (internal).
     _seq: int = field(default=0, compare=False)
 
@@ -92,8 +94,35 @@ class Delivery:
             "queued": self.queued,
             "status": self.status,
             "acknowledged_at": self.acknowledged_at,
+            "queue_reason": self.queue_reason,
             "error": self.error,
         }
+
+
+def delivery_from_dict(record: dict[str, Any]) -> Delivery | None:
+    """Rebuild a Delivery from ``Delivery.to_dict()`` (history persistence)."""
+    try:
+        message = Message(
+            message_id=str(record["message_id"]),
+            sender=str(record["sender"]),
+            recipient=str(record["recipient"]),
+            body=str(record.get("body") or ""),
+            timestamp=float(record.get("timestamp") or 0.0),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    delivery = Delivery(
+        message=message,
+        delivered=bool(record.get("delivered")),
+        sender_name=record.get("sender_name"),
+        recipient_name=record.get("recipient_name"),
+        queued=bool(record.get("queued")),
+    )
+    delivery.delivered_at = record.get("delivered_at")
+    delivery.error = record.get("error")
+    delivery.acknowledged_at = record.get("acknowledged_at")
+    delivery.queue_reason = record.get("queue_reason")
+    return delivery
 
 
 class Messaging:
@@ -124,10 +153,12 @@ class Messaging:
         revive: Any = None,
         ack_timeout: float = 15.0,
         store: Any = None,
+        history_store: Any = None,
     ) -> None:
         self._registry = registry
         self._ack_timeout = ack_timeout
         self._store = store
+        self._history_store = history_store
         self._queues: dict[str, deque[Delivery]] = {}
         self._workers: dict[str, threading.Thread] = {}
         self._keys: dict[str, Delivery] = {}
@@ -341,6 +372,9 @@ class Messaging:
         # message is waiting, so do not report the transient failure.
         delivery.error = None
         delivery.retryable = False
+        # Report the real cause so the control plane can say "human draft"
+        # instead of blaming a busy agent (Fase A3).
+        delivery.queue_reason = self._queue_reason(recipient)
         delivery.expires_at = time.time() + ttl if ttl and ttl > 0 else None
         agent_id = recipient.agent_id
         with self._lock:
@@ -497,6 +531,26 @@ class Messaging:
     def _terminal(self, harness: Harness) -> bool:
         return harness.state() in (AgentState.EXITED, AgentState.ERROR)
 
+    def _queue_reason(self, harness: Harness) -> str:
+        """Best-effort explanation of why a message had to be queued."""
+        try:
+            state = harness.state()
+        except Exception:  # noqa: BLE001 - never let the diagnosis hide the queueing
+            return "busy"
+        if state == AgentState.WORKING:
+            return "busy"
+        if state == AgentState.STARTING:
+            return "starting"
+        if state in (AgentState.EXITED, AgentState.ERROR):
+            return "stopped"
+        # Usable state but the input holds text we did not type: a human draft.
+        try:
+            if not harness.input_is_clean():
+                return "human draft"
+        except Exception:  # noqa: BLE001
+            return "busy"
+        return "busy"
+
     def history(
         self,
         *,
@@ -520,6 +574,26 @@ class Messaging:
         if limit is not None:
             items = items[-limit:]
         return [d.to_dict() for d in items]
+
+    def load_history(self) -> int:
+        """Restore the message history persisted across daemon restarts."""
+        if self._history_store is None:
+            return 0
+        try:
+            records = self._history_store.load()
+        except Exception:  # noqa: BLE001 - a bad history must not stop startup
+            return 0
+        loaded = 0
+        with self._lock:
+            for record in records:
+                delivery = delivery_from_dict(record)
+                if delivery is None:
+                    continue
+                self._seq += 1
+                delivery._seq = self._seq
+                self._history.append(delivery)
+                loaded += 1
+        return loaded
 
     def _await_usable(self, harness: Harness, timeout: float, poll: float = 0.3) -> bool:
         """Wait (bounded) until the recipient can accept input.
@@ -556,6 +630,11 @@ class Messaging:
                 self._keys[dedup_key] = delivery
                 while len(self._keys) > (self._history.maxlen or 1000):
                     self._keys.pop(next(iter(self._keys)))
+        if self._history_store is not None:
+            try:
+                self._history_store.append(delivery.to_dict())
+            except Exception:  # noqa: BLE001 - history must never break delivery
+                pass
 
     def _lock_for(self, agent_id: str) -> threading.Lock:
         with self._lock:
@@ -592,6 +671,7 @@ class Messaging:
                         "text": delivery.text,
                         "timestamp": delivery.message.timestamp,
                         "expires_at": delivery.expires_at,
+                        "queue_reason": delivery.queue_reason,
                     })
         return items
 
@@ -633,6 +713,7 @@ class Messaging:
                 recipient_name=item.get("recipient_name"),
                 text=str(item.get("text") or body),
                 expires_at=float(expires_at) if expires_at is not None else None,
+                queue_reason=item.get("queue_reason"),
             )
             with self._lock:
                 self._queues.setdefault(recipient, deque()).append(delivery)

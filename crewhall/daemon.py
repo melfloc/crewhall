@@ -119,6 +119,9 @@ class Server:
         self._cleaned = False
         self.restart_requested = False  # set by a full reset: re-exec after cleanup
         self._orphan = False  # lost ownership: must not touch sessions/files
+        # Whether a shutdown stops the agents too (Fase A1). `daemon stop`
+        # clears it so tmux-backed agents survive the restart.
+        self._kill_agents_on_stop = True
         from .frontends import FrontendManager
 
         self.frontends = FrontendManager(socket_path)
@@ -243,7 +246,7 @@ class Server:
             log.exception("error stopping headless co-editors")
         try:
             if not self._orphan:  # a duplicate must not close adopted sessions
-                self.controller.shutdown()
+                self.controller.shutdown(kill_agents=self._kill_agents_on_stop)
         except Exception:
             log.exception("error during controller shutdown")
         if self._sock is not None:
@@ -1398,11 +1401,19 @@ class Server:
         return {"session": info}
 
     def _op_shutdown(self, request: dict[str, Any]) -> dict[str, Any]:
-        threading.Thread(target=self._delayed_stop, daemon=True).start()
-        return {"stopping": True}
+        # `crewhall daemon stop` keeps tmux-backed agents running (kill_agents
+        # False); `daemon stop --kill-agents` (and older callers that omit it)
+        # stop everything. The default stays True so an unqualified RPC shutdown
+        # is the historical, fully-stopping behaviour.
+        kill_agents = bool(request.get("kill_agents", True))
+        threading.Thread(
+            target=self._delayed_stop, args=(kill_agents,), daemon=True
+        ).start()
+        return {"stopping": True, "kill_agents": kill_agents}
 
-    def _delayed_stop(self) -> None:
+    def _delayed_stop(self, kill_agents: bool = True) -> None:
         time.sleep(0.1)
+        self._kill_agents_on_stop = kill_agents
         self.stop()
 
 
