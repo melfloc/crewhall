@@ -6,6 +6,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from typing import Any
 
 from . import brand, clean, paths
@@ -1092,12 +1093,38 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         if not os.path.exists(path):
             print(f"no log at {path}")
             return 0
-        with open(path) as fh:
-            sys.stdout.write(fh.read())
+        agent = getattr(args, "agent", None)
+        if getattr(args, "follow", False):
+            return _follow_log(path, agent)
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if _log_matches(line, agent):
+                    sys.stdout.write(line)
         return 0
     if args.action == "run":
         return _run_foreground(args)
     raise SystemExit(f"unknown daemon action {args.action}")
+
+
+def _log_matches(line: str, agent: str | None) -> bool:
+    return not agent or agent in line
+
+
+def _follow_log(path: str, agent: str | None) -> int:
+    """`daemon logs --follow`: print new lines as they are written."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            fh.seek(0, os.SEEK_END)
+            while True:
+                line = fh.readline()
+                if not line:
+                    time.sleep(0.3)
+                    continue
+                if _log_matches(line, agent):
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+    except KeyboardInterrupt:
+        return 0
 
 
 def _run_foreground(args: argparse.Namespace) -> int:
@@ -1705,6 +1732,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also stop running agents (tmux agents otherwise survive a restart)",
     )
+    p.add_argument("--follow", action="store_true", help="with `logs`: stream new lines")
+    p.add_argument("--agent", default=None, help="with `logs`: only lines for this agent id")
     p.set_defaults(func=cmd_daemon)
 
     p = sub.add_parser("demo", help="run the built-in end-to-end demo")

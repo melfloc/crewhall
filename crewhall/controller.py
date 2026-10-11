@@ -30,6 +30,7 @@ from .remote_link import RemoteLinks
 from .session import InteractiveSession
 from .team import Team, TeamError, TeamRegistry
 from .types import SessionSpec, Status, new_session_id, parse_agent_args
+from .workers import WorkerRegistry
 
 log = logging.getLogger("crewhall.controller")
 
@@ -209,9 +210,13 @@ class Controller:
             history_store = HistoryStore(max_entries=entries, max_age_days=days or None)
             history_limit = entries or 1000
         self._history_store = history_store
+        # Every background worker (message queues, ack watchers, janitors…) is
+        # supervised here so a crash is recorded and the thread is relaunched.
+        self.workers = WorkerRegistry()
         self.messaging = Messaging(
             self.agents, revive=self._revive_agent, store=self._pending_store,
             history_limit=history_limit, history_store=history_store,
+            workers=self.workers,
         )
         self.requests = RequestBoard(
             max_open_per_agent=int(settings.get("requests.max_open_per_agent")),
@@ -517,14 +522,14 @@ class Controller:
                 for event in link.events(should_stop):
                     self._on_opencode_event(harness, event)
             except Exception:  # noqa: BLE001
-                pass
+                pass  # noqa: BLE001 - justified boundary guard (B1)
             if should_stop():
                 return
             if not harness.conversation_id:  # the creation event may have been missed
                 try:
                     self._discover_opencode_session(harness, link)
                 except Exception:  # noqa: BLE001
-                    pass
+                    pass  # noqa: BLE001 - justified boundary guard (B1)
             stop.wait(1.0)
 
     def _on_opencode_event(self, harness: Harness, event: dict[str, Any]) -> None:
@@ -801,7 +806,7 @@ class Controller:
         try:
             ensure_managed_section(cwd, kind=kind)
         except Exception:  # noqa: BLE001 - never block an agent over a doc file
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
 
     def _adopt_tmux(self) -> None:
         self._adopt_local_tmux()
@@ -831,7 +836,7 @@ class Controller:
                 session = InteractiveSession.adopt(
                     tmux_backend.TmuxBackend(), spec, sid, created_at=created_f
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 continue
             self._register_adopted(session)
 
@@ -866,7 +871,7 @@ class Controller:
                     failed = True
                     self._host_health[name] = (False, time.time())
                     log.warning("ssh host %s unreachable; will retry", name)
-                except Exception:
+                except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                     failed = True
                     log.exception("could not adopt sessions on ssh host %s", name)
             delay = self.REMOTE_ADOPT_RETRY if failed else self.REMOTE_ADOPT_IDLE
@@ -896,7 +901,7 @@ class Controller:
                 session = InteractiveSession.adopt(
                     ssh_tmux_backend.SshTmuxBackend(cfg), spec, sid, created_at=created_f
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 continue
             self._register_adopted(session)
 
@@ -1044,8 +1049,8 @@ class Controller:
                 continue
             try:
                 session.poll()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - a dead session is reaped below
+                log.debug("poll failed for %s", session.session_id, exc_info=True)
             if session.status.alive:
                 continue
             exited = getattr(session, "_exited_at", None)
@@ -1055,8 +1060,8 @@ class Controller:
                 continue
             try:
                 session.close()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - reaping continues regardless
+                log.debug("close failed for %s", session.session_id, exc_info=True)
             self.registry.remove(session.session_id)
             removed += 1
         if removed:
@@ -1082,7 +1087,7 @@ class Controller:
         if team:
             try:
                 t = self.teams.get(team)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 t = None
             if t is not None and t.workspace:
                 return t.workspace
@@ -1205,7 +1210,7 @@ class Controller:
                 try:
                     harness.accept_workspace_trust()
                 except Exception:  # noqa: BLE001 - best effort
-                    pass
+                    pass  # noqa: BLE001 - justified boundary guard (B1)
 
             threading.Thread(target=_accept, name=f"trust-{session_id}", daemon=True).start()
         self._agent_tokens.setdefault(session_id, agent_env["CREWHALL_TOKEN"])
@@ -1221,8 +1226,8 @@ class Controller:
         if team:
             try:
                 self.teams.add_member(team, session_id)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - an unknown team must not block the agent
+                log.debug("could not attach %s to team %s", session_id, team, exc_info=True)
         self._persist()
         if wait_ready:
             harness.start(timeout=timeout)
@@ -1233,8 +1238,8 @@ class Controller:
         if self._store is not None:
             try:
                 self._store.save(self._store.snapshot(self))
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - persistence must never break the caller
+                log.warning("could not persist state", exc_info=True)
 
     def restore(self) -> None:
         """Load persisted Teams and agent definitions (not processes).
@@ -1258,31 +1263,32 @@ class Controller:
                     host=team.get("host"),
                     verify_remote=False,  # never block a restart on a host that is down
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 continue
         for agent in data.get("agents", []):
             try:
                 self._restore_agent(agent)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 continue
         try:
             self.requests.load(data.get("requests", []))
         except Exception:  # noqa: BLE001 - a bad row must not stop the daemon
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
         # Terminals persist like agents: re-create any that is not already
         # adopted (its tmux session may have survived a crash, or not).
         for term in data.get("terminals", []):
             try:
                 self._restore_terminal(term)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 continue
         # Re-apply memberships after all agents exist.
         for team in data.get("teams", []):
             for agent_id in team.get("agent_ids", []):
                 try:
                     self.teams.add_member(team["team_id"], agent_id)
-                except Exception:
-                    pass
+                except Exception:  # noqa: BLE001 - a stale membership is skipped
+                    log.debug("could not restore membership of %s in %s",
+                              agent_id, team.get("team_id"), exc_info=True)
         # Resume messages that were still queued when the daemon stopped. The
         # recipients exist as EXITED entities; the queue worker revives them.
         if self._pending_store is not None:
@@ -1459,8 +1465,8 @@ class Controller:
             host = self._agent_hosts.get(agent_id)
             try:
                 harness.session.backend.close()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - the session is being rebuilt anyway
+                log.debug("backend close failed for %s", agent_id, exc_info=True)
             teams = self._team_names_of(agent_id)
             # Rebuild from the user's original env (not the identity-augmented
             # one) to avoid duplicated/derived keys across restarts.
@@ -1519,7 +1525,7 @@ class Controller:
                 seen.add(other_id)
                 try:
                     info = self.agents.resolve(other_id).info()
-                except Exception:
+                except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                     teammates.append({"agent_id": other_id, "name": other_id,
                                       "kind": "?", "state": "missing"})
                     continue
@@ -1886,7 +1892,7 @@ class Controller:
         try:
             roots += [str(r) for r in (settings.get("security.fs_roots") or []) if r]
         except Exception:  # noqa: BLE001
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
         for team in self.teams.list():
             if team.workspace:
                 roots.append(team.workspace)
@@ -1954,7 +1960,7 @@ class Controller:
             try:
                 self.teams.remove_member(old_team.team_id, str(lead))
             except Exception:  # noqa: BLE001 - not a member anymore
-                pass
+                pass  # noqa: BLE001 - justified boundary guard (B1)
         if lead and new_team:
             try:
                 if str(lead) not in self.teams.get(new_team).agent_ids:
@@ -2260,7 +2266,7 @@ class Controller:
                 else:
                     add(item)
         except Exception:  # noqa: BLE001 - discovery is best effort
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
         # The TUI often shows "<name> <provider>"; map it back to a catalog value
         # so the selector marks the real entry instead of inventing a new one.
         selected = current
@@ -2327,13 +2333,13 @@ class Controller:
             teams = [t.name for t in self.teams.list() if agent_id in t.agent_ids]
             self.archive_agent(harness, teams)
         except Exception:  # noqa: BLE001 — archiving must not block removal
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
         harness.stop(force=force)
         self.agents.remove(agent_id)
         try:  # do not leave a dead session behind (it keeps the name ambiguous)
             self.registry.remove(agent_id)
         except Exception:  # noqa: BLE001
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
         self._agent_args.pop(agent_id, None)
         self._mcp_cleanup(agent_id)
         self._cleanup_worktree(agent_id, force=force)
@@ -2418,22 +2424,26 @@ class Controller:
                 continue
             try:
                 harness.stop()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - shutting down must continue
+                log.debug("harness stop failed during shutdown", exc_info=True)
         for session in self.registry.all():
             if not kill_agents and self.session_survives_restart(session):
                 continue
             try:
                 session.close()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - shutting down must continue
+                log.debug("session close failed during shutdown", exc_info=True)
         if kill_agents:
             for agent_id in list(self._mcp_files):
                 self._mcp_cleanup(agent_id)
         try:
             paths.cleanup_tmpdir()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 - a cleanup failure must not block shutdown
+            log.debug("tmpdir cleanup failed during shutdown", exc_info=True)
+        try:
+            self.workers.stop_all()
+        except Exception:  # noqa: BLE001 - never block shutdown on a stuck worker
+            log.debug("could not stop all workers", exc_info=True)
 
     def summary(self, session: InteractiveSession) -> dict[str, Any]:
         session.poll()

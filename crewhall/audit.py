@@ -86,7 +86,7 @@ def _prune_locked() -> None:
         from . import settings
 
         days = int(settings.get("audit.retention_days"))
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
         days = 0
     if not days:
         return

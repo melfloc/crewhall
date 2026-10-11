@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -9,6 +10,8 @@ from typing import Any
 
 from .harness import AgentState, Harness
 from .harness.base import HarnessNotReady
+
+log = logging.getLogger("crewhall.messaging")
 
 
 class MessagingError(RuntimeError):
@@ -154,11 +157,13 @@ class Messaging:
         ack_timeout: float = 15.0,
         store: Any = None,
         history_store: Any = None,
+        workers: Any = None,
     ) -> None:
         self._registry = registry
         self._ack_timeout = ack_timeout
         self._store = store
         self._history_store = history_store
+        self._workers_reg = workers
         self._queues: dict[str, deque[Delivery]] = {}
         self._workers: dict[str, threading.Thread] = {}
         self._keys: dict[str, Delivery] = {}
@@ -360,6 +365,11 @@ class Messaging:
         with self._lock:
             return self._queues.get(agent_id, deque())
 
+    def queue_depth(self) -> dict[str, int]:
+        """Pending items per recipient (health/metrics)."""
+        with self._lock:
+            return {agent_id: len(q) for agent_id, q in self._queues.items() if q}
+
     def _enqueue(
         self,
         recipient: Harness,
@@ -385,6 +395,11 @@ class Messaging:
         return delivery
 
     def _ensure_worker(self, agent_id: str) -> None:
+        if self._workers_reg is not None:
+            self._workers_reg.spawn(
+                f"msg-queue-{agent_id}", self._drain, args=(agent_id,)
+            )
+            return
         with self._lock:
             worker = self._workers.get(agent_id)
             if worker is not None and worker.is_alive():
@@ -427,7 +442,7 @@ class Messaging:
                     try:
                         self._revive(harness)
                     except Exception:  # noqa: BLE001
-                        pass
+                        pass  # noqa: BLE001 - justified boundary guard (B1)
                     try:
                         harness = self._registry.resolve(agent_id)
                     except KeyError:
@@ -526,7 +541,12 @@ class Messaging:
                     return
                 time.sleep(0.25)
 
-        threading.Thread(target=watch, name="msg-ack", daemon=True).start()
+        if self._workers_reg is not None:
+            self._workers_reg.spawn(
+                f"msg-ack-{delivery.message.message_id}", watch
+            )
+        else:
+            threading.Thread(target=watch, name="msg-ack", daemon=True).start()
 
     def _terminal(self, harness: Harness) -> bool:
         return harness.state() in (AgentState.EXITED, AgentState.ERROR)
@@ -634,7 +654,7 @@ class Messaging:
             try:
                 self._history_store.append(delivery.to_dict())
             except Exception:  # noqa: BLE001 - history must never break delivery
-                pass
+                pass  # noqa: BLE001 - justified boundary guard (B1)
 
     def _lock_for(self, agent_id: str) -> threading.Lock:
         with self._lock:
@@ -651,8 +671,8 @@ class Messaging:
         if callable(logger):
             try:
                 logger(type_, data)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - a broken log sink must not break delivery
+                log.debug("session log callback failed for %s", type_, exc_info=True)
 
     # -- durability --------------------------------------------------------
     def snapshot(self) -> list[dict[str, Any]]:
@@ -685,7 +705,7 @@ class Messaging:
             try:
                 self._store.save(self.snapshot())
             except Exception:  # noqa: BLE001 - persistence must never break delivery
-                pass
+                pass  # noqa: BLE001 - justified boundary guard (B1)
 
     def load(self, items: list[dict[str, Any]], now: float | None = None) -> int:
         """Resume persisted pending messages (drops those already expired)."""

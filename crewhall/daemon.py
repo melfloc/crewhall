@@ -198,9 +198,10 @@ class Server:
         log.info("daemon listening on %s", self.socket_path)
         # Web interfaces chosen with `crewhall local|tailscale` come back up.
         self.frontends.begin_restore()
-        threading.Thread(target=self.frontends.restore, name="frontends-restore", daemon=True).start()
+        self.controller.workers.spawn(
+            "frontends-restore", self.frontends.restore, restart=False)
         # Deliver OnlyOffice co-authoring chat messages to the conversation's agent.
-        threading.Thread(target=self._collab_watcher, name="collab-watcher", daemon=True).start()
+        self.controller.workers.spawn("collab-watcher", self._collab_watcher)
         try:
             from . import conversations
 
@@ -247,7 +248,7 @@ class Server:
         try:
             if not self._orphan:  # a duplicate must not close adopted sessions
                 self.controller.shutdown(kill_agents=self._kill_agents_on_stop)
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
             log.exception("error during controller shutdown")
         if self._sock is not None:
             try:
@@ -298,7 +299,7 @@ class Server:
             record = conversations.producers(conversation_id).get(path) or {}
             agent_id = record.get("producer") or agent_id
         except Exception:  # noqa: BLE001
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
         if not agent_id:
             return
         label = "comentario" if kind == "comment" else "chat"
@@ -497,6 +498,14 @@ class Server:
         info = build_info()
         return {"pid": os.getpid(), "sessions": len(self.controller.registry.all()),
                 "version": info["version"], "build": info.get("commit"), "channel": info["kind"]}
+
+    def _op_health(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Background-worker and queue health (surfaced by `doctor`)."""
+        return {
+            "workers": self.controller.workers.snapshot(),
+            "queues": self.controller.messaging.queue_depth(),
+            "pid": os.getpid(),
+        }
 
     def _op_meta_info(self, request: dict[str, Any]) -> dict[str, Any]:
         return meta_info()
@@ -1353,11 +1362,11 @@ class Server:
         try:
             roots += [t["workspace"] for t in self.controller.list_teams() if t.get("workspace")]
         except Exception:  # noqa: BLE001 - missing teams must not break completion
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
         try:
             roots += [a["cwd"] for a in self.controller.list_agents() if a.get("cwd")]
         except Exception:  # noqa: BLE001
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
         actor = request.get("_actor") if isinstance(request.get("_actor"), dict) else {}
         return fscomplete.complete(
             request.get("prefix"), roots=roots, actor=(actor.get("label") or actor.get("ip") or "local"),
@@ -1417,7 +1426,7 @@ class Server:
         self.stop()
 
 
-def _start_tmpdir_janitor(interval: float | None = None) -> None:
+def _start_tmpdir_janitor(workers: Any, interval: float | None = None) -> None:
     """Periodically prune the dedicated tmpdir (contains Bun's leaked .so)."""
 
     def loop() -> None:
@@ -1435,10 +1444,10 @@ def _start_tmpdir_janitor(interval: float | None = None) -> None:
                 pruned = uploads.cleanup()
                 if pruned:
                     log.info("uploads janitor removed %d stale file(s)", pruned)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 log.exception("tmpdir janitor failed")
 
-    threading.Thread(target=loop, name="tmpdir-janitor", daemon=True).start()
+    workers.spawn("tmpdir-janitor", loop)
 
 
 def _start_terminals_janitor(controller: Controller, interval: float = 60.0) -> None:
@@ -1452,18 +1461,45 @@ def _start_terminals_janitor(controller: Controller, interval: float = 60.0) -> 
                     int(settings.get("terminals.keep_exited_seconds")))
                 if removed:
                     log.info("terminals janitor removed %d exited terminal(s)", removed)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 log.exception("terminals janitor failed")
 
-    threading.Thread(target=loop, name="terminals-janitor", daemon=True).start()
+    controller.workers.spawn("terminals-janitor", loop)
+
+
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(agent_id)s %(message)s"
+
+
+class _AgentIdFilter(logging.Filter):
+    """Give every record an ``agent_id`` field so the log format never breaks."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "agent_id"):
+            record.agent_id = "-"
+        return True
+
+
+def build_log_handler(path: str, max_bytes: int, backup_count: int) -> logging.Handler:
+    """A rotated file handler with the structured crewhall log format."""
+    from logging.handlers import RotatingFileHandler
+
+    handler = RotatingFileHandler(
+        path, maxBytes=max(1, int(max_bytes)), backupCount=max(0, int(backup_count)),
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    handler.addFilter(_AgentIdFilter())
+    return handler
 
 
 def _setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        filename=paths.log_path(),
-    )
+    max_bytes = int(settings.get("maintenance.log_max_mb")) * 1024 * 1024
+    backups = int(settings.get("maintenance.log_backups"))
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+    root.addHandler(build_log_handler(paths.log_path(), max_bytes, backups))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1480,9 +1516,9 @@ def main(argv: list[str] | None = None) -> int:
         uploads.cleanup()
     except Exception:  # noqa: BLE001 - never block startup on cleanup
         log.exception("upload cleanup failed")
-    _start_tmpdir_janitor()
     controller = Controller(adopt=True, persist=True)
     controller.restore()
+    _start_tmpdir_janitor(controller.workers)
     _start_terminals_janitor(controller)
     server = Server(controller, args.socket or paths.socket_path())
 
@@ -1495,7 +1531,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         server.serve_forever()
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
         log.exception("fatal error during daemon startup/serve")
         server._cleanup()
         return 1

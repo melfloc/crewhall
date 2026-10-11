@@ -305,7 +305,7 @@ def restart_daemon(prefix: str, expect_version: str, *, force: bool, log: Log) -
             # update stops the control plane without losing the running work.
             Client(autostart=False).call("shutdown", kill_agents=False)
         except Exception:  # noqa: BLE001
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
         deadline = time.monotonic() + 20
         while ping() and time.monotonic() < deadline:
             time.sleep(0.2)
