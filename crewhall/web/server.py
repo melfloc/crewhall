@@ -1730,8 +1730,8 @@ class _TrackingHTTPServer(ThreadingHTTPServer):
         for hub in hubs:
             try:
                 hub.stop()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - one stuck hub must not stop the rest
+                logging.getLogger("crewhall.web").debug("terminal hub stop failed", exc_info=True)
 
     def process_request(self, request: Any, client_address: Any) -> None:
         with self._clients_lock:
@@ -1806,8 +1806,9 @@ class WebServer:
                 self._httpd.shutdown()
             try:
                 self._httpd.close_terminal_hubs()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - stop serving even if hubs misbehave
+                logging.getLogger("crewhall.web").debug(
+                    "closing terminal hubs failed", exc_info=True)
             self._httpd.server_close()
             self._httpd.close_clients()
 

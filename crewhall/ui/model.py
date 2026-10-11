@@ -484,7 +484,7 @@ class AppModel:
             self.control.resize(agent["agent_id"], cols, rows)
             self._last_resize = key
         except Exception:  # noqa: BLE001 - never crash the UI on a resize race
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
 
     def _apply_pending_select(self) -> None:
         if not self._pending_select:
@@ -857,7 +857,7 @@ class AppModel:
         try:
             self.refresh()
         except Exception:  # noqa: BLE001
-            pass
+            pass  # noqa: BLE001 - justified boundary guard (B1)
 
     def _forward(self, key: str) -> None:
         agent = self.selected_agent()

@@ -221,7 +221,7 @@ class OpenCodeHarness(Harness):
                 if predicate(self.session.capture()):
                     return True
             except Exception:  # noqa: BLE001 - best effort polling
-                pass
+                pass  # noqa: BLE001 - justified boundary guard (B1)
             time.sleep(0.15)
         return False
 

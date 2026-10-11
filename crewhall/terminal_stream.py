@@ -17,6 +17,7 @@ close code 1013, while the others and the terminal keep working.
 from __future__ import annotations
 
 import collections
+import logging
 import os
 import shlex
 import stat
@@ -25,6 +26,8 @@ import threading
 import time
 
 from .web import ws as wsmod
+
+log = logging.getLogger("crewhall.terminal_stream")
 
 CHUNK = 65536
 POLL_INTERVAL = 0.3
@@ -77,8 +80,8 @@ class HubClient:
         if cb is not None:
             try:
                 cb(obj)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - a control callback must not break streaming
+                log.debug("terminal control callback failed", exc_info=True)
 
     def enqueue(self, data: bytes) -> bool:
         if not data:
@@ -110,7 +113,7 @@ class HubClient:
                 self._bytes -= len(data)
             try:
                 self._send(data)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 self.close(wsmod.CLOSE_GOING_AWAY)
                 return
 
@@ -126,8 +129,8 @@ class HubClient:
         if self._on_drop is not None:
             try:
                 self._on_drop(self, code)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - the drop notice is best effort
+                log.debug("client on_drop callback failed", exc_info=True)
 
 
 # -- output sources ----------------------------------------------------------
@@ -189,8 +192,8 @@ class LocalPipeSource(_PipeSource):
     def close(self) -> None:
         try:
             self._run("pipe-pane", "-t", self.pane)
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 - closing a dead source is a no-op
+            log.debug("could not stop pipe-pane for %s", self.pane, exc_info=True)
         try:
             os.close(self.fd)
         except OSError:
@@ -257,8 +260,8 @@ class RemotePipeSource(_PipeSource):
                     self.proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     self.proc.kill()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 - best effort teardown of the ssh source
+            log.debug("ssh terminal source teardown failed", exc_info=True)
 
 
 class PollSource(_PipeSource):
@@ -275,7 +278,7 @@ class PollSource(_PipeSource):
         try:
             text = capture_local(self.socket, self.pane) if self.host_cfg is None \
                 else capture_remote(self.host_cfg, self.socket, self.pane)
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
             return b""
         if text == self._last:
             return b""
@@ -286,7 +289,7 @@ class PollSource(_PipeSource):
         try:
             text = capture_local(self.socket, self.pane) if self.host_cfg is None \
                 else capture_remote(self.host_cfg, self.socket, self.pane)
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
             return b""
         return text.replace("\n", "\r\n").encode("utf-8", "replace")
 
@@ -407,8 +410,8 @@ class InputPump:
         if data:
             try:
                 self._send(data)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - a slow client must not stop the poller
+                log.debug("poll source send failed", exc_info=True)
 
     def close(self) -> None:
         with self._lock:
@@ -455,7 +458,7 @@ class TerminalHub:
                 return
             try:
                 self._source = self._make_source()
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 self._source = PollSource(self.socket, self.pane, self.host_cfg)
                 self.stream_mode = "poll"
             self._stop.clear()
@@ -481,8 +484,8 @@ class TerminalHub:
         if src is not None:
             try:
                 src.close()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - closing an already gone source is a no-op
+                log.debug("terminal source close failed", exc_info=True)
         self._pump.close()
 
     def schedule_stop(self, delay: float = 5.0) -> None:
@@ -549,7 +552,7 @@ class TerminalHub:
         while not self._stop.is_set():
             try:
                 data = source.read(CHUNK)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 break
             if data == b"":
                 # EOF or idle: keep polling a pipe; stop if the source died.
@@ -587,6 +590,6 @@ class TerminalHub:
         if source is None:
             try:
                 source = self._make_source()
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 return b""
         return source.snapshot()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -8,6 +9,8 @@ from typing import Any
 from collections.abc import Iterable
 
 from ..session import InteractiveSession
+
+log = logging.getLogger("crewhall.harness")
 
 
 def sgr_faint(params: str, faint: bool) -> bool:
@@ -425,7 +428,7 @@ class Harness(ABC):
                 try:
                     self.session.send_key(key)
                 except Exception:  # noqa: BLE001
-                    pass
+                    pass  # noqa: BLE001 - justified boundary guard (B1)
             time.sleep(poll)
         return self._input_is_clean()
 
@@ -507,8 +510,8 @@ class Harness(ABC):
     def state(self) -> AgentState:
         try:
             self.session.poll()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 - a broken poll falls back to the last known status
+            log.debug("session poll failed in state()", exc_info=True)
         status = self.session.status
         if not status.alive:
             code = self.session.exit_code

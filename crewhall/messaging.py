@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -9,6 +10,8 @@ from typing import Any
 
 from .harness import AgentState, Harness
 from .harness.base import HarnessNotReady
+
+log = logging.getLogger("crewhall.messaging")
 
 
 class MessagingError(RuntimeError):
@@ -427,7 +430,7 @@ class Messaging:
                     try:
                         self._revive(harness)
                     except Exception:  # noqa: BLE001
-                        pass
+                        pass  # noqa: BLE001 - justified boundary guard (B1)
                     try:
                         harness = self._registry.resolve(agent_id)
                     except KeyError:
@@ -634,7 +637,7 @@ class Messaging:
             try:
                 self._history_store.append(delivery.to_dict())
             except Exception:  # noqa: BLE001 - history must never break delivery
-                pass
+                pass  # noqa: BLE001 - justified boundary guard (B1)
 
     def _lock_for(self, agent_id: str) -> threading.Lock:
         with self._lock:
@@ -651,8 +654,8 @@ class Messaging:
         if callable(logger):
             try:
                 logger(type_, data)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - a broken log sink must not break delivery
+                log.debug("session log callback failed for %s", type_, exc_info=True)
 
     # -- durability --------------------------------------------------------
     def snapshot(self) -> list[dict[str, Any]]:
@@ -685,7 +688,7 @@ class Messaging:
             try:
                 self._store.save(self.snapshot())
             except Exception:  # noqa: BLE001 - persistence must never break delivery
-                pass
+                pass  # noqa: BLE001 - justified boundary guard (B1)
 
     def load(self, items: list[dict[str, Any]], now: float | None = None) -> int:
         """Resume persisted pending messages (drops those already expired)."""

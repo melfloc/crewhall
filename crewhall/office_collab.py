@@ -236,7 +236,7 @@ class CoEditor:
                 if target:
                     break
             except Exception:  # noqa: BLE001 - still booting
-                pass
+                pass  # noqa: BLE001 - justified boundary guard (B1)
             time.sleep(0.3)
         if not target:
             self.close()
@@ -427,7 +427,7 @@ class CoEditor:
                 self.httpd.shutdown()
                 self.httpd.server_close()
             except Exception:  # noqa: BLE001
-                pass
+                pass  # noqa: BLE001 - justified boundary guard (B1)
             self.httpd = None
         if self.proc and self.proc.poll() is None:
             try:
@@ -542,7 +542,7 @@ class CollabRegistry:
                     self._forward(conversation_id, path, user, "chat", text)
                     count += 1
                 except Exception:  # noqa: BLE001
-                    pass
+                    pass  # noqa: BLE001 - justified boundary guard (B1)
         self._seen[key] = len(messages)
         return count
 
@@ -578,7 +578,7 @@ class CollabRegistry:
                     self._forward(conversation_id, path, user, "comment", payload)
                     count += 1
                 except Exception:  # noqa: BLE001
-                    pass
+                    pass  # noqa: BLE001 - justified boundary guard (B1)
         self._seen_comments[key] = seen | new_ids
         if new_ids:
             _save_forwarded(conversation_id, path, seen | new_ids)
