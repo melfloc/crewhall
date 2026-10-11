@@ -27,9 +27,14 @@ from .types import SessionSpec
 
 # How long a Claude permission dialog waits for a Web UI answer before Claude
 # shows it in the TUI (the hook's own timeout is hooks.PERMISSION_HOOK_TIMEOUT).
-PERMISSION_WAIT = 90.0
+PERMISSION_WAIT = 300.0
 PERMISSION_WAIT_MAX = 540.0
-VIEWER_FRESH = 10.0
+# Lifetime of a permission/question card when no Web UI is connected right now:
+# the card is still created (so a viewer that connects a moment later sees it)
+# instead of being dropped entirely.
+PERMISSION_GRACE = 30.0
+# How recently a Web UI must have polled to count as "watching".
+VIEWER_FRESH = 30.0
 
 log = logging.getLogger("crewhall.daemon")
 
@@ -814,18 +819,20 @@ class Server:
         )
 
     def _op_agent_permission_request(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Claude's PermissionRequest hook: wait for an answer from a front-end.
+        """Claude's PermissionRequest/PreToolUse hook: wait for an answer from a front-end.
 
-        Only while someone has the Web UI open (otherwise nobody could answer
-        and the TUI would just be delayed); ``CREWHALL_PERMISSION_WAIT``
-        (seconds, 0 disables) bounds the wait before Claude shows its own dialog.
+        The card is always created so it is never lost; while a Web UI is connected
+        it waits the full ``agents.permission_wait``; with no viewer it holds a short
+        grace (:data:`PERMISSION_GRACE`) so a front-end that reconnects right after
+        still sees it. ``CREWHALL_PERMISSION_WAIT`` (seconds, 0 disables) sets the
+        full wait.
         """
         try:
             wait = float(settings.get("agents.permission_wait"))
         except ValueError:
             wait = PERMISSION_WAIT
         if time.monotonic() - self._viewer_seen > VIEWER_FRESH:
-            wait = 0.0
+            wait = min(wait, PERMISSION_GRACE)
         return self.controller.claude_permission_request(
             request["agent"], request.get("token"), request.get("payload"),
             wait=max(0.0, min(wait, PERMISSION_WAIT_MAX)),

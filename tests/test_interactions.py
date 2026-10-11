@@ -383,10 +383,13 @@ class WaitOnlyWhileSomeoneWatches(unittest.TestCase):
             daemon.Server._op_agent_permission_request(fake, {"agent": "a", "payload": BASH})
         return fake.controller.claude_permission_request.call_args.kwargs["wait"]
 
-    def test_no_web_viewer_means_no_wait(self):
+    def test_no_web_viewer_means_a_short_grace_not_dropped(self):
         from crewhall import daemon
 
-        self.assertEqual(self.call(seen_ago=60), 0.0)
+        # With no viewer the card is still created, but only for a short grace so a
+        # front-end that reconnects right after sees it (never silently dropped).
+        self.assertEqual(self.call(seen_ago=60), daemon.PERMISSION_GRACE)
+        self.assertEqual(self.call(seen_ago=60, env={"CREWHALL_PERMISSION_WAIT": "0"}), 0.0)
         self.assertEqual(self.call(seen_ago=1), daemon.PERMISSION_WAIT)
         self.assertEqual(self.call(seen_ago=1, env={"CREWHALL_PERMISSION_WAIT": "0"}), 0.0)
         self.assertEqual(self.call(seen_ago=1, env={"CREWHALL_PERMISSION_WAIT": "99999"}),

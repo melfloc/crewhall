@@ -5,6 +5,18 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.78.2] — 2026-10-11
+
+- **Las preguntas/permisos ya no se pierden si el Web UI no está conectado en el
+  instante exacto.** El hook solo abría la tarjeta si había un *viewer* "fresco"
+  (≤10 s); si no, devolvía `wait=0` y la tarjeta **nunca se creaba**. Y con viewer
+  se cerraba a los 90 s. Ahora la tarjeta **se crea siempre**: con un margen de
+  `PERMISSION_GRACE` (30 s) cuando no hay viewer, para que un front-end que
+  reconecta justo después la vea; y con viewer el margen por defecto sube a
+  **300 s** (`agents.permission_wait`, configurable, ≤ `PERMISSION_WAIT_MAX`).
+  Esto explica el caso visto en un despliegue real (la *question* se lanzó pero no
+  apareció tarjeta: no había viewer fresco en ese momento / caducó antes).
+
 ## [0.78.1] — 2026-10-10
 
 - **Corrección: las preguntas del agente no aparecían (ni se detectaban).** Eran
