@@ -5,6 +5,23 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.78.1] — 2026-10-10
+
+- **Corrección: las preguntas del agente no aparecían (ni se detectaban).** Eran
+  dos fallos distintos:
+  - **Modo Chat.** Las tarjetas de permiso/pregunta se leían de `S.state.agents`,
+    pero los agentes de chat están ocultos del snapshot de Cowork (aislamiento
+    intencional), así que nunca se encontraban. Ahora el chat usa el resumen del
+    agente que ya viaja en `conversation_info.agent` (con sus interactions
+    pendientes) y lo refresca con el sondeo, dibujando y respondiendo desde ahí.
+  - **Claude Code.** `AskUserQuestion` ya no entra por el hook `PermissionRequest`
+    (es una herramienta de interacción de `PreToolUse`), por lo que crewhall no la
+    veía. Se añade un hook `PreToolUse` con matcher `AskUserQuestion` que reutiliza
+    la misma op de respuesta y emite la decisión con el formato de `PreToolUse`.
+    ⚠️ Los agentes Claude **en marcha** necesitan reiniciarse para tomar el hook.
+  - **OpenCode.** Sondeo defensivo (cada ~2 s, al resumir al agente) que recupera
+    la pregunta si el evento `question.asked` se pierde por un corte del stream.
+
 ## [0.78.0] — 2026-10-10
 
 - **El modo Chat ya responde a los agentes.** Las tarjetas de **permisos y preguntas**

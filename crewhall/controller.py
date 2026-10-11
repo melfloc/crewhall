@@ -193,6 +193,8 @@ class Controller:
         self._worktree_warnings: dict[str, str] = {}
         # Permission prompts / questions the agents' TUIs are waiting on.
         self.interactions = ix.InteractionBoard()
+        # Throttle for the defensive OpenCode interaction poll (see agent_summary).
+        self._interaction_sync: dict[str, float] = {}
         # Launch Claude with a known --session-id so its full history can be read.
         self.track_conversations = settings.get("agents.conversations")
         self._agent_locks: dict[str, threading.Lock] = {}
@@ -598,6 +600,23 @@ class Controller:
         for item in self.interactions.pending(harness.agent_id):
             if item.ref.get("source") == "opencode" and item.interaction_id not in live:
                 self.interactions.close(item.interaction_id)
+
+    def _maybe_sync_interactions(self, harness: Harness) -> None:
+        """Defensive poll: recover OpenCode questions if the event was missed.
+
+        The bridge relies on the agent's event stream; a dropped ``question.asked``
+        (stream hiccup, reconnect race) would otherwise leave the request invisible.
+        Summarising the agent (which the UI and the daemon do regularly) re-checks
+        the CLI's own pending list, throttled so it is cheap.
+        """
+        link = getattr(harness, "link", None)
+        if link is None:
+            return
+        now = time.monotonic()
+        if now - self._interaction_sync.get(harness.agent_id, 0.0) < 2.0:
+            return
+        self._interaction_sync[harness.agent_id] = now
+        self._sync_opencode_interactions(harness, link)
 
     def _log_interaction(self, harness: Harness, what: str, item: ix.Interaction) -> None:
         logger = getattr(harness.session, "_log", None)
@@ -1969,6 +1988,7 @@ class Controller:
         return result
 
     def agent_summary(self, harness: Harness) -> dict[str, Any]:
+        self._maybe_sync_interactions(harness)
         summary = harness.info().to_dict()
         summary["args"] = list(self._agent_args.get(harness.agent_id, []))
         # True when a full conversation can be read for this agent (it may

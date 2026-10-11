@@ -202,8 +202,15 @@ function chatRenderHead(){
 
 /* ---------- pending interactions (permissions / questions) in chat mode ----------
    Reuses the exact cards Cowork shows (agent.js askCard); answering posts the same
-   interaction_respond op, so the chat can clear an agent that is waiting on you. */
-function chatAgent(){ return CHAT.info && CHAT.info.agent_id ? agentById(CHAT.info.agent_id) : null; }
+   interaction_respond op, so the chat can clear an agent that is waiting on you.
+
+   Chat agents are deliberately hidden from the Cowork snapshot, so `agentById`
+   (which reads S.state.agents) never finds them: the summary that carries the
+   pending interactions comes from `conversation_info.agent` instead. */
+function chatAgent(){
+  if(!CHAT.info) return null;
+  return CHAT.info.agent || agentById(CHAT.info.agent_id) || null;
+}
 function chatRenderAsks(){
   const box = $("chat-asks"); if(!box) return;
   const a = chatAgent();
@@ -332,6 +339,7 @@ async function chatLoadArtifacts(){
   catch(e){ return; }
   chatRenderArtifacts();
   chatRenderHead();
+  chatRenderAsks();
 }
 function fmtBytes(n){
   if(n == null) return "";
@@ -445,7 +453,7 @@ function chatStartPoll(){
   CHAT.poll = setInterval(() => {
     if(document.hidden || !CHAT.open) return;
     if(CHAT.active) chatLoadHistory(false);
-    CHAT.lastArtifacts = (CHAT.lastArtifacts + 1) % 4;
+    CHAT.lastArtifacts = (CHAT.lastArtifacts + 1) % 3;
     if(CHAT.active && CHAT.lastArtifacts === 0) chatLoadArtifacts();
     CHAT.osTick = ((CHAT.osTick || 0) + 1) % 10;
     if(CHAT.osTick === 0) chatLoadOffice();

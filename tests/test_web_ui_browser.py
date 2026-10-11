@@ -1444,11 +1444,16 @@ class SpecialKeysAndMenu(_Browser):
 
 
 CHAT_CONV = {"id": "c-1", "title": "Report", "agent_id": "sess_attn",
-             "outputs": [], "inputs": [], "created_at": 0, "updated_at": 0}
+             "outputs": [], "inputs": [], "created_at": 0, "updated_at": 0,
+             # The daemon attaches the agent summary (with its pending interactions)
+             # to conversation_info; chat agents are NOT in the Cowork snapshot.
+             "agent": {**ATTN, "interactions": [PERMISSION, QUESTION]}}
 
 
 class _ChatBase(_Browser):
-    agents = [ATTN]
+    # The chat's agent is hidden from Cowork (the snapshot excludes chat agents):
+    # this is exactly the case that must still surface its questions in Chat.
+    agents = [AGENT]
     conversations = [CHAT_CONV]
     office = {"docker": True, "healthy": True, "running": True, "office_enabled": True,
               "office_public_url": "http://office.local:8081",

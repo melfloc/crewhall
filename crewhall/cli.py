@@ -779,6 +779,36 @@ def _permission_hook(args: argparse.Namespace, agent: str, payload: dict) -> int
     return 0
 
 
+def _question_hook(args: argparse.Namespace, agent: str, payload: dict) -> int:
+    """``PreToolUse`` for AskUserQuestion: same op, printed as a PreToolUse decision.
+
+    The question (and the user's answer) travel through the identical
+    ``agent_permission_request`` op; only the JSON shape Claude expects differs.
+    No output means "let the TUI ask on its own".
+    """
+    try:
+        out = _client(args).call(
+            "agent_permission_request", agent=agent,
+            token=brand.env("TOKEN"), payload=payload,
+        )
+    except Exception:  # noqa: BLE001
+        return 0
+    decision = out.get("decision")
+    if not isinstance(decision, dict):
+        return 0
+    if decision.get("behavior") == "allow":
+        hook: dict[str, Any] = {"hookEventName": "PreToolUse", "permissionDecision": "allow"}
+        if decision.get("updatedInput"):
+            hook["updatedInput"] = decision["updatedInput"]
+        print(json.dumps({"hookSpecificOutput": hook}))
+    elif decision.get("behavior") == "deny":
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "deny",
+            "permissionDecisionReason": decision.get("message") or "The user dismissed the question.",
+        }}))
+    return 0
+
+
 def cmd_agent_hook(args: argparse.Namespace) -> int:
     agent = brand.env("AGENT_ID")
     if not agent:
@@ -786,6 +816,8 @@ def cmd_agent_hook(args: argparse.Namespace) -> int:
     payload = _hook_payload()
     if args.event == "permission_request":
         return _permission_hook(args, agent, payload)
+    if args.event == "question_request":
+        return _question_hook(args, agent, payload)
     _client(args).call(
         "agent_hook", agent=agent,
         token=brand.env("TOKEN"), event=args.event,
@@ -1482,7 +1514,8 @@ def build_parser() -> argparse.ArgumentParser:
     a.set_defaults(func=cmd_agent_list)
 
     a = asub.add_parser("hook", help="(internal) report an agent lifecycle event")
-    a.add_argument("event", choices=["session_start", "prompt_submit", "stop", "permission_request"])
+    a.add_argument("event", choices=["session_start", "prompt_submit", "stop",
+                                     "permission_request", "question_request"])
     a.set_defaults(func=cmd_agent_hook)
 
     a = asub.add_parser(

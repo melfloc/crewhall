@@ -165,6 +165,21 @@ class OpenCodeInteractions(unittest.TestCase):
         self.c.remove_agent(self.h.agent_id, force=True)
         self.assertEqual(self.c.list_interactions(), [])
 
+    def test_agent_summary_recovers_a_question_whose_event_was_missed(self):
+        # No event is delivered: the summary poll re-checks the CLI's own pending
+        # list, so a dropped ``question.asked`` still surfaces.
+        FakeServer.state["perms"].clear()
+        summary = self.c.agent_summary(self.h)
+        self.assertEqual([i["kind"] for i in summary["interactions"]], ["question"])
+
+    def test_the_sync_poll_is_throttled(self):
+        FakeServer.state["perms"].clear()
+        self.c._interaction_sync.clear()
+        self.c.agent_summary(self.h)
+        stamp = self.c._interaction_sync[self.h.agent_id]
+        self.c.agent_summary(self.h)  # within the window: no new poll
+        self.assertEqual(self.c._interaction_sync[self.h.agent_id], stamp)
+
 
 class Board(unittest.TestCase):
     def test_closed_requests_are_pruned_after_a_while(self):
@@ -294,6 +309,16 @@ class ClaudeHookWiring(unittest.TestCase):
         self.assertTrue(entry["command"].endswith("|| true"))
         self.assertEqual(entry["timeout"], hooks.PERMISSION_HOOK_TIMEOUT)
 
+    def test_askuserquestion_is_bridged_through_pretooluse(self):
+        # AskUserQuestion is a PreToolUse user-interaction tool in current Claude
+        # Code, so it must be matched there (not only via PermissionRequest).
+        groups = hooks.claude_settings()["hooks"]["PreToolUse"]
+        self.assertEqual(groups[0]["matcher"], "AskUserQuestion")
+        entry = groups[0]["hooks"][0]
+        self.assertIn("agent hook question_request", entry["command"])
+        self.assertNotIn(">/dev/null 2>&1", entry["command"])
+        self.assertTrue(entry["command"].endswith("|| true"))
+
     def run_hook(self, response=None, error=None):
         client = mock.Mock()
         client.call.side_effect = error
@@ -317,6 +342,33 @@ class ClaudeHookWiring(unittest.TestCase):
         self.assertEqual(self.run_hook({"decision": None})[1], "")
         code, out, _ = self.run_hook(error=RuntimeError("daemon down"))
         self.assertEqual((code, out), (0, ""))
+
+    def run_question_hook(self, response):
+        client = mock.Mock()
+        client.call.return_value = response
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"CREWHALL_AGENT_ID": "a1", "CREWHALL_TOKEN": "t"}), \
+                mock.patch.object(cli, "_client", lambda args: client), \
+                mock.patch.object(cli, "_hook_payload", lambda: dict(ASK)), \
+                mock.patch("sys.stdout", out):
+            code = cli.cmd_agent_hook(mock.Mock(event="question_request"))
+        return code, out.getvalue()
+
+    def test_question_hook_prints_a_pretooluse_decision(self):
+        decision = {"behavior": "allow", "updatedInput": {"questions": [], "answers": {"q": "a"}}}
+        code, out = self.run_question_hook({"decision": decision})
+        self.assertEqual(code, 0)
+        hook = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hook["hookEventName"], "PreToolUse")
+        self.assertEqual(hook["permissionDecision"], "allow")
+        self.assertEqual(hook["updatedInput"]["answers"], {"q": "a"})
+
+    def test_question_hook_deny_and_no_decision(self):
+        _, out = self.run_question_hook({"decision": {"behavior": "deny", "message": "no"}})
+        hook = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hook["permissionDecision"], "deny")
+        self.assertEqual(hook["permissionDecisionReason"], "no")
+        self.assertEqual(self.run_question_hook({"decision": None})[1], "")
 
 
 class WaitOnlyWhileSomeoneWatches(unittest.TestCase):

@@ -48,6 +48,14 @@ def permission_hook_command(remote: bool = False) -> str:
     return f"{base} agent hook permission_request 2>/dev/null || true"
 
 
+def question_hook_command(remote: bool = False) -> str:
+    base = _base(remote)
+    # AskUserQuestion/ExitPlanMode are user-interaction tools handled by
+    # ``PreToolUse`` (not ``PermissionRequest``); the same op answers them and we
+    # print a ``PreToolUse`` decision. No output means "let the TUI ask".
+    return f"{base} agent hook question_request 2>/dev/null || true"
+
+
 def claude_settings(remote: bool = False) -> dict:
     settings = {
         "hooks": {
@@ -55,11 +63,20 @@ def claude_settings(remote: bool = False) -> dict:
             for name, event in _CLAUDE_EVENTS.items()
         }
     }
-    # A permission dialog (or AskUserQuestion) can be answered from the Web UI.
+    # A permission dialog can be answered from the Web UI.
     settings["hooks"]["PermissionRequest"] = [{"hooks": [{
         "type": "command", "command": permission_hook_command(remote),
         "timeout": PERMISSION_HOOK_TIMEOUT,
     }]}]
+    # ``AskUserQuestion`` (the agent asking you something) is a PreToolUse tool as
+    # of current Claude Code: bridged here so its card shows in the Web UI too.
+    settings["hooks"]["PreToolUse"] = [{
+        "matcher": "AskUserQuestion",
+        "hooks": [{
+            "type": "command", "command": question_hook_command(remote),
+            "timeout": PERMISSION_HOOK_TIMEOUT,
+        }],
+    }]
     return settings
 
 
