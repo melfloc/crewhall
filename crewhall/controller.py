@@ -25,7 +25,7 @@ from . import processes as procs
 from .opencode_link import OpenCodeLink, free_port
 from .messaging import Delivery, Messaging, MessagingError
 from .requests import OPEN_STATES, RequestBoard, RequestError
-from .persistence import PendingQueueStore, StateStore
+from .persistence import HistoryStore, PendingQueueStore, StateStore
 from .remote_link import RemoteLinks
 from .session import InteractiveSession
 from .team import Team, TeamError, TeamRegistry
@@ -201,8 +201,17 @@ class Controller:
         self._locks_guard = threading.Lock()
         self._store = StateStore() if persist else None
         self._pending_store = PendingQueueStore() if persist else None
+        history_store = None
+        history_limit = 1000
+        if persist:
+            entries = int(settings.get("messaging.history_entries"))
+            days = int(settings.get("messaging.history_days"))
+            history_store = HistoryStore(max_entries=entries, max_age_days=days or None)
+            history_limit = entries or 1000
+        self._history_store = history_store
         self.messaging = Messaging(
             self.agents, revive=self._revive_agent, store=self._pending_store,
+            history_limit=history_limit, history_store=history_store,
         )
         self.requests = RequestBoard(
             max_open_per_agent=int(settings.get("requests.max_open_per_agent")),
@@ -1281,6 +1290,13 @@ class Controller:
                 self.messaging.load(self._pending_store.load())
             except Exception:  # noqa: BLE001 - a bad queue must not stop startup
                 log.exception("could not resume the pending message queue")
+        # Restore the message history so the crew strip / Message flow survive
+        # the restart (Fase A2).
+        if self._history_store is not None:
+            try:
+                self.messaging.load_history()
+            except Exception:  # noqa: BLE001 - a bad history must not stop startup
+                log.exception("could not restore the message history")
 
     def _restore_agent(self, agent: dict[str, Any]) -> None:
         agent_id = agent["agent_id"]

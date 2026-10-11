@@ -138,6 +138,11 @@ def _static_schema() -> list[dict[str, Any]]:
           "How long a request waits for its reply before it expires.", min=10, max=86400),
         s("requests.max_body_chars", "requests", "int", 8000, "Max request/reply size (chars)",
           "Requests and replies longer than this are rejected.", min=256, max=65536),
+        s("messaging.history_entries", "messaging", "int", 2000, "Message history entries",
+          "How many agent messages are kept on disk (the crew strip and Message flow survive "
+          "a daemon restart). Older entries are dropped as new ones arrive.", min=0, max=1000000),
+        s("messaging.history_days", "messaging", "int", 30, "Message history retention (days)",
+          "Message history older than this is pruned (0 = keep forever).", min=0, max=3650),
         s("maintenance.tmp_max_age_minutes", "maintenance", "int", 60, "Temp files: max age (min)",
           "Agent temp files older than this are removed by the janitor.", min=5, max=10080),
         s("maintenance.tmp_max_mb", "maintenance", "int", 512, "Temp dir: size cap (MB)",
