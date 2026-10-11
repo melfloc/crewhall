@@ -82,7 +82,11 @@ chat arranca sin interacción.
 y `AGENTS.md`) y el `workspace/` de cada conversación llevan un fichero de reglas
 que explica al agente las carpetas (`inputs/outputs/workspace`) y cómo usar
 `crewhall office open|insert|read|comment|say|save` para editar en vivo, leer
-comentarios y responder en el chat del documento.
+comentarios y responder en el chat del documento. Junto a las reglas se escribe
+`ONLYOFFICE.md`, la **guía profesional** (formatos, cuándo usar FS vs co-editor,
+formato OOXML con estilos, per-app, errores frecuentes); el SOP corto va dentro
+de las propias reglas (`crewhall/office_guide.py`, publicado en
+`docs/ONLYOFFICE-AGENTS.md`).
 
 **El chat revive al agente.** Si el agente está `exited`/`error` (p. ej. tras
 reiniciar el daemon), enviar un mensaje lo reinicia antes de escribir

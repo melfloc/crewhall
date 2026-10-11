@@ -5,6 +5,22 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.79.0] — 2026-10-11
+
+- **Agentes de chat profesionales con OnlyOffice.** Cada conversación recibe ahora,
+  junto a `CLAUDE.md`/`AGENTS.md`, una **guía completa** (`ONLYOFFICE.md`) y un
+  **SOP** que se añade a las reglas (se lee en cada turno). Deja claro lo que la
+  integración hace de verdad y cómo producir documentos impecables:
+  - **Formato por archivo (FS)** para crear/reestructurar (estilos con nombre,
+    títulos, tablas, fórmulas) con `python-docx`/`openpyxl`/`python-pptx`/`pandoc`.
+  - **Texto incremental por el co-editor** (`office insert` = `Add_Text`, texto
+    plano en el cursor; el usuario lo ve en vivo) — nunca para dar formato.
+  - Elección de formato (`docx`/`xlsx`/`pptx`; `.md`/`.csv` se abren como texto/hoja;
+    `.pdf` es solo lectura), modelo de las **tres URLs**, `document.key`, guardado
+    por callback, comentarios anclados y chat, y errores frecuentes.
+  La guía vive en el paquete (`crewhall/office_guide.py`) y el repo la publica en
+  `docs/ONLYOFFICE-AGENTS.md`, con un test que impide que se desincronicen.
+
 ## [0.78.2] — 2026-10-11
 
 - **Las preguntas/permisos ya no se pierden si el Web UI no está conectado en el

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from crewhall import conversations
+from crewhall import conversations, office_guide
 
 
 class _Base(unittest.TestCase):
@@ -148,6 +148,29 @@ class Files(_Base):
         self.assertEqual([f["name"] for f in conversations.list_files(meta["id"], "outputs")],
                          ["real.txt"])
         self.assertEqual(conversations.list_files(meta["id"], "inputs"), [])
+
+    def test_chat_rules_carry_the_professional_onlyoffice_sop(self):
+        meta = conversations.create("chat")
+        ws = conversations.workspace(meta["id"])
+        rules = open(os.path.join(ws, "CLAUDE.md"), encoding="utf-8").read()
+        self.assertIn("OnlyOffice: documentos impecables", rules)
+        # The full reference ships next to the rules, byte-for-byte the module's.
+        guide = open(os.path.join(ws, "ONLYOFFICE.md"), encoding="utf-8").read()
+        self.assertEqual(guide, office_guide.GUIDE)
+        self.assertIn("Add_Text", guide)          # insert is plain text
+        self.assertIn("python-docx", guide)       # create/format by file
+
+    def test_global_chat_dir_also_carries_the_guide(self):
+        meta = conversations.create("chat")
+        root = os.path.realpath(conversations.root())
+        self.assertTrue(os.path.isfile(os.path.join(root, "CLAUDE.md")))
+        self.assertTrue(os.path.isfile(os.path.join(root, "ONLYOFFICE.md")))
+        self.assertEqual(meta["id"], conversations.get(meta["id"])["id"])
+
+    def test_repo_copy_of_the_guide_stays_in_sync(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "docs", "ONLYOFFICE-AGENTS.md")
+        with open(path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), office_guide.GUIDE)
 
 
 if __name__ == "__main__":

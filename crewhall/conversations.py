@@ -20,7 +20,7 @@ import threading
 import time
 from typing import Any
 
-from . import paths, settings
+from . import office_guide, paths, settings
 
 # An artifact/input name is reduced to a safe basename; an oversized extension
 # is not an extension.
@@ -265,6 +265,9 @@ Los **comentarios** anclados llegan como `[OnlyOffice comentario · …] sobre
 "texto": …`; haz el cambio pedido sobre ese texto y responde por el chat o con
 un comentario.
 """
+# The professional OnlyOffice SOP is appended so every chat agent reads it on
+# each turn; the full reference lives next to it as ONLYOFFICE.md (see below).
+RULES = RULES + office_guide.RULES_SECTION
 
 
 def ensure_rules(directory: str) -> None:
@@ -281,6 +284,7 @@ def ensure_rules(directory: str) -> None:
             os.chmod(path, 0o600)
         except OSError:
             pass
+    office_guide.ensure_guide(directory)
 
 
 def ensure_global_rules() -> None:
