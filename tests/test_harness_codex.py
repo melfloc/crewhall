@@ -9,6 +9,8 @@ import unittest
 from crewhall import codex_rollout
 from crewhall.harness.codex import CodexHarness
 
+from .support import FakeSession
+
 ACCOUNT_ID = "acct-SUPER-SECRET-0001"
 
 
@@ -83,6 +85,72 @@ class CodexHarnessUnit(unittest.TestCase):
 
     def test_dangerous_flags_are_declared(self):
         self.assertIn("--dangerously-bypass-approvals-and-sandbox", CodexHarness.dangerous_flags)
+
+
+class _CodexSession(FakeSession):
+    """FakeSession that draws Codex's input line with escape sequences.
+
+    ``ghost`` is the rotating suggestion, rendered faint (SGR 2) after a bold
+    ``›`` and a reset, exactly like Codex CLI 0.158.0. ``input_text`` is a real
+    (non-faint) draft. A ``help`` line keeps the placeholder text on screen so
+    ``_detect`` still reports READY.
+    """
+
+    def __init__(self, input_text: str = "", ghost: str = "") -> None:
+        super().__init__(screen="", name="codex")
+        self.input_text = input_text
+        self.ghost = ghost
+        self._render()
+
+    def _render(self) -> None:
+        line = self.input_text or self.ghost
+        self.screen = "\n".join([
+            "  >_ OpenAI Codex (v0.158.0)",
+            "  Ask Codex to do anything",  # help text keeps the TUI "mounted"
+            "\u203a " + line,
+            "  GPT-5.6-Terra medium \u00b7 /tmp/x",
+            "  ? for shortcuts",
+        ])
+
+    def capture(self, escapes: bool = False) -> str:
+        if not escapes or self.input_text or not self.ghost:
+            return self.screen
+        return self.screen.replace(
+            "\u203a " + self.ghost,
+            "\x1b[1m\u203a\x1b[0m \x1b[2m" + self.ghost + "\x1b[0m")
+
+
+class CodexGhostText(unittest.TestCase):
+    def test_faint_suggestion_reads_as_empty(self):
+        harness = CodexHarness(_CodexSession(ghost='Shall we turn "what if" into something?'))
+        self.assertTrue(harness._input_is_ghost())
+        self.assertEqual(harness.input_line(), "")
+
+    def test_typed_draft_is_not_ghost(self):
+        harness = CodexHarness(_CodexSession(input_text="borrador"))
+        self.assertFalse(harness._input_is_ghost())
+        self.assertEqual(harness.input_line(), "borrador")
+
+    def test_suggestion_does_not_block_send(self):
+        session = _CodexSession(ghost="Shall we turn this into a test?")
+        harness = CodexHarness(session)
+        harness.send("hola", timeout=2)
+        self.assertEqual(session.writes, ["hola"])
+        self.assertEqual(session.keys, ["ENTER"])
+        self.assertNotIn("CTRL_U", session.keys)
+        self.assertNotIn("ESC", session.keys)
+
+    def test_human_draft_raises_without_clearing(self):
+        from crewhall.harness.base import HarnessNotReady
+
+        session = _CodexSession(input_text="borrador humano")
+        harness = CodexHarness(session)
+        with self.assertRaises(HarnessNotReady):
+            harness.send("hola", timeout=0.5)
+        self.assertEqual(session.writes, [])
+        self.assertNotIn("CTRL_U", session.keys)
+        self.assertNotIn("ESC", session.keys)
+        self.assertEqual(session.input_text, "borrador humano")
 
 
 RUN = os.environ.get("AT_RUN_CODEX") == "1"

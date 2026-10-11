@@ -4,7 +4,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .harness import AgentState, Harness
@@ -59,6 +59,15 @@ class Delivery:
     retryable: bool = False
     # Set when the recipient visibly started working after the injection.
     acknowledged_at: float | None = None
+    #-- queue bookkeeping (internal, never serialized by to_dict) ---------
+    # Text actually typed (already carries the ``[from: …]`` prefix or not).
+    text: str = ""
+    # Absolute wall-clock expiry of the queued item (None: no TTL).
+    expires_at: float | None = None
+    # Whether the queue worker already tried to revive the recipient once.
+    revive_tried: bool = False
+    # Insertion marker for history-ordered key pruning (internal).
+    _seq: int = field(default=0, compare=False)
 
     @property
     def status(self) -> str:
@@ -88,13 +97,20 @@ class Delivery:
 
 
 class Messaging:
-    """Minimal agent-to-agent messaging over the Harness contract.
+    """Agent-to-agent messaging with an ordered, durable per-recipient queue.
 
     Delivery is synchronous and means: the recipient ``Harness.send()`` accepted
     the body and injected it into its input (``InteractiveSession.write`` +
     ``send_enter``). It does NOT mean the agent finished processing the message,
     and it does NOT mean the model answered. If that stronger guarantee is ever
     needed, it belongs to a later layer (Inbox/Teams), not here.
+
+    When a recipient is momentarily WORKING (or its input holds a human draft),
+    messages are handed to a **FIFO queue with one worker per recipient**, so
+    several messages to the same agent arrive in order (never interleaved or
+    reordered). Queued entries are persisted (with their remaining TTL) and
+    resumed on the next daemon start; a message carries at most one retry worker,
+    not one thread per attempt.
 
     This layer knows only agent identity and the ``Harness.send`` method. It has
     no knowledge of OpenCode, Claude Code, tmux or PTYs.
@@ -107,14 +123,20 @@ class Messaging:
         history_limit: int = 1000,
         revive: Any = None,
         ack_timeout: float = 15.0,
+        store: Any = None,
     ) -> None:
         self._registry = registry
         self._ack_timeout = ack_timeout
-        # (sender, recipient, body) -> Delivery still waiting in the retry queue.
-        self._pending: dict[tuple[str, str, str], Delivery] = {}
+        self._store = store
+        self._queues: dict[str, deque[Delivery]] = {}
+        self._workers: dict[str, threading.Thread] = {}
+        self._keys: dict[str, Delivery] = {}
         self._history: deque[Delivery] = deque(maxlen=history_limit)
         self._lock = threading.RLock()
         self._send_locks: dict[str, threading.Lock] = {}
+        self._stop = threading.Event()
+        self._persist_lock = threading.Lock()
+        self._seq = 0
         # Optional callable(harness) that restarts a stopped agent on demand.
         self._revive = revive
 
@@ -129,46 +151,21 @@ class Messaging:
         queue_if_busy: bool = True,
         queue_ttl: float = 1800.0,
         prefix_sender: bool = False,
+        message_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> Delivery:
         """Deliver a message to the recipient's own terminal.
 
         If the recipient is momentarily WORKING (e.g. an orchestrator blocked in
         its own turn waiting for this reply), a synchronous wait would deadlock
-        the sender. Instead, after a short grace ``wait`` we hand the message to
-        a deferred worker that keeps trying until the recipient is usable again
-        (bounded by ``queue_ttl``); the returned Delivery is marked
-        ``queued=True``. This is a bounded retry, not a persistent queue.
+        the sender. Instead, after a short grace ``wait`` we append the message to
+        the recipient's FIFO queue and return a Delivery marked ``queued=True``.
+
+        Two calls with the same ``idempotency_key`` (or the same caller-supplied
+        ``message_id``) return the very same Delivery; two identical bodies with
+        no such key are two legitimate messages and are never merged.
         """
         sender_harness = self._resolve(sender, "sender")
-        recipient_harness = self._resolve(recipient, "recipient")
-        if sender_harness.agent_id == recipient_harness.agent_id:
-            raise MessagingError(
-                f"cannot send a message from an agent to itself "
-                f"({sender_harness.agent_id})"
-            )
-        if authorize is not None:
-            authorize(sender_harness, recipient_harness)
-
-        key = (sender_harness.agent_id, recipient_harness.agent_id, body)
-        with self._lock:
-            pending = self._pending.get(key)
-        if pending is not None and pending.queued and not pending.delivered:
-            # Same message still waiting for a busy recipient: do not duplicate.
-            return pending
-
-        message = Message(
-            message_id=new_message_id(),
-            sender=sender_harness.agent_id,
-            recipient=recipient_harness.agent_id,
-            body=body,
-            timestamp=time.time(),
-        )
-        delivery = Delivery(
-            message=message,
-            delivered=False,
-            sender_name=sender_harness.name,
-            recipient_name=recipient_harness.name,
-        )
         # What is typed into the recipient's terminal. Messages carry no sender
         # on their own, so agent-to-agent sends are attributed explicitly.
         text = (
@@ -176,14 +173,116 @@ class Messaging:
             if prefix_sender
             else body
         )
-        self._log(
-            sender_harness,
-            "message_sent",
-            {"message_id": message.message_id, "recipient": message.recipient,
-             "size": len(body)},
+        return self._deliver(
+            sender_id=sender_harness.agent_id,
+            sender_name=sender_harness.name,
+            sender_harness=sender_harness,
+            recipient=recipient,
+            body=body,
+            text=text,
+            authorize=authorize,
+            wait=wait,
+            queue_if_busy=queue_if_busy,
+            queue_ttl=queue_ttl,
+            message_id=message_id,
+            idempotency_key=idempotency_key,
         )
 
+    def send_system(
+        self,
+        recipient: str,
+        body: str,
+        *,
+        origin: str,
+        queue_ttl: float = 1800.0,
+        idempotency_key: str | None = None,
+        wait: float = 2.0,
+    ) -> Delivery:
+        """Deliver a message with no agent sender (e.g. an OnlyOffice comment).
+
+        Same FIFO queue, persistence and acknowledgement as ``send`` but there is
+        no sender to authenticate: the body is attributed to ``system:<origin>``.
+        A short synchronous grace (``wait``) keeps a READY recipient instant; a
+        WORKING one, or one holding a human draft, is queued and retried instead
+        of losing the message.
+        """
+        return self._deliver(
+            sender_id=f"system:{origin}",
+            sender_name=origin,
+            sender_harness=None,
+            recipient=recipient,
+            body=body,
+            text=body,
+            authorize=None,
+            wait=wait,
+            queue_if_busy=True,
+            queue_ttl=queue_ttl,
+            message_id=None,
+            idempotency_key=idempotency_key,
+        )
+
+    def _deliver(
+        self,
+        *,
+        sender_id: str,
+        sender_name: str | None,
+        sender_harness: Harness | None,
+        recipient: str,
+        body: str,
+        text: str,
+        authorize: Any,
+        wait: float,
+        queue_if_busy: bool,
+        queue_ttl: float,
+        message_id: str | None,
+        idempotency_key: str | None,
+    ) -> Delivery:
+        """Shared delivery path for ``send`` (agent) and ``send_system``."""
+        recipient_harness = self._resolve(recipient, "recipient")
+        if sender_harness is not None and sender_harness.agent_id == recipient_harness.agent_id:
+            raise MessagingError(
+                f"cannot send a message from an agent to itself "
+                f"({sender_harness.agent_id})"
+            )
+        if authorize is not None:
+            authorize(sender_harness, recipient_harness)
+
+        dedup_key = idempotency_key or message_id
+        if dedup_key:
+            with self._lock:
+                existing = self._keys.get(dedup_key)
+            if existing is not None:
+                return existing
+
+        message = Message(
+            message_id=message_id or new_message_id(),
+            sender=sender_id,
+            recipient=recipient_harness.agent_id,
+            body=body,
+            timestamp=time.time(),
+        )
+        delivery = Delivery(
+            message=message,
+            delivered=False,
+            sender_name=sender_name,
+            recipient_name=recipient_harness.name,
+        )
+        delivery.text = text
+        if sender_harness is not None:
+            self._log(
+                sender_harness,
+                "message_sent",
+                {"message_id": message.message_id, "recipient": message.recipient,
+                 "size": len(body)},
+            )
+
         with self._lock_for(recipient_harness.agent_id):
+            # Once anything is queued for this recipient, new messages line up
+            # behind it: FIFO across both the synchronous and deferred paths.
+            if len(self._queue_of(recipient_harness.agent_id)) > 0:
+                return self._enqueue(
+                    recipient_harness, delivery, queue_ttl, dedup_key)
+
             if self._revive is not None and not recipient_harness.session.status.alive:
                 self._log(
                     recipient_harness,
@@ -199,26 +298,21 @@ class Messaging:
             if delivery.error is None:
                 # Short synchronous attempt so READY recipients deliver now.
                 if self._await_usable(recipient_harness, wait, poll=0.25):
+                    if self._try_inject(recipient_harness, delivery, delivery.text):
+                        self._record(delivery, dedup_key)
+                        return delivery
                     if (
-                        not self._try_inject(recipient_harness, delivery, text)
-                        and delivery.retryable
+                        delivery.retryable
                         and queue_if_busy
                         and not self._terminal(recipient_harness)
                     ):
-                        # Usable a moment ago but not safe to type into now:
-                        # hand over to the bounded retry worker.
-                        delivery.queued = True
-                        self._record(delivery)
-                        self._defer(
-                            recipient_harness.agent_id, delivery, text, queue_ttl,
-                            key,
-                        )
-                        return delivery
+                        # Usable a moment ago but not safe to type into now
+                        # (e.g. a human started drafting): queue and retry.
+                        return self._enqueue(
+                            recipient_harness, delivery, queue_ttl, dedup_key)
                 elif queue_if_busy and not self._terminal(recipient_harness):
-                    delivery.queued = True
-                    self._record(delivery)
-                    self._defer(recipient_harness.agent_id, delivery, text, queue_ttl, key)
-                    return delivery
+                    return self._enqueue(
+                        recipient_harness, delivery, queue_ttl, dedup_key)
                 else:
                     delivery.error = "recipient not usable"
                     self._log(
@@ -227,8 +321,122 @@ class Messaging:
                          "sender": message.sender, "error": delivery.error},
                     )
 
-        self._record(delivery)
+        self._record(delivery, dedup_key)
         return delivery
+
+    # -- ordered queue -----------------------------------------------------
+    def _queue_of(self, agent_id: str) -> deque[Delivery]:
+        with self._lock:
+            return self._queues.get(agent_id, deque())
+
+    def _enqueue(
+        self,
+        recipient: Harness,
+        delivery: Delivery,
+        ttl: float,
+        dedup_key: str | None,
+    ) -> Delivery:
+        delivery.queued = True
+        delivery.expires_at = time.time() + ttl if ttl and ttl > 0 else None
+        agent_id = recipient.agent_id
+        with self._lock:
+            self._queues.setdefault(agent_id, deque()).append(delivery)
+        self._record(delivery, dedup_key)
+        self._persist()
+        self._ensure_worker(agent_id)
+        return delivery
+
+    def _ensure_worker(self, agent_id: str) -> None:
+        with self._lock:
+            worker = self._workers.get(agent_id)
+            if worker is not None and worker.is_alive():
+                return
+            worker = threading.Thread(
+                target=self._drain, args=(agent_id,),
+                name=f"msg-queue-{agent_id}", daemon=True,
+            )
+            self._workers[agent_id] = worker
+        worker.start()
+
+    def _drain(self, agent_id: str) -> None:
+        """Deliver this recipient's queue strictly in order.
+
+        One worker per recipient: it only ever looks at the head item, so order
+        is preserved even under concurrent sends.
+        """
+        while not self._stop.is_set():
+            with self._lock:
+                queue = self._queues.get(agent_id)
+                if not queue:
+                    self._queues.pop(agent_id, None)
+                    self._workers.pop(agent_id, None)
+                    return
+                delivery = queue[0]
+
+            if delivery.expires_at and time.time() > delivery.expires_at:
+                self._drop(agent_id, delivery, error="queue ttl expired")
+                continue
+
+            try:
+                harness = self._registry.resolve(agent_id)
+            except KeyError:
+                self._drop(agent_id, delivery, error="recipient removed")
+                continue
+
+            if self._terminal(harness):
+                if self._revive is not None and not delivery.revive_tried:
+                    delivery.revive_tried = True
+                    try:
+                        self._revive(harness)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    try:
+                        harness = self._registry.resolve(agent_id)
+                    except KeyError:
+                        pass
+                if self._terminal(harness):
+                    self._drop(agent_id, delivery, error="recipient not usable")
+                    continue
+
+            if not harness.state().usable:
+                self._stop.wait(0.5)
+                continue
+
+            with self._lock_for(agent_id):
+                injected = self._try_inject(harness, delivery, delivery.text)
+            if injected:
+                self._log(harness, "message_delivered_deferred",
+                          {"message_id": delivery.message.message_id})
+                self._drop(agent_id, delivery)
+                continue
+            if delivery.retryable:
+                self._stop.wait(0.5)
+                continue
+            self._drop(agent_id, delivery, error=delivery.error or "injection failed")
+
+    def _drop(self, agent_id: str, delivery: Delivery, error: str | None = None) -> None:
+        with self._lock:
+            queue = self._queues.get(agent_id)
+            if queue and queue[0] is delivery:
+                queue.popleft()
+            if not queue:
+                self._queues.pop(agent_id, None)
+                self._workers.pop(agent_id, None)
+            if error is not None:
+                # Given up: it is no longer queued, it failed (status "failed").
+                delivery.queued = False
+                if delivery.error is None:
+                    delivery.error = error
+        if error is not None:
+            try:
+                harness = self._registry.resolve(agent_id)
+            except KeyError:
+                harness = None
+            if harness is not None:
+                self._log(harness, "message_failed",
+                          {"message_id": delivery.message.message_id,
+                           "sender": delivery.message.sender, "error": delivery.error})
+        self._persist()
 
     # -- delivery helpers --------------------------------------------------
     def _try_inject(self, harness: Harness, delivery: Delivery, body: str) -> bool:
@@ -285,49 +493,6 @@ class Messaging:
     def _terminal(self, harness: Harness) -> bool:
         return harness.state() in (AgentState.EXITED, AgentState.ERROR)
 
-    def _defer(
-        self,
-        agent_id: str,
-        delivery: Delivery,
-        body: str,
-        ttl: float,
-        key: tuple[str, str, str] | None = None,
-    ) -> None:
-        if key is not None:
-            with self._lock:
-                self._pending[key] = delivery
-
-        def forget() -> None:
-            if key is not None:
-                with self._lock:
-                    if self._pending.get(key) is delivery:
-                        del self._pending[key]
-
-        def worker() -> None:
-            try:
-                run()
-            finally:
-                forget()
-
-        def run() -> None:
-            deadline = time.monotonic() + ttl
-            while time.monotonic() < deadline:
-                time.sleep(1.0)
-                try:
-                    harness = self._registry.resolve(agent_id)
-                except KeyError:
-                    return  # agent removed
-                if self._terminal(harness):
-                    return
-                if not harness.state().usable:
-                    continue
-                with self._lock_for(agent_id):
-                    if self._try_inject(harness, delivery, body):
-                        self._log(harness, "message_delivered_deferred",
-                                  {"message_id": delivery.message.message_id})
-                        return
-        threading.Thread(target=worker, name=f"msg-defer-{agent_id}", daemon=True).start()
-
     def history(
         self,
         *,
@@ -378,9 +543,15 @@ class Messaging:
         except KeyError as exc:
             raise MessagingError(f"unknown {role} {target!r}") from exc
 
-    def _record(self, delivery: Delivery) -> None:
+    def _record(self, delivery: Delivery, dedup_key: str | None = None) -> None:
         with self._lock:
+            self._seq += 1
+            delivery._seq = self._seq
             self._history.append(delivery)
+            if dedup_key:
+                self._keys[dedup_key] = delivery
+                while len(self._keys) > (self._history.maxlen or 1000):
+                    self._keys.pop(next(iter(self._keys)))
 
     def _lock_for(self, agent_id: str) -> threading.Lock:
         with self._lock:
@@ -399,3 +570,74 @@ class Messaging:
                 logger(type_, data)
             except Exception:
                 pass
+
+    # -- durability --------------------------------------------------------
+    def snapshot(self) -> list[dict[str, Any]]:
+        """Queue contents, in order, for persistence across a daemon restart."""
+        with self._lock:
+            items = []
+            for agent_id, queue in self._queues.items():
+                for delivery in queue:
+                    items.append({
+                        "message_id": delivery.message.message_id,
+                        "sender": delivery.message.sender,
+                        "recipient": delivery.message.recipient,
+                        "sender_name": delivery.sender_name,
+                        "recipient_name": delivery.recipient_name,
+                        "body": delivery.message.body,
+                        "text": delivery.text,
+                        "timestamp": delivery.message.timestamp,
+                        "expires_at": delivery.expires_at,
+                    })
+        return items
+
+    def _persist(self) -> None:
+        if self._store is None:
+            return
+        # Snapshot and write under one lock: two workers persisting concurrently
+        # must not let an older snapshot land last (it would resurrect, and
+        # re-deliver after a restart, a message that was already injected).
+        with self._persist_lock:
+            try:
+                self._store.save(self.snapshot())
+            except Exception:  # noqa: BLE001 - persistence must never break delivery
+                pass
+
+    def load(self, items: list[dict[str, Any]], now: float | None = None) -> int:
+        """Resume persisted pending messages (drops those already expired)."""
+        now = time.time() if now is None else now
+        resumed = 0
+        for item in items or []:
+            try:
+                recipient = str(item["recipient"])
+                sender = str(item["sender"])
+                body = str(item["body"])
+                message_id = str(item.get("message_id") or new_message_id())
+                expires_at = item.get("expires_at")
+            except (KeyError, TypeError):
+                continue
+            if expires_at is not None and float(expires_at) <= now:
+                continue
+            delivery = Delivery(
+                message=Message(
+                    message_id=message_id, sender=sender, recipient=recipient,
+                    body=body, timestamp=float(item.get("timestamp") or now),
+                ),
+                delivered=False,
+                queued=True,
+                sender_name=item.get("sender_name"),
+                recipient_name=item.get("recipient_name"),
+                text=str(item.get("text") or body),
+                expires_at=float(expires_at) if expires_at is not None else None,
+            )
+            with self._lock:
+                self._queues.setdefault(recipient, deque()).append(delivery)
+            self._record(delivery)
+            self._ensure_worker(recipient)
+            resumed += 1
+        if resumed:
+            self._persist()
+        return resumed
+
+    def close(self) -> None:
+        self._stop.set()

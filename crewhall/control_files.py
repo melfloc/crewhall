@@ -245,6 +245,26 @@ def ensure_managed_section(
         return None
 
 
+def refresh_control_file(path: str) -> ControlFileResult | None:
+    """Refresh the managed block of one *existing* control file, if any.
+
+    Used by ``crewhall doctor --fix-control-files`` to re-generate stale managed
+    sections (e.g. ones still named ``agent-terminal``) that would otherwise only
+    be touched when an agent is launched with that directory as its cwd. Never
+    creates a file.
+    """
+    if not enabled() or not path or not os.path.isfile(path):
+        return None
+    real = os.path.realpath(path)
+    try:
+        with open(_lock_path(real), "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return _ensure_locked(path, real, True)
+    except OSError as exc:
+        log.warning("control file %s left untouched: %s", path, exc)
+        return None
+
+
 def _skip(path: str, why: str) -> ControlFileResult:
     log.warning("control file %s left untouched: %s", path, why)
     return ControlFileResult(path, created=False, updated=False, unchanged=False, skipped=why)

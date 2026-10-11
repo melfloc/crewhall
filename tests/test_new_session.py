@@ -189,6 +189,39 @@ class NewSessionCommand(unittest.TestCase):
         self.assertEqual(self.oc.session.writes, [])
 
 
+class OpenCodeRotatingPlaceholder(unittest.TestCase):
+    """The ``Ask anything… "…"`` placeholder rotates its example text.
+
+    Validated against opencode 1.18.34: the rotating part is only the quoted
+    example, so the ``Ask anything`` prefix filter still recognises the ghost
+    text and does not treat it as residual input (which would block delivery).
+    """
+
+    SCREEN = """\
+  ┃
+  ┃  Ask anything… "Summarize the diff"
+  ┃
+  ┃  Build · DeepSeek V4.1 Flash OpenCode Go
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+"""
+
+    def test_rotating_suggestion_reads_as_empty(self):
+        harness = OpenCodeHarness(FakeSession(screen=self.SCREEN, name="o"), name="o")
+        self.assertEqual(harness.input_line(), "")
+
+    def test_draft_without_the_suggestion_is_seen(self):
+        # Once you type, OpenCode replaces the placeholder with the draft.
+        typed = """\
+  ┃
+  ┃  un borrador
+  ┃
+  ┃  Build · DeepSeek V4.1 Flash OpenCode Go
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+"""
+        harness = OpenCodeHarness(FakeSession(screen=typed, name="o"), name="o")
+        self.assertEqual(harness.input_line(), "un borrador")
+
+
 if __name__ == "__main__":
     unittest.main()
 

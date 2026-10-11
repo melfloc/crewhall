@@ -629,6 +629,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     from . import doctor
 
     results = doctor.run_checks()
+    if getattr(args, "fix_control_files", False):
+        results += doctor.fix_control_files()
     if args.json:
         print(json.dumps(results, indent=2))
     else:
@@ -1745,6 +1747,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("doctor", help="check this machine's environment")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--fix-control-files", action="store_true",
+                   help="refresh stale CLAUDE.md/AGENTS.md managed sections")
     p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("clean", help="remove test leftovers, old backups and old releases")
@@ -1845,36 +1849,44 @@ def cmd_office(args: argparse.Namespace) -> int:
     cid = getattr(args, "conversation", None) or os.environ.get("CREWHALL_CONVERSATION")
     rel = getattr(args, "path", None)
     client = _client(args)
+    # Inside an agent, identify as it: the daemon lets an agent co-edit only the
+    # chat it leads or crews (the control plane itself is closed to agents).
+    sender = brand.env("AGENT_ID")
+    creds = {"sender": sender, "token": brand.env("TOKEN")} if sender else {}
+
+    def call(op: str, **params: Any) -> dict[str, Any]:
+        return client.call(op, **creds, **params)
+
     if action == "list":
         res = client.call("office_collab_list")
     elif action == "open":
-        res = client.call("office_collab_open", id=cid, path=rel)
+        res = call("office_collab_open", id=cid, path=rel)
     elif action == "read":
-        res = client.call("office_collab_read", id=cid, path=rel)
+        res = call("office_collab_read", id=cid, path=rel)
     elif action == "insert":
-        res = client.call("office_collab_insert", id=cid, path=rel, text=args.text)
+        res = call("office_collab_insert", id=cid, path=rel, text=args.text)
     elif action == "command":
         try:
             parsed = _json.loads(args.args) if args.args else []
         except _json.JSONDecodeError as exc:
             print(f"error: --args is not JSON: {exc}", file=sys.stderr)
             return 1
-        res = client.call("office_collab_command", id=cid, path=rel,
+        res = call("office_collab_command", id=cid, path=rel,
                           method=args.method, args=parsed)
     elif action == "close":
-        res = client.call("office_collab_close", id=cid, path=rel)
+        res = call("office_collab_close", id=cid, path=rel)
     elif action == "users":
-        res = client.call("office_collab_users", id=cid, path=rel)
+        res = call("office_collab_users", id=cid, path=rel)
     elif action == "chat":
-        res = client.call("office_collab_chat", id=cid, path=rel)
+        res = call("office_collab_chat", id=cid, path=rel)
     elif action == "say":
-        res = client.call("office_collab_say", id=cid, path=rel, text=args.text)
+        res = call("office_collab_say", id=cid, path=rel, text=args.text)
     elif action == "comments":
-        res = client.call("office_collab_comments", id=cid, path=rel)
+        res = call("office_collab_comments", id=cid, path=rel)
     elif action == "comment":
-        res = client.call("office_collab_comment_add", id=cid, path=rel, text=args.text)
+        res = call("office_collab_comment_add", id=cid, path=rel, text=args.text)
     elif action == "save":
-        res = client.call("office_collab_save", id=cid, path=rel)
+        res = call("office_collab_save", id=cid, path=rel)
     else:  # pragma: no cover - argparse enforces the choices
         print(f"error: unknown office command {action!r}", file=sys.stderr)
         return 1

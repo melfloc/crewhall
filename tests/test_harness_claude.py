@@ -217,6 +217,7 @@ class ClaudeHarnessFakeSession(unittest.TestCase):
             "\u276f\u00a0/model sonnet",
         )
         harness = self.make(residue)
+        harness._injected = "/model sonnet"  # crewhall's own residue is clearable
         session = harness.session
 
         def clear(*_a, **_k):
@@ -310,6 +311,13 @@ class ClaudeKeyedSession(FakeSession):
             ]
         )
 
+    def capture(self, escapes: bool = False) -> str:
+        if not escapes or self.input_text or not self.ghost:
+            return self.screen
+        # Like the real TUI: ghost/suggestion text is drawn faint (SGR 2).
+        return self.screen.replace(
+            "\u276f\u00a0" + self.ghost, "\u276f\u00a0\x1b[2m" + self.ghost + "\x1b[0m")
+
     def send_key(self, key: str) -> None:
         super().send_key(key)
         if self.rewind:
@@ -337,13 +345,37 @@ class ClaudeKeyedSession(FakeSession):
 
 
 class ClaudeInputSafety(unittest.TestCase):
-    def test_clearing_residue_never_sends_esc_and_message_becomes_a_turn(self):
-        session = ClaudeKeyedSession(input_text="\u00bfya respondi\u00f3 el ejecutor?")
+    def test_human_draft_is_never_cleared_and_send_is_refused(self):
+        # A human typing in the agent's own terminal must not lose their draft
+        # (Fase 0.2). The send is refused so the caller can queue and retry.
+        draft = "\u00bfya respondi\u00f3 el ejecutor?"
+        session = ClaudeKeyedSession(input_text=draft)
         harness = ClaudeCodeHarness(session, name="c")
-        harness.send("REPLY_TEST", timeout=3)
+        with self.assertRaises(HarnessNotReady):
+            harness.send("REPLY_TEST", timeout=0.5)
+        self.assertEqual(session.input_text, draft)  # draft intact
+        self.assertEqual(session.sent, [])
+        self.assertNotIn("CTRL_U", session.keys)
         self.assertNotIn("ESC", session.keys)
-        self.assertFalse(session.rewind)
-        self.assertEqual(session.sent, ["REPLY_TEST"])
+
+    def test_web_ui_draft_is_never_cleared(self):
+        # Keys a human types through the Web UI go through write_raw (tracked
+        # as ``_typed``); that is a draft, not crewhall residue.
+        session = ClaudeKeyedSession()
+        harness = ClaudeCodeHarness(session, name="c")
+        harness.write_raw("borrador del usuario")
+        with self.assertRaises(HarnessNotReady):
+            harness.send("REPLY_TEST", timeout=0.5)
+        self.assertEqual(session.input_text, "borrador del usuario")
+        self.assertNotIn("CTRL_U", session.keys)
+
+    def test_short_human_draft_is_not_taken_for_a_partial_injection(self):
+        session = ClaudeKeyedSession(input_text="h")
+        harness = ClaudeCodeHarness(session, name="c")
+        harness._injected = "hello world"
+        with self.assertRaises(HarnessNotReady):
+            harness.send("REPLY_TEST", timeout=0.5)
+        self.assertEqual(session.input_text, "h")
 
     def test_no_keys_sent_when_input_already_clean(self):
         session = ClaudeKeyedSession()
@@ -352,8 +384,18 @@ class ClaudeInputSafety(unittest.TestCase):
         self.assertEqual(session.keys, ["ENTER"])
         self.assertEqual(session.sent, ["hello"])
 
-    def test_ghost_text_is_not_residue_and_does_not_block_send(self):
-        session = ClaudeKeyedSession(ghost="run the tests")  # CTRL_U can't clear it
+    def test_placeholder_is_not_residue_and_does_not_block_send(self):
+        # Claude's rotating placeholder (``Try "..."``) is filtered by
+        # ``input_line`` and is not residue.
+        session = ClaudeKeyedSession(ghost='Try "run the tests"')
+        harness = ClaudeCodeHarness(session, name="c")
+        harness.send("hello", timeout=3)
+        self.assertEqual(session.sent, ["hello"])
+
+    def test_ghost_suggestion_is_not_residue_and_does_not_block_send(self):
+        # A prompt suggestion after a turn (faint text CTRL_U cannot clear) must
+        # neither block delivery nor be mistaken for a human draft.
+        session = ClaudeKeyedSession(ghost="run the tests")
         harness = ClaudeCodeHarness(session, name="c")
         harness.send("hello", timeout=3)
         self.assertNotIn("ESC", session.keys)

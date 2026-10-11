@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import time
 
-from .base import AgentState, Harness
+from .base import AgentState, Harness, faint_first_visible
 
 WORKING_RE = re.compile(r"esc\s+to\s+interrupt", re.IGNORECASE)
 COMPLETION_RE = re.compile(r"\u00b7\s*done\s+\d", re.IGNORECASE)
@@ -55,9 +55,9 @@ class ClaudeCodeHarness(Harness):
     # ESC is deliberately not used to clear input: on an empty Claude input
     # two ESCs open the "Rewind" selector, which swallows the next text+ENTER
     # (the message looks delivered but never becomes a turn). Ctrl+U kills the
-    # line and has no such side effect.
+    # line and has no such side effect. Only crewhall's own residue is cleared:
+    # a human draft in the input is never destroyed (Fase 0.2).
     clear_input_keys = ("CTRL_U",)
-    unclearable_input_is_ghost = True
 
     def __init__(self, session, *, name: str | None = None) -> None:
         super().__init__(session, name=name)
@@ -235,12 +235,36 @@ class ClaudeCodeHarness(Harness):
         return lines[-1] if lines else ""
 
     def input_line(self) -> str:
-        """Content of the Claude input box, excluding its placeholder tip."""
-        raw = self._input_line().lstrip("\u276f").strip("\xa0 ").strip()
+        """Content of the Claude input box, excluding placeholder/ghost text."""
+        raw = self._input_line().strip().lstrip("\u276f").strip("\xa0 ").strip()
         # A fresh Claude shows a rotating placeholder like: Try "write a test".
         if raw.startswith("Try "):
             return ""
+        if raw and self._input_is_ghost():
+            # A prompt suggestion after a turn: typing replaces it, so it is
+            # neither residue nor a human draft.
+            return ""
         return raw
+
+    def _input_is_ghost(self) -> bool:
+        """Whether the input box text is rendered dim (Claude's ghost text).
+
+        Validated against Claude Code 2.1.x: the placeholder/suggestion is drawn
+        with SGR 2 (faint) right after the ``❯`` prompt; a typed draft is not.
+        Without escape support (e.g. a test double) nothing is ghost.
+        """
+        try:
+            screen = self.session.capture(escapes=True)
+        except TypeError:
+            return False
+        lines = [line for line in screen.splitlines() if "\u276f" in line]
+        if not lines:
+            return False
+        after = lines[-1].split("\u276f", 1)[1].lstrip("\xa0 ")
+        # Ghost/suggestion text is faint (``2``) when the first visible
+        # character is drawn; a typed draft is not.
+        faint, visible = faint_first_visible(after)
+        return faint and bool(visible.strip())
 
     def transcript(self) -> str:
         """Capture with Claude's own input box/footer stripped.

@@ -115,3 +115,42 @@ class StateStore:
             })
         return {"schema": SCHEMA_VERSION, "teams": teams, "agents": agents,
                 "requests": requests, "terminals": terminals}
+
+
+class PendingQueueStore:
+    """Durable store for messages still waiting to be delivered.
+
+    Keeps only what is needed to resume a bounded retry after a daemon restart:
+    the two agent ids, the body, the id and the absolute (wall-clock) expiry.
+    Bodies live on the user's own disk under the 0700 state directory; identity
+    tokens and credentials are never stored here.
+    """
+
+    def __init__(self, path: str | None = None) -> None:
+        self.path = path or os.path.join(paths.state_dir(), "pending-messages.json")
+
+    def load(self) -> list[dict[str, Any]]:
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except FileNotFoundError:
+            return []
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("could not read pending queue %s: %s", self.path, exc)
+            return []
+        items = data.get("items") if isinstance(data, dict) else data
+        return [item for item in (items or []) if isinstance(item, dict)]
+
+    def save(self, items: list[dict[str, Any]]) -> None:
+        directory = os.path.dirname(self.path)
+        os.makedirs(directory, exist_ok=True)
+        try:
+            fd, tmp = tempfile.mkstemp(dir=directory, prefix=".pending-", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                os.fchmod(fh.fileno(), 0o600)
+                json.dump({"schema": SCHEMA_VERSION, "items": items}, fh, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            log.warning("could not persist pending queue %s: %s", self.path, exc)

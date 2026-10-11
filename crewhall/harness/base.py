@@ -10,6 +10,53 @@ from collections.abc import Iterable
 from ..session import InteractiveSession
 
 
+def sgr_faint(params: str, faint: bool) -> bool:
+    """Apply one SGR parameter list to the "faint" flag (2 on; 0/22 off).
+
+    Extended colours (``38;5;n``, ``38;2;r;g;b`` and the 48/58 forms) carry
+    numbers that are arguments, not attributes, so they are skipped.
+    """
+    codes = params.split(";") if params else ["0"]
+    i = 0
+    while i < len(codes):
+        code = codes[i] or "0"
+        if code in ("38", "48", "58"):
+            mode = codes[i + 1] if i + 1 < len(codes) else ""
+            i += 3 if mode == "5" else 5 if mode == "2" else 2
+            continue
+        if code in ("0", "22"):
+            faint = False
+        elif code == "2":
+            faint = True
+        i += 1
+    return faint
+
+
+def faint_first_visible(text: str) -> tuple[bool, str]:
+    """``(is_faint, visible)`` for the first visible character of ``text``.
+
+    Walks leading SGR escape sequences (and the spaces among them) and reports
+    whether the first real character is drawn faint. Used by the adapters to tell
+    a TUI's dim placeholder/suggestion apart from a real typed draft.
+    """
+    faint = False
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char == "\x1b" and i + 1 < len(text) and text[i + 1] == "[":
+            end = text.find("m", i)
+            if end < 0:
+                break
+            faint = sgr_faint(text[i + 2:end], faint)
+            i = end + 1
+            continue
+        if char in " \t\xa0\r\n":
+            i += 1
+            continue
+        return faint, text[i:]
+    return faint, ""
+
+
 class AgentState(str, Enum):
     STARTING = "starting"
     READY = "ready"
@@ -93,9 +140,6 @@ class Harness(ABC):
     # Keys used to clear residual input. Adapters override when a key has a
     # side effect on their TUI (see ClaudeCodeHarness).
     clear_input_keys: tuple[str, ...] = ("CTRL_U", "ESC")
-    # True when input that survives clearing is the TUI's own placeholder /
-    # suggestion (ghost text), which typing replaces, not real residue.
-    unclearable_input_is_ghost = False
 
     @classmethod
     def command(cls) -> list[str]:
@@ -273,6 +317,7 @@ class Harness(ABC):
                 self.agent_id, f"not ready to receive input (state={state.value})"
             )
         previous = self.conversation_id
+        self._injected = prompt
         self.session.write(prompt)
         if self.submit_delay > 0:
             # Some TUIs read a fast text+ENTER as a paste and do not submit it.
@@ -303,6 +348,7 @@ class Harness(ABC):
             raise HarnessNotReady(
                 self.agent_id, f"not ready to receive input (state={state.value})"
             )
+        self._injected = text
         self.session.write(text)
         if self.submit_delay > 0:
             time.sleep(self.submit_delay)
@@ -322,6 +368,24 @@ class Harness(ABC):
         """True when the agent's input has no residual text/completion."""
         return not self.input_line().strip()
 
+    def _residue_is_ours(self, line: str) -> bool:
+        """True when the dirty input line is text crewhall itself injected.
+
+        Only ``_injected`` (what ``send``/``send_command`` typed) counts. Keys a
+        human types through the Web UI (``write_raw`` -> ``_typed``) are a draft,
+        never residue, so they are never cleared.
+        """
+        injected = (self._injected or "").strip()
+        current = line.strip()
+        if not injected or not current:
+            return False
+        if current == injected or current.endswith(injected):
+            return True
+        # A partially written injection (prefix) is ours too, but never a short
+        # line: one or two human keystrokes would match the prefix of almost any
+        # injected text and must not be wiped.
+        return len(current) >= min(8, len(injected)) and injected.startswith(current)
+
     def ensure_input_clean(
         self, timeout: float = 30.0, poll: float = 0.1
     ) -> bool:
@@ -329,34 +393,39 @@ class Harness(ABC):
 
         A freshly (re)started TUI can still hold previous text or have a
         completion popup pending; writing then would concatenate our message
-        with that residue (e.g. ``/model sonnet`` + our text). We therefore
-        wait for an empty input line before injecting, clearing it with a
-        non-destructive ``Ctrl+U`` (kill-line) if the agent is idle. This is
-        evidence-based, not a fixed sleep.
+        with that residue. We wait for an empty input line before injecting.
+
+        Crucially, only residue crewhall itself injected (``_injected``) is cleared
+        with a non-destructive ``Ctrl+U``. A non-empty line the human is
+        drafting in the agent's own terminal (tmux attach or the Web UI) is
+        **left untouched**: we return ``False`` so the caller queues and retries
+        instead of destroying the user's work. The TUI's own placeholder /
+        suggestion is not residue: each adapter's ``input_line`` filters it, so
+        it reads as clean here.
         """
         deadline = time.monotonic() + timeout
-        last_cleared: str | None = None
         while time.monotonic() < deadline:
             if not self.session.status.alive:
                 return False
             if self._input_is_clean():
                 return True
             # Clear residual input only when the agent is not mid-turn or
-            # starting (keys would interfere), and only while the line is
-            # actually dirty: never send keys to an already-empty input.
+            # starting (keys would interfere), and only if the residue is ours.
             state = self.state()
-            if state not in (AgentState.WORKING, AgentState.STARTING):
-                line = self.input_line()
-                if self.unclearable_input_is_ghost and line == last_cleared:
-                    # Clearing changed nothing: it is placeholder/ghost text,
-                    # which the next keystrokes replace.
-                    return state.usable
-                last_cleared = line
-                for key in self.clear_input_keys:
-                    try:
-                        self.session.send_key(key)
-                    except Exception:  # noqa: BLE001
-                        pass
+            if state in (AgentState.WORKING, AgentState.STARTING):
+                time.sleep(poll)
+                continue
+            line = self.input_line()
+            if not self._residue_is_ours(line):
+                # Not ours: a human draft (never destroy it) or the TUI's own
+                # ghost text that the adapter could not filter. Refuse; the
+                # higher layer queues the message and retries.
+                return False
+            for key in self.clear_input_keys:
+                try:
+                    self.session.send_key(key)
+                except Exception:  # noqa: BLE001
+                    pass
             time.sleep(poll)
         return self._input_is_clean()
 
@@ -402,6 +471,9 @@ class Harness(ABC):
     # Set by the controller: called when one of those commands is submitted.
     on_new_session = None
     _typed = ""
+    # Last text crewhall itself injected (send/send_command): the only residue
+    # ``ensure_input_clean`` may clear.
+    _injected = ""
 
     def _is_new_session_command(self, text: str) -> bool:
         return text.strip().lower() in self.new_session_commands

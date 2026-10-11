@@ -50,6 +50,12 @@ class Client:
             return self._roundtrip({"op": op, **params})
 
     def _roundtrip(self, request: dict[str, Any]) -> dict[str, Any]:
+        # Prove control-plane access to the daemon (agent-ops ignore it). The
+        # daemon also refuses control ops from callers that look like an agent
+        # (process tree / inherited agent token); that is defence in depth, not
+        # isolation: see SECURITY.md.
+        if "_control_token" not in request:
+            request = {**request, "_control_token": paths.load_control_token()}
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             try:
                 sock.connect(self.socket_path)

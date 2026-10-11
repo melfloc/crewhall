@@ -426,7 +426,7 @@ class DeliveryStatusAndDedup(CollaborationBase):
         delivery = messaging.send(a.agent_id, b.agent_id, "hi", wait=1.0)
         self.assertEqual(delivery.status, "injected")
 
-    def test_identical_pending_message_is_not_duplicated(self):
+    def test_identical_messages_queue_distinctly_in_order(self):
         import time as _t
 
         from crewhall.harness import AgentState
@@ -443,19 +443,39 @@ class DeliveryStatusAndDedup(CollaborationBase):
         self.controller.register_agent(a)
         self.controller.agents.add(b)
         messaging = Messaging(self.controller.agents, ack_timeout=0)
+        # Two identical bodies with no idempotency key are two legitimate
+        # messages (Fase 0.3): they are not merged and arrive in order.
         d1 = messaging.send(a.agent_id, b.agent_id, "same", wait=0.2)
         d2 = messaging.send(a.agent_id, b.agent_id, "same", wait=0.2)
-        self.assertIs(d1, d2)
-        self.assertTrue(d1.queued)
+        self.assertIsNot(d1, d2)
+        self.assertTrue(d1.queued and d2.queued)
         Busy.busy = False
         deadline = _t.monotonic() + 8
-        while not d1.delivered and _t.monotonic() < deadline:
+        while not d2.delivered and _t.monotonic() < deadline:
             _t.sleep(0.1)
-        self.assertTrue(d1.delivered)
-        self.assertEqual(b.session.writes, ["same"])
-        # Once delivered, the same text is a new, legitimate message.
-        d3 = messaging.send(a.agent_id, b.agent_id, "same", wait=1.0)
-        self.assertIsNot(d3, d1)
+        self.assertTrue(d1.delivered and d2.delivered)
+        self.assertEqual(b.session.writes, ["same", "same"])
+
+    def test_idempotency_key_dedups_pending(self):
+        from crewhall.harness import AgentState
+        from crewhall.messaging import Messaging
+        from tests.support import FakeHarness
+
+        class Busy(FakeHarness):
+            def _detect(self, text):
+                return AgentState.WORKING, "w"
+
+        a, b = FakeHarness("a"), Busy("b")
+        self.controller.register_agent(a)
+        self.controller.agents.add(b)
+        messaging = Messaging(self.controller.agents, ack_timeout=0)
+        d1 = messaging.send(a.agent_id, b.agent_id, "same", wait=0.2,
+                            idempotency_key="req-1")
+        d2 = messaging.send(a.agent_id, b.agent_id, "same", wait=0.2,
+                            idempotency_key="req-1")
+        self.assertIs(d1, d2)
+        self.assertTrue(d1.queued)
+        messaging.close()
 
 
 class AgentSendDoesNotBlockTheSender(CollaborationBase):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .base import AgentState, Harness
+from .base import AgentState, Harness, faint_first_visible
 
 # Verified against Codex CLI 0.158.0 (see ADAPTERS.md §8).
 WORKING_RE = re.compile(r"Working\s*\([^)]*esc to interrupt", re.IGNORECASE)
@@ -96,8 +96,34 @@ class CodexHarness(Harness):
             m = re.match(r"^\s*›\s?(.*)$", line)
             if m:
                 text = m.group(1).strip()
-                return "" if text.lower().startswith("ask codex") else text
+                if text.lower().startswith("ask codex"):
+                    return ""
+                if text and self._input_is_ghost():
+                    # A rotating prompt suggestion (drawn faint): typing replaces
+                    # it, so it is neither residue nor a human draft.
+                    return ""
+                return text
         return ""
+
+    def _input_is_ghost(self) -> bool:
+        """Whether the ``›`` input text is rendered dim (Codex's suggestion).
+
+        Validated against Codex CLI 0.158.0: the placeholder/suggestion after
+        ``›`` is drawn with SGR 2 (faint) -- the ``›`` itself is bold and reset
+        first, so the faint run starts after a reset plus a space. A typed draft
+        is not faint. Without escape support (e.g. a test double) nothing is
+        ghost.
+        """
+        try:
+            screen = self.session.capture(escapes=True)
+        except TypeError:
+            return False
+        lines = [line for line in screen.splitlines() if "\u203a" in line]
+        if not lines:
+            return False
+        after = lines[-1].split("\u203a", 1)[1].lstrip("\xa0 ")
+        faint, visible = faint_first_visible(after)
+        return faint and bool(visible.strip())
 
     def transcript(self) -> str:
         """Capture with the input box (from the last ``›`` line) removed."""

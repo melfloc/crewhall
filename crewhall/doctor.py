@@ -180,6 +180,34 @@ def check_systemd() -> Check:
                 f"user manager: {state}; installed units: {', '.join(units) or 'none'}")
 
 
+def check_agent_version_ranges() -> list[Check]:
+    """Warn when an installed agent CLI falls outside its validated range.
+
+    Adapters key on phrases from the TUI; an upstream release can move them. We
+    cannot test against every version, so we flag the ones we have not verified.
+    """
+    from .harness import versions as harness_versions
+
+    out: list[Check] = []
+    for kind in ("claude", "codex", "opencode"):
+        path = shutil.which(kind)
+        if not path:
+            continue
+        text = _version_of([kind, "--version"])
+        rng = harness_versions.validated_range(kind)
+        if rng is None:
+            continue
+        supported = harness_versions.is_supported(kind, text)
+        captured = rng.get("captured", "?")
+        if supported is False:
+            out.append(_res(
+                f"cli:{kind} version", "warn", f"{text or 'unknown'} outside validated range",
+                f"Last verified against {captured}. Re-check the adapter and ADAPTERS.md."))
+        elif supported is True:
+            out.append(_res(f"cli:{kind} version", "ok", text or captured))
+    return out
+
+
 def check_tailscale() -> Check:
     path = shutil.which("tailscale")
     return _res("tailscale", "ok" if path else "warn",
@@ -314,10 +342,68 @@ def check_office() -> Check:
 
 
 CHECKS: list[Callable[[], Check | list[Check]]] = [
-    check_python, check_install, check_tmux, check_agent_clis, check_command_on_path, check_dirs,
+    check_python, check_install, check_tmux, check_agent_clis, check_agent_version_ranges,
+    check_command_on_path, check_dirs,
     check_tmpdir, check_hooks, check_daemon, check_web, check_office, check_security,
     check_agent_configs, check_systemd, check_tailscale,
 ]
+
+
+def fix_control_files(dirs: list[str] | None = None) -> list[Check]:
+    """Re-generate stale managed control-file sections under likely roots.
+
+    The managed block is normally refreshed when an agent is launched with a
+    directory as its cwd; a directory that is never used as a cwd (e.g. the home
+    directory) can keep an old block (still named ``agent-terminal``) forever.
+    This scans the home directory, the cwd and its ancestors for existing
+    ``CLAUDE.md``/``AGENTS.md`` and refreshes their block in place.
+    """
+    from . import control_files
+
+    if not control_files.enabled():
+        return [_res("control files", "warn", "disabled by CREWHALL_CONTROL_FILES")]
+
+    seen: set[str] = set()
+    candidates: list[str] = []
+
+    def add(directory: str) -> None:
+        directory = os.path.abspath(directory)
+        if directory and directory not in seen and os.path.isdir(directory):
+            seen.add(directory)
+            candidates.append(directory)
+
+    add(os.path.expanduser("~"))
+    candidates_root = list(dirs) if dirs is not None else None
+    if candidates_root is None:
+        current = os.getcwd()
+        while True:
+            add(current)
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+    else:
+        for directory in candidates_root:
+            add(directory)
+
+    out: list[Check] = []
+    changed = 0
+    for directory in candidates:
+        for name in control_files.CONTROL_FILENAMES:
+            path = os.path.join(directory, name)
+            if not os.path.isfile(path):
+                continue
+            result = control_files.refresh_control_file(path)
+            if result is None:
+                continue
+            if result.created or result.updated:
+                changed += 1
+                out.append(_res("control file", "ok", f"updated {path}"))
+            elif result.skipped:
+                out.append(_res("control file", "warn", f"{path}: {result.skipped}"))
+    if changed == 0 and not out:
+        out.append(_res("control file", "ok", "managed sections already up to date"))
+    return out
 
 
 def run_checks() -> list[Check]:

@@ -94,6 +94,21 @@ def descendants(root: int, kids: dict[int, list[int]] | None = None) -> list[int
     return out
 
 
+def ancestors(pid: int, *, limit: int = 512) -> list[int]:
+    """``pid`` followed by its parent chain (nearest first, pid included)."""
+    out: list[int] = []
+    seen: set[int] = set()
+    cur = int(pid)
+    while cur and cur not in seen and len(out) < limit:
+        out.append(cur)
+        seen.add(cur)
+        st = _stat(cur)
+        if st is None:
+            break
+        cur = st["ppid"]
+    return out
+
+
 def claude_command(argv: list[str]) -> str:
     """The command Claude was asked to run, out of its bash wrapper."""
     script = argv[-1] if argv else ""

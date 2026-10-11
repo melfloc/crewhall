@@ -35,7 +35,7 @@ def _resolve_test_socket() -> str:
     # Set both: the new name is preferred, the legacy one keeps older tests and
     # subprocesses that still read it working (no deprecation warning in tests).
     os.environ["CREWHALL_TMUX_SOCKET"] = current
-    os.environ["CREWHALL_TMUX_SOCKET"] = current
+    os.environ["AGENT_TERMINAL_TMUX_SOCKET"] = current
     return current
 
 

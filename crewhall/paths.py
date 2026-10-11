@@ -203,5 +203,56 @@ def state_path() -> str:
     return os.path.join(state_dir(), "state.json")
 
 
+def control_token_path() -> str:
+    """File holding the control-plane token (0600, never put in agent env)."""
+    return os.path.join(state_dir(), "control-token")
+
+
+def load_control_token() -> str | None:
+    """Read the control token, or None if it has not been created yet."""
+    try:
+        with open(control_token_path(), "r", encoding="utf-8") as fh:
+            token = fh.read().strip()
+    except OSError:
+        return None
+    return token or None
+
+
+def ensure_control_token() -> str:
+    """Return the control token, creating a fresh 0600 one atomically.
+
+    The token is *not* injected into agents' environment: it lives only in a
+    file under the state dir. Combined with the daemon's peer-credential check,
+    an agent process (which runs as the same user) cannot use it to reach the
+    control plane.
+    """
+    import secrets
+    import tempfile
+
+    token = load_control_token()
+    if token:
+        return token
+    path = control_token_path()
+    directory = os.path.dirname(path)
+    _makedirs(directory)
+    fd, tmp = tempfile.mkstemp(prefix=".control-token-", dir=directory)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(secrets.token_hex(32) + "\n")
+        try:
+            os.link(tmp, path)  # atomic, fails if another process won the race
+        except FileExistsError:
+            pass
+        except OSError:
+            os.replace(tmp, path)
+        return load_control_token() or ""
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

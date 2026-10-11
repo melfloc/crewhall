@@ -202,5 +202,37 @@ class WhichFile(Base):
         self.assertIn("[from: <sender>]", managed_section())
 
 
+class StaleSectionRefresh(Base):
+    def test_refresh_replaces_a_legacy_agent_terminal_block(self):
+        from crewhall import brand
+        from crewhall.control_files import refresh_control_file
+
+        legacy = f"{brand.LEGACY_CONTROL_BEGIN}\nold rules\n{brand.LEGACY_CONTROL_END}".encode()
+        data = b"# home\n\n" + legacy + b"\n\ntail\n"
+        path = self.write(data)
+        result = refresh_control_file(path)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.updated)
+        after = self.read()
+        self.assertIn(B, after)
+        self.assertIn(b"Crewhall collaboration", after)
+        self.assertNotIn(b"old rules", after)
+        self.assertNotIn(b"AGENT-TERMINAL", after)
+        self.assertTrue(after.startswith(b"# home\n\n"))
+        self.assertTrue(after.endswith(b"\n\ntail\n"))
+
+    def test_doctor_fix_control_files_updates_only_existing_files(self):
+        from crewhall import brand, doctor
+
+        legacy = f"{brand.LEGACY_CONTROL_BEGIN}\nstale\n{brand.LEGACY_CONTROL_END}".encode()
+        self.write(legacy)
+        empty = os.path.join(self.root, "empty")
+        os.makedirs(empty)
+        results = doctor.fix_control_files(dirs=[self.proj, empty])
+        self.assertTrue(any(r["detail"].startswith("updated") for r in results), results)
+        self.assertFalse(os.path.exists(os.path.join(empty, "CLAUDE.md")))
+        self.assertIn(b"Crewhall collaboration", self.read())
+
+
 if __name__ == "__main__":
     unittest.main()
