@@ -21,6 +21,9 @@ const CHAT = {
   layout: store.get("at.chat.layout") === "document" ? "document" : "chat",
 };
 
+/* Crew activity strip (handoffs/requests of a chat's Cowork team). */
+const CREW = {data:null, sig:"", tick:0};
+
 const chatBody = () => document.body.classList;
 
 /* ---------- top-level interfaces: Cowork (agents) and Chat (conversations) ---------- */
@@ -115,23 +118,48 @@ async function chatNew(){
   let meta = { harnesses:[{kind:"opencode"}], defaults:{} };
   try { meta = await op("meta_info"); } catch(e){}
   const kinds = (meta.harnesses||[]).map(h => h.kind);
+  let crews = [];
+  try { const r = await op("team_list"); crews = (r.teams||[]).filter(t => !t.host); } catch(e){}
   const fields = [
     {key:"title", label:"Name", value:"New chat", required:true},
     {key:"kind", label:"Provider", type:"select",
       options:(kinds.length ? kinds : ["opencode"]).map(k => ({value:k, label:k})),
       value:(meta.defaults||{}).kind || kinds[0] || "opencode"},
+    {key:"crew", label:"Crew", type:"select", value:"",
+      options:[{value:"", label:"Solo (no team)"},
+               ...crews.map(t => ({value:t.name, label:t.name}))]},
   ];
   const out = await promptDlg({title:"New chat",
-    sub:"Starts an agent isolated in this conversation's own folder (no project directory).",
+    sub:"Starts an agent isolated in this conversation's own folder. A crew lets it delegate to a Cowork team.",
     fields, ok:"Create"});
   if(!out) return;
   try {
-    const conv = await op("conversation_create", {title:out.title});
+    const conv = await op("conversation_create", {title:out.title, team:out.crew || null});
     const cid = conv.conversation.id;
     const res = await op("agent_create", {kind:out.kind, name:out.title, conversation:cid});
     CHAT.list.unshift({...conv.conversation, agent:res.agent, outputs:0, inputs:0});
     chatRenderList();
     await chatSelect(cid);
+  } catch(e){ flash(e.message); }
+}
+
+/* Set/clear a chat's crew from the chat head. */
+function chatCrewMenu(anchor){
+  op("team_list").then(r => {
+    const crews = (r.teams||[]).filter(t => !t.host);
+    const items = [{label:"Solo (no team)", icon:"users", run:()=>chatSetCrew(null)}];
+    crews.forEach(t => items.push({label:t.name, icon:"users", run:()=>chatSetCrew(t.name)}));
+    if(!crews.length) items.push({label:"(no local teams yet)", run:()=>{}});
+    openMenu(anchor, items);
+  }).catch(e => flash(e.message));
+}
+async function chatSetCrew(team){
+  try {
+    const r = await op("conversation_set_team", {id:CHAT.active, team});
+    if(CHAT.info) CHAT.info.team = r.conversation.team;
+    toast(team ? `Crew: ${team}` : "Crew removed", "ok");
+    chatRenderHead();
+    CREW.sig = ""; chatLoadActivity(true);
   } catch(e){ flash(e.message); }
 }
 
@@ -146,6 +174,7 @@ async function chatSelect(id){
   chatRenderAsks();
   chatLoadHistory(true);
   chatLoadArtifacts();
+  CREW.sig = ""; chatLoadActivity(true);
 }
 
 async function chatDelete(c){
@@ -175,6 +204,9 @@ function chatRenderHead(){
   if(a && (st === "exited" || st === "error"))
     acts.push(el("button", {className:"btn sm primary", type:"button", onclick:()=>chatRestart()}, ic("refresh","sm"), "Start"));
   if(CHAT.office) acts.push(el("button", {className:"btn sm", type:"button", onclick:()=>chatCloseOffice()}, "Close editor"));
+  acts.push(el("button", {className:"btn sm", type:"button", title:"Set the Cowork crew for this chat",
+    onclick:(e)=>{ e.stopPropagation(); chatCrewMenu(e.currentTarget); }}, ic("users","sm"),
+    CHAT.info.team ? "Crew" : "Solo"));
   acts.push(el("a", {className:"btn sm", title:"Export this chat (transcript + files) as a ZIP",
     href:`/api/conversation/export?id=${encodeURIComponent(CHAT.info.id)}`, download:""},
     ic("down","sm"), "Export"));
@@ -186,6 +218,7 @@ function chatRenderHead(){
         el("div", {className:"chat-head-sub"},
           a ? el("span", {className:`pill s-${st}`}, dot(st, actOf(a).kind), stateLabel(st)) : el("span", {className:"pill s-exited"}, "no agent"),
           a && a.kind ? el("span", {className:"chip mono"}, a.kind) : null,
+          CHAT.info.team ? el("span", {className:"chip crew"}, ic("users","sm"), "crew") : null,
           a && a.activity && a.activity.model ? el("span", {className:"chip mono"}, a.activity.model) : null)),
       el("div", {className:"chat-head-actions"}, chatLayoutToggle(), ...acts)));
   const working = a && st === "working";
@@ -332,6 +365,53 @@ function chatRenderTray(){
         onclick:()=>{ CHAT.attach.splice(i,1); chatRenderTray(); }}, "×"))));
 }
 
+/* ---------- crew activity strip ----------
+   Shows the handoffs/requests the chat's Cowork team is working on, so the user
+   sees the team "behind" the chat without switching to Cowork. Tolerates
+   system:* senders (OnlyOffice comments routed to the team). */
+function crewName(id){
+  if(!id) return "";
+  if(String(id).startsWith("system:")) return String(id).slice(7);
+  const a = (typeof agentById === "function") && agentById(id);
+  return (a && a.name) || id;
+}
+async function chatLoadActivity(force){
+  const id = CHAT.active;
+  if(!id || !CHAT.info || !CHAT.info.team){ CREW.data = null; chatRenderActivity(null); return; }
+  let r;
+  try { r = await op("conversation_activity", {id, limit:20}); }
+  catch(e){ return; }
+  if(CHAT.active !== id) return;
+  const sig = (r.messages||[]).length + ":" + (r.requests||[]).length +
+    ":" + (r.messages||[]).map(m=>m.status).join(",");
+  if(sig === CREW.sig && !force) return;
+  CREW.sig = sig; CREW.data = r;
+  chatRenderActivity(r);
+}
+function chatRenderActivity(data){
+  const box = $("chat-crew"); if(!box) return;
+  const msgs = (data && data.messages) || [];
+  const reqs = (data && data.requests) || [];
+  if(!CHAT.info || !CHAT.info.team || (!msgs.length && !reqs.length)){
+    box.classList.add("init-hidden"); box.replaceChildren(); return;
+  }
+  box.classList.remove("init-hidden");
+  const row = (who, status, body) => el("div", {className:"crew-row"},
+    el("span", {className:"crew-who", textContent:who}),
+    el("span", {className:"crew-status", textContent:status || ""}),
+    el("span", {className:"crew-body", title:body || "", textContent:body || ""}));
+  const rows = [
+    ...msgs.slice(-8).map(m => row(`${crewName(m.sender)} → ${crewName(m.recipient)}`, m.status, m.body)),
+    ...reqs.slice(-8).map(r => row(`${crewName(r.sender)} → ${crewName(r.recipient)}`, r.state, r.task)),
+  ];
+  box.replaceChildren(
+    el("button", {className:"crew-toggle", type:"button", "aria-expanded":"false",
+      onclick:(e)=>{ const open = box.classList.toggle("open");
+                     e.currentTarget.setAttribute("aria-expanded", open ? "true" : "false"); }},
+      ic("users","sm"), `Crew · ${msgs.length + reqs.length}`),
+    el("div", {className:"crew-rows"}, ...rows));
+}
+
 /* ---------- artifacts ---------- */
 async function chatLoadArtifacts(){
   const id = CHAT.active; if(!id) return;
@@ -378,8 +458,14 @@ function chatArtRow(f, isOutput){
     el("span", {className:"chat-art-ic"}, ic(f.kind === "image" ? "image" : "file","sm")),
     el("span", {className:"chat-art-mid"},
       el("span", {className:"chat-art-name", textContent:f.name, title:f.relpath}),
-      el("span", {className:"chat-art-sub", textContent:`${f.kind} · ${fmtBytes(f.size)}`})),
+      el("span", {className:"chat-art-sub", textContent:
+        `${f.kind} · ${fmtBytes(f.size)}${f.producer ? " · " + artifactProducer(f) : ""}`})),
     el("span", {className:"chat-art-acts"}, ...acts));
+}
+function artifactProducer(f){
+  if(!f || !f.producer) return "";
+  if(CHAT.info && f.producer === CHAT.info.agent_id) return "by the lead";
+  return "by " + crewName(f.producer);
 }
 async function chatLiveEdit(f){
   try {
@@ -455,6 +541,8 @@ function chatStartPoll(){
     if(CHAT.active) chatLoadHistory(false);
     CHAT.lastArtifacts = (CHAT.lastArtifacts + 1) % 3;
     if(CHAT.active && CHAT.lastArtifacts === 0) chatLoadArtifacts();
+    CREW.tick = (CREW.tick + 1) % 3;
+    if(CHAT.active && CREW.tick === 0) chatLoadActivity(false);
     CHAT.osTick = ((CHAT.osTick || 0) + 1) % 10;
     if(CHAT.osTick === 0) chatLoadOffice();
   }, 1600);

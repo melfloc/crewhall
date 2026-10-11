@@ -71,6 +71,24 @@ function missionSummary(agents){
                  [c(x => x.state === "exited" || x.state === "error"), "stopped"]].filter(([n]) => n);
   return el("div", {className:"mc-sum"}, parts.length ? parts.map(([n, l]) => el("span", {className:"chip"}, `${n} ${l}`)) : el("span", {className:"muted"}, "All quiet"));
 }
+function missionChatNodes(chats){
+  if(!chats.length) return null;
+  const grid = el("div", {className:"mc-grid"});
+  chats.forEach(c => {
+    const st = (c.agent && c.agent.state) || "exited";
+    grid.append(el("div", {className:"mc-card chat-node"},
+      el("div", {className:"mc-head"},
+        el("span", {className:`avatar ${st}`}, (c.title||"?").trim().charAt(0) || "?"),
+        el("div", {},
+          el("div", {className:"nm", textContent:c.title || "Chat"}),
+          el("div", {className:"pm"}, c.team ? `crew · ${c.team_name || (teamById(c.team) || {}).name || c.team}` : "chat")),
+        el("span", {className:`pill s-${st}`}, stateLabel(st))),
+      el("div", {className:"mc-doing"}, ic("msg","sm"), `${c.outputs||0} artifact${(c.outputs||0)===1?"":"s"}`),
+      el("button", {className:"btn sm", type:"button",
+        onclick:()=>{ closeMission(); setInterface("chat"); chatSelect(c.id); }}, "Open in Chat")));
+  });
+  return el("div", {}, el("h4", {className:"mc-h"}, "Chats", el("span", {className:"chip"}, chats.length)), grid);
+}
 function requestRows(ids){
   const reqs = (S.state?.requests || []).filter(r => !ids || (ids.has(r.sender) && ids.has(r.recipient)));
   if(!reqs.length) return null;
@@ -99,6 +117,7 @@ function renderMission(){
     (() => { const grid = el("div", {className:"mc-grid"});
       if(!agents.length) grid.append(el("div", {className:"none"}, team ? "(no members yet)" : "(no agents)"));
       agents.forEach(a => grid.append(agentCard(a, msgs))); return grid; })(),
+    (team ? null : missionChatNodes(S.state?.conversations || [])),
     requestRows(ids),
     el("h4", {className:"mc-h"}, "Message flow", el("span", {className:"chip"}, msgs.length)),
     missionTimeline(msgs));

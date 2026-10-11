@@ -786,6 +786,23 @@ body.col-resizing * { cursor:col-resize !important; }
 .chat-head-sub { display:flex; align-items:center; gap:8px; margin-top:3px; }
 .chat-head-actions { display:flex; gap:8px; align-items:center; }
 
+/* Crew activity strip: the Cowork team working behind a chat. */
+.chat-crew { border-bottom:1px solid var(--border); background:var(--surface-2); }
+.crew-toggle { display:flex; align-items:center; gap:7px; width:100%; border:0; background:transparent;
+  color:var(--fg-2); font-size:12px; font-weight:600; padding:6px 14px; cursor:pointer; }
+.crew-toggle:hover { color:var(--fg); }
+.crew-toggle[aria-expanded="true"] { color:var(--fg); }
+.crew-rows { display:none; flex-direction:column; gap:2px; padding:0 14px 8px; }
+.chat-crew.open .crew-rows { display:flex; }
+.crew-row { display:grid; grid-template-columns:minmax(0,1.2fr) auto minmax(0,2fr); gap:8px;
+  align-items:baseline; font-size:12px; }
+.crew-who { color:var(--fg-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.crew-status { color:var(--accent); font-weight:600; }
+.crew-body { color:var(--fg-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.chip.crew { text-transform:none; }
+.mc-card.chat-node { border-style:dashed; }
+.mc-card.chat-node .btn { align-self:flex-start; }
+
 /* Two clearly separated modes: Chat (conversation first) and Cowork (document first). */
 .chat-layout { display:inline-flex; gap:2px; padding:2px; border:1px solid var(--border-strong); border-radius:999px; background:var(--bg); }
 .chat-layout button { border:0; background:transparent; color:var(--fg-2); font-size:12px; font-weight:600;
