@@ -27,6 +27,24 @@ The rules below are the project's contract; they are enforced by review and CI.
 - Versioning: `RELEASING.md` (SemVer; a feature is MINOR). Update
   `pyproject.toml`, `crewhall/__init__.py` and `CHANGELOG.md` together.
 
+### Browser tests (optional, slow)
+
+`tests/test_web_ui_browser.py` and `tests/test_terminal_web_browser.py` drive a
+real Chromium through Playwright. They **skip automatically** when Playwright or
+a Chromium binary is missing, so they never run in the default suite. They are
+slow (each test launches a browser, ~2 s/test; the UI file is ~250 s):
+
+```bash
+python -m pip install playwright && playwright install chromium
+python -m unittest tests.test_web_ui_browser tests.test_terminal_web_browser
+```
+
+`CHROMIUM` may point at `chromium`, `chromium-browser` or `google-chrome` on
+`PATH`. Every browser test has a **hard per-test timeout**
+(`HardTimeoutMixin.TEST_TIMEOUT`, default 120 s in `tests/support.py`): a stuck
+navigation fails the test instead of hanging the suite. Raise it locally for a
+slow machine, or run them with `-v` to see progress.
+
 ## Commits
 
 `tipo(ámbito): resumen (X.Y.Z)` (Spanish summaries are fine; code and CHANGELOG

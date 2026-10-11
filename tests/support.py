@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 import shutil
+import signal
 
 from crewhall import (
     AgentState,
@@ -16,6 +17,34 @@ from crewhall.types import SessionInfo
 BACKENDS = ["pty"] + (["tmux"] if shutil.which("tmux") else [])
 
 _ids = itertools.count(1)
+
+
+class HardTimeoutMixin:
+    """Give each test a hard per-test timeout so a hung browser fails loudly.
+
+    Playwright's sync API blocks the main thread; ``SIGALRM`` interrupts it, so a
+    stuck navigation becomes an ``AssertionError`` (a failed test) instead of a
+    suite that never finishes. No-op where ``SIGALRM`` does not exist (non-Unix).
+    """
+
+    TEST_TIMEOUT = 120.0
+
+    def _install_test_timeout(self, seconds: float | None = None) -> None:
+        if not hasattr(signal, "SIGALRM"):
+            return
+        seconds = self.TEST_TIMEOUT if seconds is None else seconds
+
+        def handler(_signum, _frame):
+            raise AssertionError(f"test exceeded the {seconds:g}s hard timeout")
+
+        previous = signal.signal(signal.SIGALRM, handler)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+
+        def cancel() -> None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+
+        self.addCleanup(cancel)
 
 
 class FakeBackend:

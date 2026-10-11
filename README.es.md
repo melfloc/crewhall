@@ -46,6 +46,31 @@ La `UI` es un **cliente del daemon** (el `Controller` residente) y no salta capa
 
 ![Mission control](docs/images/mission-control-dark.png)
 
+## Un producto, dos caras: Chat es la puerta, Cowork es el equipo
+
+> **Chat es la puerta, Cowork es el equipo que trabaja detrás, y los artefactos son
+> el entregable compartido.**
+
+Una conversación puede tener una **crew**: un Team de agentes Cowork reales. El
+agente del chat actúa como *lead*: habla contigo y delega en el equipo, mientras su
+directorio de trabajo sigue aislado. Los artefactos vuelven a la conversación, llevan
+el agente que los produjo y se pueden revisar y coeditar en OnlyOffice.
+
+```mermaid
+flowchart LR
+    U[Usuario] -->|conversa| L["Lead (agente del Chat)"]
+    L -->|handoff / request| C["Crew (Team de Cowork)"]
+    C -->|publish artifact| A["Artefactos (outputs de la conversación)"]
+    A -->|revisar / comentar| O[OnlyOffice]
+    O -->|enrutado al productor| C
+    A -->|se muestra en| U
+```
+
+La misma identidad, socket y garantías de entrega sostienen ambas caras; Cowork
+muestra cada conversación con crew como un nodo más en Mission Control. Detalle en
+[docs/CHAT-MODE.md](docs/CHAT-MODE.md) y superficie estable en
+[docs/STABLE-SURFACE.md](docs/STABLE-SURFACE.md).
+
 ## Modo Chat y OnlyOffice
 
 Además del espacio de trabajo de agentes (**Cowork**), crewhall tiene una interfaz

@@ -53,7 +53,7 @@ Reglas de oro: la detección es **por evidencia, no por tiempo** (nada de `sleep
 | `transcript()` | Captura **sin** la caja de entrada propia (la Web UI dibuja la suya). | Captura cruda. |
 | `supports_history` + `history(limit, before)` | Pestaña Conversation. Lee de disco/servidor del propio agente. | Sin conversación. |
 | `interrupt_keys` | Teclas que detienen un turno (Claude: 1×ESC; OpenCode: 2×ESC). | `("ESC",)`. |
-| `clear_input_keys`, `unclearable_input_is_ghost` | Cómo vaciar la entrada sin efectos secundarios. | `Ctrl+U`, `ESC`. |
+| `clear_input_keys` | Cómo vaciar **solo** el residuo propio (nunca un borrador humano). | `Ctrl+U`, `ESC`. |
 | `new_session_commands` | `/clear`, `/new`… (Claude/OpenCode). | Sin "New session". |
 | `on_hook(event, at)` | Señales exactas de ciclo de vida empujadas por el agente. | — |
 | `activity_snapshot()` · `model_from_screen()` · `usage_from_screen()` | Modelo, herramienta en curso, uso. *(Hoy están como `if kind == …` dispersos; mover aquí es la Fase 2 del plan de trabajo.)* | Actividad = solo estado. |
@@ -158,6 +158,41 @@ class ExampleHarness(Harness):
 | `claude` | implementado | pantalla + hooks | transcript JSONL | `SessionStart`/`UserPromptSubmit`/`Stop`/`PermissionRequest` | transcript / cabecera |
 | `opencode` | implementado | pantalla | servidor local HTTP | eventos SSE (`session.status`, `permission.asked`…) | servidor / pie de caja |
 | `codex` | implementado | pantalla | `~/.codex/sessions/AAAA/MM/DD/rollout-*.jsonl` (solo lectura) | `task_started` / `task_complete` en el rollout (pantalla de respaldo) | pie: `GPT-5.6-Terra medium · <cwd>` |
+
+### Versiones validadas y de dónde viene cada señal
+
+Cada adaptador prioriza **señales estructuradas** sobre el scraping; la pantalla es
+el respaldo. Esta tabla dice qué fuente gana y qué versión se verificó por última vez
+(`crewhall doctor` avisa si la CLI instalada queda fuera del rango, ver
+`crewhall/harness/versions.py`).
+
+| Kind | Fuente primaria | Respaldo | Versión validada |
+|---|---|---|---|
+| `claude` | hooks (`SessionStart`/`UserPromptSubmit`/`Stop`/`PermissionRequest`) + transcript JSONL | pantalla | 2.1.284 |
+| `opencode` | servidor local HTTP + eventos SSE (`session.status`, `permission.asked`…) | pantalla | 1.18.34 |
+| `codex` | rollout JSONL (`task_started` / `task_complete`) | pantalla | 0.158.0 |
+
+Las fixtures de `tests/fixtures/screens/<kind>/` son capturas reales por versión; el
+kit de contrato (§9) las valida contra `_detect`. `tests/test_adapter_versions.py`
+comprueba además que la versión capturada en cada fixture siga dentro del rango
+validado.
+
+### Texto fantasma (placeholder/sugerencia) y borradores humanos
+
+La caja de entrada de cada TUI muestra a veces una **sugerencia** que no es
+contenido real: al teclear se reemplaza. No debe confundirse con un borrador
+humano, que **nunca** se borra (Fase 0.2). El criterio por adaptador:
+
+- **claude 2.1.x** y **codex 0.158.0**: la sugerencia se dibuja tenue (SGR 2,
+  *faint*) tras el prompt (`❯` / `›`); un borrador no. `_input_is_ghost()` usa el
+  helper compartido `faint_first_visible()` de `harness/base.py` (y
+  `capture(escapes=True)`).
+- **opencode 1.18.34**: el placeholder (`Ask anything… "…"`) se dibuja con un gris
+  fijo y la parte rotatoria es solo el ejemplo entrecomillado, así que
+  `input_line()` lo reconoce por el prefijo `Ask anything` y lo trata como vacío.
+
+Capturas reales usadas para fijar esto: `tmux -L probe capture-pane -p -e` sobre
+Codex 0.158.0 y OpenCode 1.18.34.
 
 ### Codex CLI 0.158.0 — señales verificadas (captura real, tmux aislado, 120×40)
 

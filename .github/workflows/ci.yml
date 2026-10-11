@@ -66,3 +66,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: AT_RUN_CLAUDE=1 AT_RUN_OPENCODE=1 AT_RUN_CODEX=1 python -m unittest discover
+
+  browser:
+    # Optional: drives a real Chromium through Playwright. The tests skip when
+    # Playwright is absent, so this only runs when explicitly requested (a
+    # nightly run, or the `browser-tests` label on a PR).
+    if: github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'browser-tests')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: python -m pip install playwright && python -m playwright install --with-deps chromium
+      - run: python -m unittest tests.test_web_ui_browser tests.test_terminal_web_browser

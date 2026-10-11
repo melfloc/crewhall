@@ -14,6 +14,8 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # noqa: BLE001
     sync_playwright = None
 
+from .support import HardTimeoutMixin
+
 CHROMIUM = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
 INDEX = os.path.join(os.path.dirname(__file__), "..", "crewhall", "web", "static", "index.html")
 AGENT = {"agent_id": "sess_a", "name": "a", "kind": "claude", "state": "waiting_input",
@@ -81,7 +83,7 @@ def rich_msg() -> dict:
 
 
 @unittest.skipUnless(sync_playwright and CHROMIUM, "needs playwright + chromium")
-class _Browser(unittest.TestCase):
+class _Browser(HardTimeoutMixin, unittest.TestCase):
     initial_total = 450
     available = True
     wait_for_messages = True
@@ -96,6 +98,7 @@ class _Browser(unittest.TestCase):
     viewport = {"width": 1300, "height": 800}
 
     def setUp(self):
+        self._install_test_timeout()
         self.total = self.initial_total
         self.calls: list[str] = []
         self.payloads: list[dict] = []

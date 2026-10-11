@@ -17,6 +17,8 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # noqa: BLE001
     sync_playwright = None
 
+from .support import HardTimeoutMixin
+
 CHROMIUM = (shutil.which("chromium") or shutil.which("chromium-browser")
             or shutil.which("google-chrome"))
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,7 +42,7 @@ def _wait(predicate, timeout: float = 15.0) -> bool:
 
 
 @unittest.skipUnless(sync_playwright and CHROMIUM, "needs playwright + chromium")
-class TerminalPageBrowser(unittest.TestCase):
+class TerminalPageBrowser(HardTimeoutMixin, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.root = tempfile.mkdtemp(prefix="ati-termweb-", dir="/tmp")
@@ -137,6 +139,7 @@ class TerminalPageBrowser(unittest.TestCase):
         shutil.rmtree(cls.root, ignore_errors=True)
 
     def setUp(self):
+        self._install_test_timeout()
         from crewhall.client import Client
 
         client = Client(socket_path=self.sock, autostart=False)

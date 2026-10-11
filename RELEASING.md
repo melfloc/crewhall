@@ -21,6 +21,11 @@
    revierte solo.
 5. **Se verifica lo que se instala.** sha256 + firma SSH (`ssh-keygen -Y`) contra el firmante que la
    máquina destino ya confía; un build nuevo se prueba (versión, imports) *antes* de reemplazar nada.
+6. **Releases agrupadas, no por commit.** Una versión (y su entrada de CHANGELOG) agrupa un conjunto de
+   cambios coherente y probado, no cada commit. Los commits intermedios de `main` no suben la versión:
+   se sube `pyproject.toml`/`__init__.py`/`CHANGELOG.md` una sola vez, en el commit de release, cuando el
+   grupo está cerrado y la suite está en verde. Evita la secuencia "0.79 con 57 commits" que hace
+   ilegible el historial de versiones.
 
 ## Versionado (SemVer, aplicado a este proyecto)
 

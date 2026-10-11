@@ -24,6 +24,31 @@ terminals, live view, mission control) and **Chat** (a provider-style chat over 
 crewhall agents, with document **artifacts** you can preview and co-edit in
 **OnlyOffice**).
 
+## One product, two faces: Chat is the door, Cowork is the team
+
+> **Chat is the door, Cowork is the team that works behind it, and the artifacts
+> are the shared deliverable.**
+
+A conversation can have a **crew**: a Team of real Cowork agents. The chat's own
+agent acts as the *lead* — it talks with you and delegates to the team, while its
+working directory stays isolated. Artifacts flow back into the conversation, carry
+the agent that produced them, and can be reviewed and co-edited in OnlyOffice.
+
+```mermaid
+flowchart LR
+    U[You] -->|talk| L["Lead (Chat agent)"]
+    L -->|handoff / request| C["Crew (Cowork Team)"]
+    C -->|publish artifact| A["Artifacts (conversation outputs)"]
+    A -->|review / comment| O[OnlyOffice]
+    O -->|routed to producer| C
+    A -->|shown in| U
+```
+
+The same socket, identity and delivery guarantees underpin both faces; Cowork shows
+a conversation with a crew as a node in Mission Control. See
+[docs/CHAT-MODE.md](docs/CHAT-MODE.md) and, for the stable surface you can build
+against, [docs/STABLE-SURFACE.md](docs/STABLE-SURFACE.md).
+
 ## Screenshots
 
 The Web UI: live agent view, and Mission control with every agent and the message flow.
@@ -58,8 +83,8 @@ tmux *or* a plain PTY.
 - **Teams, tasks and correlation**: assign a task (`handoff`) or ask and wait for an
   answer (`request`/`reply`), with timeouts, chain limits and anti-loop rules.
 - **A native MCP server** (stdio, stdlib only, off by default) so an agent can call
-  `whoami`, `list_teammates`, `send_message`, `request`, `reply`, `handoff` and
-  `new_session` as tools.
+  `whoami`, `list_teammates`, `send_message`, `request`, `reply`, `handoff`,
+  `new_session` and `publish_artifact` as tools.
 - **Optional per-agent git worktrees** (`workspace_mode: worktree`) on a branch
   `at/<team>/<agent>`, isolated under the state directory.
 - **Mission Control**, a live activity view, conversation history, cost/usage,
