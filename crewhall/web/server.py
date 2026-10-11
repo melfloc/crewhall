@@ -220,6 +220,9 @@ class Handler(BaseHTTPRequestHandler):
     # injected by the server
     control: Client
     security: "SecurityPolicy"
+    # BaseHTTPRequestHandler types ``self.server`` as BaseServer; this handler is
+    # always served by our own subclass (tickets, terminal hubs, locks…).
+    server: "_TrackingHTTPServer"
 
     def log_message(self, fmt: str, *args: Any) -> None:  # quieter
         pass
@@ -234,7 +237,7 @@ class Handler(BaseHTTPRequestHandler):
         super().send_header(keyword, value)
 
     def end_headers(self) -> None:
-        sent = getattr(self, "_sent_headers", set())
+        sent: set[str] = getattr(self, "_sent_headers", set())
         headers = (("Content-Security-Policy", content_security_policy()), *_SECURITY_HEADERS)
         for key, value in headers:
             if key.lower() not in sent:
@@ -792,7 +795,7 @@ class Handler(BaseHTTPRequestHandler):
                 "id": rec["id"], "label": rec["label"], "scopes": rec["scopes"],
                 "hosts": rec["hosts"], "expires_at": rec["expires_at"]}})
         if op == "terminal_token_revoke":
-            token_id = payload.get("id")
+            token_id = str(payload.get("id") or "")
             removed = terminal_tokens.revoke(token_id)
             audit.record("web_terminal_token_revoke", actor=self._audit_actor(),
                          result="ok" if removed else "error",
@@ -1240,7 +1243,7 @@ class Handler(BaseHTTPRequestHandler):
         if not settings.get("terminals.enabled"):
             return False
         grant = self._effective_grant()
-        return bool(grant) and terminal_tokens.scopes_imply(
+        return grant is not None and terminal_tokens.scopes_imply(
             grant.get("scopes"), terminal_tokens.SCOPE_READ)
 
     def _authorize_terminal_op(self, op: str, params: dict[str, Any]) -> dict[str, Any] | None:

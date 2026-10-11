@@ -47,8 +47,10 @@ def clean_user_text(text: str) -> str:
     """Hide Claude's internal wrappers so the conversation reads like what the user saw."""
     text = _PASTE_TAG.sub("", text)
     if "<command-name>" in text:
-        name = (_CMD.search(text) or [None, ""])[1].strip()
-        args = (_CMD_ARGS.search(text) or [None, ""])[1].strip()
+        name_match = _CMD.search(text)
+        name = (name_match.group(1) if name_match else "").strip()
+        args_match = _CMD_ARGS.search(text)
+        args = (args_match.group(1) if args_match else "").strip()
         return (name + (" " + args if args else "")).strip() or text
     m = _CMD_OUT.search(text)
     if m:
@@ -158,6 +160,7 @@ def read_history(session_id: str, limit: int = 200, before: int | None = None,
     """
     unavailable = {"available": False, "messages": [], "total": 0, "start": 0}
     truncated = False
+    entries: list[dict[str, Any]] | None
     if host is not None:
         from . import remote_files
 

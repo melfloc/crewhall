@@ -9,12 +9,12 @@ Use it before cutting a release and right after every deploy to a new machine.
 """
 from __future__ import annotations
 
+import functools
 import shutil
 import time
 import uuid
 from typing import Any
 from collections.abc import Callable
-
 from .client import Client, RpcError, ping
 import contextlib
 
@@ -121,9 +121,12 @@ def _kind(client: Client, report: _Report, kind: str, team: str, suffix: str,
     if _failed(report):
         return
     with report.step(f"{kind}: both agents become ready"):
+        def _ready(target: str) -> bool:
+            return client.call("agent_state", target=target)["agent"]["state"] \
+                in ("ready", "waiting_input")
+
         for name in (a, b):
-            ok = _wait(lambda n=name: client.call("agent_state", target=n)["agent"]["state"]
-                       in ("ready", "waiting_input"), 90, 1.0)
+            ok = _wait(functools.partial(_ready, name), 90, 1.0)
             _expect(ok, f"{name} never became ready (for Claude: open it once in {cwd} and accept the "
                         "folder-trust dialog)")
     if _failed(report):

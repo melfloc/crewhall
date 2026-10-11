@@ -12,6 +12,7 @@ that matter are kept distinct (this is the classic OnlyOffice mistake):
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import io
@@ -138,13 +139,13 @@ def jwt_decode(token: str) -> dict[str, Any]:
     ).digest()
     try:
         given = _b64d(sig_b64)
-    except (ValueError, base64.binascii.Error) as exc:
+    except (ValueError, binascii.Error) as exc:
         raise OfficeError("malformed signature") from exc
     if not hmac.compare_digest(expected, given):
         raise OfficeError("bad signature")
     try:
         payload = json.loads(_b64d(payload_b64))
-    except (ValueError, base64.binascii.Error) as exc:
+    except (ValueError, binascii.Error) as exc:
         raise OfficeError("malformed payload") from exc
     exp = payload.get("exp")
     if isinstance(exp, (int, float)) and time.time() > exp:

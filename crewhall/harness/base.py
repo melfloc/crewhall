@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from ..session import InteractiveSession
 
@@ -198,7 +198,7 @@ class Harness(ABC):
         return {"available": False, "messages": [], "total": 0, "start": 0}
 
     @classmethod
-    def mcp_launch_args(cls, config_path: str) -> list[str]:
+    def mcp_launch_args(cls, config_path: str | None) -> list[str]:
         """argv wiring an MCP server config into the agent (Fase 4). Empty when
         the CLI does not support it; adapters override."""
         return []
@@ -223,7 +223,7 @@ class Harness(ABC):
         """Static model names this adapter can switch to (may be empty)."""
         return []
 
-    def available_models(self) -> list:
+    def available_models(self) -> list[Any]:
         """Model names/labels discoverable at runtime (e.g. OpenCode's catalog).
 
         Returns a list of strings or ``{"value", "label"}`` dicts. The default
@@ -260,7 +260,8 @@ class Harness(ABC):
         """Still-running tool commands known through the agent's own signals."""
         return {}
 
-    def config_risks(self) -> list[str]:
+    @classmethod
+    def config_risks(cls) -> list[str]:
         """Read-only warnings about the agent's own user config (permissive
         approval/sandbox settings). Adapters override; never modifies anything."""
         return []
@@ -472,7 +473,7 @@ class Harness(ABC):
     # Commands that make the TUI drop its conversation and start another one.
     new_session_commands: tuple[str, ...] = ()
     # Set by the controller: called when one of those commands is submitted.
-    on_new_session = None
+    on_new_session: Callable[[str | None], None] | None = None
     _typed = ""
     # Last text crewhall itself injected (send/send_command): the only residue
     # ``ensure_input_clean`` may clear.

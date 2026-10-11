@@ -464,11 +464,12 @@ def _normalize(raw: Any) -> dict[str, Any]:
 def load() -> dict[str, Any]:
     """The stored (non-default) values, cached by file mtime."""
     p = path()
+    stamp: tuple[str, int | None, int | None]
     try:
         st = os.stat(p)
         stamp = (p, st.st_mtime_ns, st.st_size)
     except OSError:
-        stamp = (p, None)
+        stamp = (p, None, None)
     with _LOCK:
         if _CACHE["stamp"] == stamp and _CACHE["data"] is not None:
             return _CACHE["data"]

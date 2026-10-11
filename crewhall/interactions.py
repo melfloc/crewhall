@@ -193,7 +193,8 @@ class InteractionBoard:
 
 def opencode_permission(props: dict[str, Any]) -> dict[str, Any]:
     """OpenCode ``PermissionRequest`` -> neutral permission data."""
-    metadata = props.get("metadata") if isinstance(props.get("metadata"), dict) else {}
+    meta_raw = props.get("metadata")
+    metadata: dict[str, Any] = meta_raw if isinstance(meta_raw, dict) else {}
     patterns = [_clip(p, 500) for p in props.get("patterns") or [] if isinstance(p, str)]
     detail_bits = []
     for key in ("command", "filepath", "filePath", "path", "url", "description"):

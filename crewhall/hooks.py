@@ -13,6 +13,7 @@ import shlex
 import shutil
 import sys
 import tempfile
+from typing import Any
 
 from . import paths
 
@@ -57,7 +58,7 @@ def question_hook_command(remote: bool = False) -> str:
 
 
 def claude_settings(remote: bool = False) -> dict:
-    settings = {
+    settings: dict[str, Any] = {
         "hooks": {
             name: [{"hooks": [{"type": "command", "command": hook_command(event, remote)}]}]
             for name, event in _CLAUDE_EVENTS.items()

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import builtins
 import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from .harness import AgentInfo, Harness
 
@@ -252,8 +253,8 @@ class TeamRegistry:
                     remaining = tuple(a for a in team.agent_ids if a != agent_id)
                     self._replace(team, remaining)
 
-    def member_harnesses(self, team: Team) -> list[Harness]:
-        out: list[Harness] = []
+    def member_harnesses(self, team: Team) -> builtins.list[Harness]:
+        out: builtins.list[Harness] = []
         for agent_id in team.agent_ids:
             try:
                 out.append(self._agents.resolve(agent_id))
@@ -261,10 +262,10 @@ class TeamRegistry:
                 continue
         return out
 
-    def members(self, team: Team) -> list[AgentInfo]:
+    def members(self, team: Team) -> builtins.list[AgentInfo]:
         return [harness.info() for harness in self.member_harnesses(team)]
 
-    def missing(self, team: Team) -> list[str]:
+    def missing(self, team: Team) -> builtins.list[str]:
         alive = {harness.agent_id for harness in self.member_harnesses(team)}
         return [agent_id for agent_id in team.agent_ids if agent_id not in alive]
 
@@ -277,7 +278,7 @@ class TeamRegistry:
 
     def _resolve_agent(self, target: str) -> Harness:
         try:
-            return self._agents.resolve(target)
+            return cast(Harness, self._agents.resolve(target))
         except KeyError as exc:
             raise TeamError(f"unknown agent {target!r}") from exc
 

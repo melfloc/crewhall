@@ -64,7 +64,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_create(args: argparse.Namespace) -> int:
-    command = list(args.command)
+    command: Any = list(args.command)
     if args.shell and command:
         command = " ".join(command)
     elif not command:
@@ -639,7 +639,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return doctor.exit_code(results)
 
 
-def _human_bytes(n: int) -> str:
+def _human_bytes(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024 or unit == "GB":
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
@@ -1193,11 +1193,11 @@ def cmd_web_token(args: argparse.Namespace) -> int:
         print("token revoked" if removed else "no token to revoke")
         return 0
     if action == "show":
-        token = auth.load_token()
-        if not token:
+        shown = auth.load_token()
+        if not shown:
             print("no token configured", file=sys.stderr)
             return 1
-        print(token)
+        print(shown)
         return 0
     raise SystemExit("usage: crewhall web token generate|revoke|show")
 

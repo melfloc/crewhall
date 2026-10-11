@@ -9,12 +9,20 @@ falls outside it, so a surprising UI change is flagged before it bites.
 from __future__ import annotations
 
 import re
+from typing import TypedDict
 
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
 
+
+class ValidatedRange(TypedDict):
+    min: tuple[int, int, int]
+    max_exclusive: tuple[int, int, int]
+    captured: str
+
+
 # kind -> {"min": (inclusive), "max_exclusive": ..., "captured": the tested one}.
 # A kind absent here has no validated range yet (never warned about).
-VALIDATED: dict[str, dict[str, object]] = {
+VALIDATED: dict[str, ValidatedRange] = {
     "claude": {"min": (2, 1, 0), "max_exclusive": (3, 0, 0), "captured": "2.1.284"},
     "codex": {"min": (0, 150, 0), "max_exclusive": (1, 0, 0), "captured": "0.158.0"},
     "opencode": {"min": (1, 0, 0), "max_exclusive": (2, 0, 0), "captured": "1.18.34"},
@@ -30,7 +38,7 @@ def parse_version(text: str | None) -> tuple[int, int, int] | None:
     return int(major), int(minor), int(patch or 0)
 
 
-def validated_range(kind: str) -> dict[str, object] | None:
+def validated_range(kind: str) -> ValidatedRange | None:
     return VALIDATED.get(kind)
 
 

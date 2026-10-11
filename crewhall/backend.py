@@ -21,6 +21,11 @@ class Backend(ABC):
     @abstractmethod
     def start(self, spec: SessionSpec) -> None: ...
 
+    def adopt(self, name: str) -> None:
+        """Bind to an already-running session (only backends that can survive
+        the daemon, e.g. tmux/ssh-tmux, override this)."""
+        raise NotImplementedError
+
     @abstractmethod
     def write(self, text: str) -> None: ...
 

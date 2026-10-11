@@ -102,7 +102,8 @@ class PtyBackend(Backend):
             self._acc_len += len(text)
             while self._acc_len > self._acc_max and len(self._acc) > 1:
                 self._acc_len -= len(self._acc.pop(0))
-            self.session._emit_output(text)
+            if self.session is not None:
+                self.session._emit_output(text)
 
         code = self._poll_wait()
         if code is None:

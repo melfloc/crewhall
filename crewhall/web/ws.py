@@ -182,7 +182,7 @@ class FrameReader:
 
 
 # -- backwards-compatible helpers (state WebSocket) --------------------------
-def decode_frame(data: bytes) -> tuple[str | None, int, int, bytes]:
+def decode_frame(data: bytes) -> tuple[int | None, int, int, bytes]:
     """Legacy decoder used by the state socket. Returns (opcode, len, flen, payload).
 
     Opcode is returned as ``int`` (or None on malformed input), matching the

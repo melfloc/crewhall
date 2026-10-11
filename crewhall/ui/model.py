@@ -97,7 +97,8 @@ def translate_sequence(data: bytes) -> list[str]:
     ):
         if seq and data[: len(seq)] == seq:
             rest = data[len(seq):]
-            return [name, *[_byte_key(b) for b in rest if _byte_key(b)]]
+            rest_keys = [k for b in rest if (k := _byte_key(b)) is not None]
+            return [name, *rest_keys]
     return [k for k in (_byte_key(b) for b in data) if k]
 
 
@@ -632,7 +633,8 @@ class AppModel:
             self.status_kind = "warning"
             return
         member_ids = {m["agent_id"] for m in team["members"]}
-        names = [a.get("name") for a in self.agents if a["agent_id"] not in member_ids]
+        names = [str(a.get("name") or a["agent_id"]) for a in self.agents
+                 if a["agent_id"] not in member_ids]
         self._new_modal(
             "add_members",
             f"ADD MEMBERS \u00b7 {team['name']}",
@@ -1016,9 +1018,9 @@ class AppModel:
         assert modal is not None
         action, target = modal.action, modal.target
         self.close_modal()
-        if action == "remove_agent":
+        if action == "remove_agent" and target:
             self.remove_agent(target)
-        elif action == "remove_team":
+        elif action == "remove_team" and target:
             self.remove_team(target)
 
     def _option(self, field: ModalField) -> str | None:
@@ -1059,7 +1061,7 @@ class AppModel:
             if name in self.agent_names():
                 modal.error = f'agent "{name}" already exists'
                 return
-            if not host and not os.path.isdir(os.path.expanduser(cwd)):
+            if not host and cwd and not os.path.isdir(os.path.expanduser(cwd)):
                 modal.error = "working directory does not exist"
                 return
             team = modal.target
@@ -1075,6 +1077,8 @@ class AppModel:
         elif kind == "add_members":
             field = modal.fields[0]
             team = modal.target
+            if team is None:
+                return
             if not field.options:
                 # No agents available: offer to create one in this team.
                 self.close_modal()
@@ -1086,6 +1090,8 @@ class AppModel:
         elif kind == "remove_members":
             names = self._checked(modal.fields[0])
             team = modal.target
+            if team is None:
+                return
             self.close_modal()
             self.remove_members(team, names)
         elif kind == "message":

@@ -24,6 +24,8 @@ import stat
 import subprocess
 import threading
 import time
+from collections.abc import Callable
+from typing import Any, cast
 
 from .web import ws as wsmod
 import contextlib
@@ -71,7 +73,7 @@ class HubClient:
         self._closed = False
         self.dropped_code: int | None = None
         self.mode = "read"
-        self.control_cb = None  # set by the WS handler: callable(dict)
+        self.control_cb: Callable[[dict[str, Any]], None] | None = None  # set by the WS handler
         self.thread = threading.Thread(target=self._run, name="term-client", daemon=True)
         if autostart:
             self.thread.start()
@@ -244,7 +246,7 @@ class RemotePipeSource(_PipeSource):
             return b""
         # read1 returns as soon as some bytes are available (a plain read(n)
         # would block until n bytes or EOF, stalling the stream).
-        return self.proc.stdout.read1(n) or b""
+        return cast(Any, self.proc.stdout).read1(n) or b""
 
     def snapshot(self) -> bytes:
         return capture_with_cursor_remote(self.host_cfg, self.socket, self.pane)

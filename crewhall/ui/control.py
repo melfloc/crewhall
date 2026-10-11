@@ -73,7 +73,7 @@ class ControlPort(Protocol):
         self, sender: str, recipient: str, body: str
     ) -> dict[str, Any]: ...
     def message_history(
-        self, agent: str | None, limit: int | None
+        self, agent: str | None = None, limit: int | None = None
     ) -> list[dict[str, Any]]: ...
 
 

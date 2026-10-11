@@ -715,7 +715,7 @@ class Server:
 
     def _op_host_set(self, request: dict[str, Any]) -> dict[str, Any]:
         self._need_confirm(request, "changing a host")
-        body = {k: request[k] for k in ("ssh", "port", "identity", "known_hosts",
+        body: dict[str, Any] = {k: request[k] for k in ("ssh", "port", "identity", "known_hosts",
                                         "tmux_socket", "tunnel") if k in request}
         return {"host": self.controller.host_set(str(request.get("name") or ""), body)}
 
@@ -1354,7 +1354,8 @@ class Server:
             roots += [a["cwd"] for a in self.controller.list_agents() if a.get("cwd")]
         except Exception:  # noqa: BLE001
             log.debug("ignored exception in a boundary guard", exc_info=True)
-        actor = request.get("_actor") if isinstance(request.get("_actor"), dict) else {}
+        actor_raw = request.get("_actor")
+        actor: dict[str, Any] = actor_raw if isinstance(actor_raw, dict) else {}
         return fscomplete.complete(
             request.get("prefix"), roots=roots, actor=(actor.get("label") or actor.get("ip") or "local"),
         )

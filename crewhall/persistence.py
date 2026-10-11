@@ -28,6 +28,7 @@ class StateStore:
         self.path = path or paths.state_path()
 
     def load(self) -> dict[str, Any]:
+        data: dict[str, Any]
         try:
             with open(self.path, encoding="utf-8") as fh:
                 data = json.load(fh)

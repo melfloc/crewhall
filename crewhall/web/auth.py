@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -224,7 +225,7 @@ def revoke_sessions(keep: str | None = None) -> int:
         n = len(_SESSIONS) - (1 if kept else 0)
         _SESSIONS.clear()
         if kept:
-            _SESSIONS[_label_key(keep)] = kept
+            _SESSIONS[_label_key(keep or "")] = kept
     with _TERMINAL_LOCK:
         if keep:
             rec = _TERMINAL_GRANTS.get(_label_key(keep))
@@ -263,7 +264,7 @@ _TERMINAL_LOCK = threading.Lock()
 
 
 def unlock_terminal(value: str | None, *, scopes: list[str], hosts: list[str],
-                    token_id: str) -> bool:
+                    token_id: str | None) -> bool:
     if not value:
         return False
     with _TERMINAL_LOCK:
@@ -289,7 +290,7 @@ def verify_session(value: str | None) -> bool:
     try:
         body = body_b64.encode("ascii")
         sig = base64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
-    except (ValueError, base64.binascii.Error):
+    except (ValueError, binascii.Error):
         return False
     expected = hmac.new(_session_secret(), body, hashlib.sha256).digest()
     if not hmac.compare_digest(sig, expected):

@@ -133,11 +133,11 @@ def run(
                     for mapped in translate_sequence(bytes(seq)):
                         model.handle_key(mapped)
                 else:
-                    mapped = _map_key(key)
-                    if mapped == "quit":
+                    mapped_key = _map_key(key)
+                    if mapped_key == "quit":
                         break
-                    if mapped:
-                        model.handle_key(mapped)
+                    if mapped_key:
+                        model.handle_key(mapped_key)
 
             # Propagate the real session viewport to the focused agent's TUI
             # (also covers KEY_RESIZE: dimensions change -> resize is sent).

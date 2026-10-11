@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from .base import AgentState, Harness, faint_first_visible
+from ..session import InteractiveSession
 
 # Verified against Codex CLI 0.158.0 (see ADAPTERS.md §8).
 WORKING_RE = re.compile(r"Working\s*\([^)]*esc to interrupt", re.IGNORECASE)
@@ -40,7 +42,7 @@ class CodexHarness(Harness):
         "--dangerously-bypass-approvals-and-sandbox", "--full-auto", "--yolo", "-a never",
     )
 
-    def __init__(self, session, *, name: str | None = None) -> None:
+    def __init__(self, session: InteractiveSession, *, name: str | None = None) -> None:
         super().__init__(session, name=name)
         self._seen_working = False
 
@@ -60,12 +62,12 @@ class CodexHarness(Harness):
         except Exception:  # noqa: BLE001
             return None
 
-    def history(self, limit: int = 200, before: int | None = None) -> dict:
+    def history(self, limit: int = 200, before: int | None = None) -> dict[str, Any]:
         from .. import codex_rollout
 
         return codex_rollout.read(self.conversation_id, cwd=self._cwd(), limit=limit)
 
-    def activity_snapshot(self) -> dict:
+    def activity_snapshot(self) -> dict[str, Any]:
         from .. import codex_rollout
 
         snap = codex_rollout.latest_signal(self.conversation_id, cwd=self._cwd())
@@ -133,7 +135,8 @@ class CodexHarness(Harness):
                 return "\n".join(lines[:i]).rstrip("\n")
         return self.session.capture()
 
-    def config_risks(self) -> list[str]:
+    @classmethod
+    def config_risks(cls) -> list[str]:
         import os
 
         path = os.path.join(os.path.expanduser("~"), ".codex", "config.toml")

@@ -30,7 +30,7 @@ DEFAULT_SOCKET = "crewhall"
 def socket_name() -> str:
     from .. import brand
 
-    return brand.env("TMUX_SOCKET", DEFAULT_SOCKET)
+    return brand.env("TMUX_SOCKET", DEFAULT_SOCKET) or DEFAULT_SOCKET
 
 
 def __getattr__(name: str) -> str:
@@ -88,6 +88,7 @@ class TmuxBackend(Backend):
         argv = spec.argv()
         terminal = is_terminal(spec)
         cwd = spec.cwd or os.getcwd()
+        assert self.session is not None
         name = self.session.session_id
         # The tmux server may predate this process; pass the session env
         # explicitly with `env VAR=val` so agents inherit it regardless of the
@@ -163,7 +164,7 @@ class TmuxBackend(Backend):
 
     def _first_pane(self) -> str | None:
         proc = self._run(
-            "list-panes", "-t", self.tmux_name, "-F", "#{pane_id}"
+            "list-panes", "-t", self.tmux_name or "", "-F", "#{pane_id}"
         )
         line = proc.stdout.strip().splitlines()
         return line[0] if line else None
@@ -183,7 +184,7 @@ class TmuxBackend(Backend):
             if text != last:
                 delta = text[len(last):] if text.startswith(last) else text
                 last = text
-                if delta:
+                if delta and self.session is not None:
                     self.session._emit_output(delta)
             code = self.poll()
             if code is not None:

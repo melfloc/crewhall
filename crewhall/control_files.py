@@ -123,7 +123,7 @@ class _Corrupt(Exception):
 
 
 def enabled() -> bool:
-    return brand.env("CONTROL_FILES", "append").lower() not in (
+    return (brand.env("CONTROL_FILES", "append") or "append").lower() not in (
         "off", "0", "false", "no",
     )
 

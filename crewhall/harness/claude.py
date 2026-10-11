@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 import time
+from typing import Any
 
 from .base import AgentState, Harness, faint_first_visible
+from ..session import InteractiveSession
 
 WORKING_RE = re.compile(r"esc\s+to\s+interrupt", re.IGNORECASE)
 COMPLETION_RE = re.compile(r"\u00b7\s*done\s+\d", re.IGNORECASE)
@@ -59,7 +61,7 @@ class ClaudeCodeHarness(Harness):
     # a human draft in the input is never destroyed (Fase 0.2).
     clear_input_keys = ("CTRL_U",)
 
-    def __init__(self, session, *, name: str | None = None) -> None:
+    def __init__(self, session: InteractiveSession, *, name: str | None = None) -> None:
         super().__init__(session, name=name)
         self._seen_working = False
         self._sent_marker = ""
@@ -84,7 +86,7 @@ class ClaudeCodeHarness(Harness):
             args += ["--session-id", conversation_id]
         return args
 
-    def _host_cfg(self) -> dict | None:
+    def _host_cfg(self) -> dict[str, Any] | None:
         """The configured SSH host of a remote agent (None for a local one)."""
         name = getattr(self.session.spec, "host", None)
         if not name:
@@ -96,7 +98,7 @@ class ClaudeCodeHarness(Harness):
         except settings.SettingsError:
             return None
 
-    def history(self, limit: int = 200, before: int | None = None) -> dict:
+    def history(self, limit: int = 200, before: int | None = None) -> dict[str, Any]:
         from ..transcripts import read_history
 
         if not self.conversation_id:
@@ -113,7 +115,7 @@ class ClaudeCodeHarness(Harness):
     def mcp_launch_args(cls, config_path: str | None) -> list[str]:
         return ["--mcp-config", config_path] if config_path else []
 
-    def activity_snapshot(self) -> dict:
+    def activity_snapshot(self) -> dict[str, Any]:
         from .. import activity
 
         return activity.claude_snapshot(self.conversation_id, host=self._host_cfg())
@@ -132,7 +134,8 @@ class ClaudeCodeHarness(Harness):
     def models(cls) -> list[str]:
         return ["default", "sonnet", "opus", "haiku", "opusplan", "fable", "best"]
 
-    def config_risks(self) -> list[str]:
+    @classmethod
+    def config_risks(cls) -> list[str]:
         import json
         import os
 

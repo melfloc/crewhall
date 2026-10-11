@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
+from typing import Any, cast
 
 from .base import AgentState, Harness, HarnessNotReady
+from ..session import InteractiveSession
 
 WORKING_RE = re.compile(r"esc\s+interrupt", re.IGNORECASE)
 # One ``Build · <model> · 4.3s`` line is appended to the transcript per completed
@@ -43,7 +46,7 @@ class OpenCodeHarness(Harness):
     uses_local_server = True
     interrupt_keys = ("ESC", "ESC")  # "esc again to interrupt"
 
-    def __init__(self, session, *, name: str | None = None) -> None:
+    def __init__(self, session: InteractiveSession, *, name: str | None = None) -> None:
         super().__init__(session, name=name)
         self._seen_working = False
         self._completion_count_at_send = 0
@@ -86,12 +89,12 @@ class OpenCodeHarness(Harness):
         return (READY_PLACEHOLDER in low and not TOKENS_RE.search(text)
                 and not WORKING_RE.search(low) and not COMPLETION_RE.search(text))
 
-    def history(self, limit: int = 200, before: int | None = None) -> dict:
+    def history(self, limit: int = 200, before: int | None = None) -> dict[str, Any]:
         if self.link and not self.conversation_id and self.conversation_resolver:
             self.conversation_id = self.conversation_resolver()
         if not (self.link and self.conversation_id):
             return super().history(limit, before)
-        data = self.link.history(self.conversation_id, limit, before)
+        data = cast(dict[str, Any], self.link.history(self.conversation_id, limit, before))
         # ``/new`` typed straight into the TUI (not through crewhall): the start
         # screen shows while the tracked conversation still has messages, so we
         # left it.  A start screen over an *empty* conversation is just the fresh
@@ -105,11 +108,12 @@ class OpenCodeHarness(Harness):
             if self.conversation_resolver:
                 self.conversation_resolver()
                 if self.conversation_id:
-                    return self.link.history(self.conversation_id, limit, before)
+                    return cast(dict[str, Any],
+                                self.link.history(self.conversation_id, limit, before))
             return super().history(limit, before)
         return data
 
-    def activity_snapshot(self) -> dict:
+    def activity_snapshot(self) -> dict[str, Any]:
         from .. import activity
 
         return activity.opencode_snapshot(self.link, self.conversation_id)
@@ -136,7 +140,7 @@ class OpenCodeHarness(Harness):
         link = self.link
         if link is None:
             return []
-        cache = getattr(self, "_models_cache", None)
+        cache: tuple[float, list[dict[str, str]]] | None = getattr(self, "_models_cache", None)
         now = time.monotonic()
         if cache and now - cache[0] < self._MODELS_TTL:
             return cache[1]
@@ -214,7 +218,7 @@ class OpenCodeHarness(Harness):
             self.session.send_key("ESC")
             time.sleep(0.25)
 
-    def _await(self, predicate, timeout: float) -> bool:
+    def _await(self, predicate: Callable[[str], bool], timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
@@ -225,17 +229,17 @@ class OpenCodeHarness(Harness):
             time.sleep(0.15)
         return False
 
-    def usage_from_screen(self, text: str) -> dict:
+    def usage_from_screen(self, text: str) -> dict[str, Any]:
         from .. import usage
 
         return usage.opencode_usage(text)
 
-    def running_shells(self, root: int | None = None) -> dict:
+    def running_shells(self, root: int | None = None) -> dict[str, Any]:
         link, conv = self.link, self.conversation_id
         if link is None or not conv:
             return {}
         try:
-            return link.running_tools(conv)
+            return cast(dict[str, Any], link.running_tools(conv))
         except Exception:  # noqa: BLE001 - the server may be busy/restarting
             return {}
 

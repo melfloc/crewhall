@@ -6,7 +6,7 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from .harness import AgentState, Harness
 from .harness.base import HarnessNotReady
@@ -636,7 +636,7 @@ class Messaging:
 
     def _resolve(self, target: str, role: str) -> Harness:
         try:
-            return self._registry.resolve(target)
+            return cast(Harness, self._registry.resolve(target))
         except KeyError as exc:
             raise MessagingError(f"unknown {role} {target!r}") from exc
 

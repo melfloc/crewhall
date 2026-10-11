@@ -7,6 +7,7 @@ completion from terminal quietness: the answer is another message, matched by
 """
 from __future__ import annotations
 
+import builtins
 import threading
 import time
 import uuid
@@ -205,12 +206,12 @@ class RequestBoard:
         return [r.to_dict() for r in items]
 
     # -- persistence (bounded) --------------------------------------------
-    def snapshot(self) -> list[dict[str, Any]]:
+    def snapshot(self) -> builtins.list[dict[str, Any]]:
         self.sweep()
         with self._lock:
             return [r.to_dict() for r in self._items.values()]
 
-    def load(self, rows: list[dict[str, Any]]) -> None:
+    def load(self, rows: builtins.list[dict[str, Any]]) -> None:
         with self._lock:
             self._items.clear()
             self._order.clear()

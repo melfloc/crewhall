@@ -281,7 +281,7 @@ class Controller:
             # The remote agent reaches the restricted gateway, never the daemon.
             # A down tunnel raises HostUnreachable: the agent is not launched
             # with a socket path that cannot work.
-            values["SOCKET"] = self.remote_links.ensure(settings.host(host)).remote_socket
+            values["SOCKET"] = self.remote_links.ensure(settings.host(host)).remote_socket or ""
             values["GATEWAY"] = "1"
         for key, value in values.items():
             env[f"{brand.ENV_PREFIX}_{key}"] = value
@@ -368,7 +368,7 @@ class Controller:
         return OpenCodeLink(free_port(), secrets.token_urlsafe(24))
 
     def _make_worktree(self, agent_id: str, agent_name: str, team: str | None,
-                       cwd: str, host: str | None = None) -> str:
+                       cwd: str | None, host: str | None = None) -> str | None:
         from . import remote_worktrees, worktrees
 
         hcfg = settings.host(host) if host else None
@@ -459,7 +459,9 @@ class Controller:
             raise ValueError("type DISCARD to discard a worktree with changes")
         for agent_id, wt in list(self._worktrees.items()):
             if wt.get("host") and wt["path"] == path:  # a managed remote worktree
-                remote_worktrees.remove(self._wt_host(wt), path, force=True)
+                wt_host = self._wt_host(wt)
+                if wt_host is not None:
+                    remote_worktrees.remove(wt_host, path, force=True)
                 self._worktrees.pop(agent_id, None)
                 return {"discarded": path, "host": wt["host"]}
         real, base = os.path.realpath(path), os.path.realpath(worktrees.root())
@@ -1530,7 +1532,7 @@ class Controller:
                                       "kind": "?", "state": "missing"})
                     continue
                 teammates.append({
-                    "agent_id": info.agent_id, "name": info.name,
+                    "agent_id": info.agent_id, "name": info.name or "",
                     "kind": info.kind, "state": info.state.value,
                 })
         return {
@@ -1596,7 +1598,7 @@ class Controller:
 
     def _task_dirs(self, harness: Harness) -> set[str]:
         dirs = self._agent_task_dirs.setdefault(harness.agent_id, set())
-        roots = [paths.usable_tmpdir(), os.environ.get("TMPDIR"), "/tmp"]
+        roots = [r for r in (paths.usable_tmpdir(), os.environ.get("TMPDIR"), "/tmp") if r]
         dirs.update(procs.claude_task_files(harness.conversation_id, roots))
         return dirs
 
@@ -1614,7 +1616,7 @@ class Controller:
             conv = harness.conversation_id
             dirs = {d for d in dirs if conv and os.path.basename(os.path.dirname(d)) == conv}
             live = {s["output"]["task"] for s in out["shells"] if s.get("output", {}).get("kind") == "file"}
-            finished = []
+            finished: list[dict[str, Any]] = []
             for directory in dirs:
                 for path in glob.glob(os.path.join(directory, "*.output")):
                     task = os.path.basename(path)[: -len(".output")]
@@ -2026,11 +2028,11 @@ class Controller:
             self.requests.accept(req.request_id)
         if not (delivery.delivered or delivery.queued):
             self.requests.fail(req.request_id, delivery.error or "not delivered")
-            return {"request": self.requests.get(req.request_id).to_dict(),
-                    "delivery": delivery.to_dict()}
+            failed = self.requests.get(req.request_id) or req
+            return {"request": failed.to_dict(), "delivery": delivery.to_dict()}
         if not wait:
-            return {"request": self.requests.get(req.request_id).to_dict(),
-                    "delivery": delivery.to_dict()}
+            current = self.requests.get(req.request_id) or req
+            return {"request": current.to_dict(), "delivery": delivery.to_dict()}
         return {"request": self._await_reply(req.request_id),
                 "delivery": delivery.to_dict()}
 

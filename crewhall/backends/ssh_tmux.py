@@ -173,6 +173,7 @@ class SshTmuxBackend(TmuxBackend):
         argv = spec.argv()
         terminal = is_terminal(spec)
         cwd = spec.cwd  # a *remote* path: never substitute the local cwd
+        assert self.session is not None
         name = _remote_session_name(self.host_alias, self.session.session_id)
         env_items = [
             (key, value)
@@ -283,7 +284,7 @@ class SshTmuxBackend(TmuxBackend):
 
     # ------------------------------------------------------------------- attach
     @classmethod
-    def attach_command(cls, host: dict[str, Any], tmux_name: str) -> list[str]:
+    def attach_command(cls, host: dict[str, Any], tmux_name: str) -> list[str]:  # type: ignore[override]
         inst = cls(host)
         return [
             *inst._ssh_local_argv(allocate_tty=True),

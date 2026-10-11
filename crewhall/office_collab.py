@@ -193,7 +193,7 @@ class CoEditor:
         self.port = _free_port()
         self.proc: subprocess.Popen | None = None
         self.ws: _WsClient | None = None
-        self.httpd = None
+        self.httpd: Any = None
         self.web_port = 0
         self._id = 0
         self._contexts: dict[str, int] = {}
