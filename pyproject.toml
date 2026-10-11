@@ -96,3 +96,20 @@ warn_return_any = true
 no_implicit_reexport = true
 strict_equality = true
 extra_checks = true
+
+[tool.coverage.run]
+source = ["crewhall"]
+parallel = true
+sigterm = true
+# The suite spawns the daemon and the CLI as subprocesses; with
+# COVERAGE_PROCESS_START set (and the coverage .pth installed) their lines are
+# measured too, which is what the thresholds below are about.
+branch = false
+
+[tool.coverage.report]
+skip_covered = false
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+]

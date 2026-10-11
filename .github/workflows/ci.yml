@@ -28,6 +28,30 @@ jobs:
       # persistence/harness (see [tool.mypy] in pyproject.toml).
       - run: mypy
 
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: pip install coverage
+      # The suite spawns the daemon and the CLI as subprocesses; the .pth makes
+      # every Python process start coverage so their lines are measured too.
+      - name: Enable subprocess coverage
+        run: |
+          python - <<'PY'
+          import pathlib, site
+          pth = pathlib.Path(site.getsitepackages()[0]) / "zz_coverage.pth"
+          pth.write_text("import coverage; coverage.process_startup()\n")
+          PY
+      - run: COVERAGE_PROCESS_START=$PWD/pyproject.toml coverage run -m unittest discover
+      - run: coverage combine
+      # Fails below 80% global, 90% on messaging/conversations and 90% on
+      # daemon._guard_origin / controller.publish_artifact.
+      - run: python scripts/coverage_gate.py
+
   tests:
     runs-on: ubuntu-latest
     strategy:
