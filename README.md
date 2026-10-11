@@ -19,6 +19,11 @@ tmux or a native PTY, exposes a semantic state per agent, and adds a peer-to-pee
 team-scoped messaging layer with an authoritative identity — so agents can assign
 work, request an answer and hand off tasks, not just run side by side.
 
+It ships **two first-class interfaces**: **Cowork** (the agent workspace: teams,
+terminals, live view, mission control) and **Chat** (a provider-style chat over real
+crewhall agents, with document **artifacts** you can preview and co-edit in
+**OnlyOffice**).
+
 ## Screenshots
 
 The Web UI: live agent view, and Mission control with every agent and the message flow.
@@ -59,15 +64,29 @@ tmux *or* a plain PTY.
   `at/<team>/<agent>`, isolated under the state directory.
 - **Mission Control**, a live activity view, conversation history, cost/usage,
   cleanup/reset, bundles and a settings panel — all in the Web UI.
+- **Two first-class interfaces — Cowork and Chat** (top-bar toggle, remembered).
+  *Cowork* is the agent workspace (teams, terminals, live view, mission control);
+  *Chat* is a conversational view over real agents, with an artifact panel.
+- **Chat mode with documents (OnlyOffice).** Each chat is a real agent isolated in
+  its own folder (`inputs/`, `outputs/`, `workspace/`); artifacts are previewed and
+  edited with OnlyOffice, the agent joins the **same session** as a live co-editor
+  (its edits appear in your editor, with its own cursor), and you can talk to it from
+  inside the document (anchored comments + co-authoring chat). One command provisions
+  the Document Server: `crewhall office setup`.
+- **Artifacts & export.** Resizable artifact panel with a parallel 50/50 view and an
+  OnlyOffice **status button** (start/restart/stop), plus **Export** a whole
+  conversation (transcript + inputs + outputs) as a ZIP. Document files are
+  **OOXML-validated on open and on save**, so a bad save never overwrites a good
+  artifact and Microsoft Office (or any suite) opens the result.
 - **File uploads from the Web UI**: the composer accepts files (button, drag & drop
   or paste), stores them on the server — temp, cleaned by the janitor, or a permanent
   directory — and hands the agent their absolute path.
-- **Composer tools**: a per-provider **model selector** (Claude applies
-  `/model <alias>`; OpenCode's catalog is read from its local server and its picker
-  is driven for you; Codex opens its own picker), a **slash-command palette**,
-  **quick actions** (interrupt, new session, permission mode), **conversation export**
-  (Markdown/JSON), **global search** across every agent, and **`@`-mentions** for
-  workspace paths.
+- **Composer tools & shortcuts**: the composer collapses into a single **＋ Tools**
+  button (slash commands, prompt templates, attach, change model); a **special-keys
+  palette** (`Ctrl+Shift+K`: Esc, `Ctrl+C/D/B/O/L/R/U/W`, Tab, arrows…) and a
+  **right-click menu on the agent viewport** to send keys or insert slash commands;
+  plus a per-provider **model selector**, **conversation export** (Markdown/JSON),
+  **global search** and **`@`-mentions** for workspace paths.
 - **Web terminals** (off by default): real `xterm.js` shells shown in the sidebar
   like agents and in the main pane, local or over SSH, gated by scoped tokens.
 - **Drag & drop** in the sidebar: reorder teams and move an agent to another team.
@@ -151,6 +170,44 @@ capability: a terminal is arbitrary code execution as your user.
   socket already belongs to your user, so it needs no token.
 - Limits per token/host/total, an idle timeout that drops the client (not the
   terminal), a maximum message size and a cap on WebSocket clients.
+
+## Chat mode and OnlyOffice
+
+Beyond the agent workspace (Cowork), crewhall has a **Chat** interface: a
+provider-style chat where each conversation is backed by a **real crewhall agent**
+isolated in its own folder, and everything the agent produces lands in an
+**artifact panel** you can preview, edit and download.
+
+```bash
+crewhall office setup     # install + run the OnlyOffice Document Server (Docker), wire it
+crewhall office status    # docker · container · healthcheck · settings
+crewhall office stop      # / restart
+crewhall doctor           # also verifies OnlyOffice when it is enabled
+```
+
+- **Artifacts.** `<conversations.dir>/<id>/{inputs,outputs,workspace}` (0700/0600,
+  path-confined). What you upload goes to `inputs/`; what the agent writes goes to
+  `outputs/` (it receives `CREWHALL_OUTPUTS`), and that is what the panel shows.
+  Download one artifact, preview images/PDF, or **Export** the whole conversation
+  (transcript + inputs + outputs) as a ZIP.
+- **Live co-editing.** Opening an artifact brings the agent in as a co-editor of the
+  **same session** (same `document.key`), so its edits appear in your editor as you
+  watch. You can steer it from inside the document: the co-authoring chat and
+  anchored comments are forwarded to the agent as prompts.
+- **Formats & fidelity.** OOXML is edited natively (`.docx`/`.xlsx`/`.pptx`) and Open
+  Document too; `.md`/`.csv` open as text/sheet and `.pdf` is view-only. crewhall
+  **validates** documents on open and on save, so a corrupt payload never replaces a
+  good artifact and the file stays readable by Microsoft Office and other suites.
+- **Professional use.** Every chat gets an agent-facing guide
+  ([docs/ONLYOFFICE-AGENTS.md](docs/ONLYOFFICE-AGENTS.md)) plus a short SOP in its
+  `CLAUDE.md`/`AGENTS.md`: **format and structure by file** (`python-docx`,
+  `openpyxl`, `python-pptx`, `pandoc`), incremental text through the live co-editor.
+- **The status button** in the artifact panel shows whether Docker / the Document
+  Server are up and lets you start, restart or stop them without leaving the chat.
+
+Design details: [docs/CHAT-MODE.md](docs/CHAT-MODE.md) · infrastructure:
+[scripts/onlyoffice/](scripts/onlyoffice/) · OnlyOffice for agents:
+[docs/ONLYOFFICE-AGENTS.md](docs/ONLYOFFICE-AGENTS.md).
 
 ## Upgrading from agent-terminal
 

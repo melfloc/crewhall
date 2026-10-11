@@ -46,6 +46,44 @@ La `UI` es un **cliente del daemon** (el `Controller` residente) y no salta capa
 
 ![Mission control](docs/images/mission-control-dark.png)
 
+## Modo Chat y OnlyOffice
+
+Además del espacio de trabajo de agentes (**Cowork**), crewhall tiene una interfaz
+**Chat**: conversaciones al estilo de los chats web de proveedores, cada una
+respaldada por un **agente crewhall real** aislado en su propia carpeta, con un
+**panel de artefactos** que puedes previsualizar, editar y descargar.
+
+- **Dos interfaces de primer nivel** (conmutador en la barra superior, se recuerda):
+  *Cowork* (equipos, terminales, vista en vivo, mission control) y *Chat*.
+- **Artefactos.** `<conversations.dir>/<id>/{inputs,outputs,workspace}` (0700/0600,
+  con confinamiento de rutas). Lo que subes va a `inputs/`; lo que produce el agente
+  va a `outputs/` (recibe `CREWHALL_OUTPUTS`) y es lo que muestra el panel. Puedes
+  descargar un artefacto, previsualizar imagen/PDF o **exportar** la conversación
+  entera (transcript + inputs + outputs) a un **ZIP**.
+- **Co-edición en vivo.** Abrir un artefacto incorpora al agente como co-editor de la
+  **misma sesión** (mismo `document.key`): sus cambios aparecen en tu editor con su
+  propio cursor. Puedes dirigirlo desde el documento: el chat de co-autoría y los
+  **comentarios anclados** llegan al agente como prompts.
+- **Formatos.** OOXML nativo (`.docx`/`.xlsx`/`.pptx`) y OpenDocument; `.md`/`.csv` se
+  abren como texto/hoja y `.pdf` es solo lectura. crewhall **valida** el documento al
+  abrir y al guardar, así que un guardado inválido nunca sobreescribe el artefacto
+  bueno y el fichero sigue abriéndose en Microsoft Office u otra suite.
+- **Uso profesional.** Cada chat recibe una guía ([docs/ONLYOFFICE-AGENTS.md](docs/ONLYOFFICE-AGENTS.md))
+  y un SOP corto en su `CLAUDE.md`/`AGENTS.md`: **formato y estructura por archivo**
+  (`python-docx`, `openpyxl`, `python-pptx`, `pandoc`), texto incremental por el
+  co-editor. Botón de **estado de OnlyOffice** en el panel de artefactos
+  (iniciar/reiniciar/apagar).
+
+```bash
+crewhall office setup     # instala/arranca el Document Server (Docker) y lo enlaza
+crewhall office status    # docker · contenedor · healthcheck · ajustes
+crewhall office stop      # / restart
+crewhall doctor           # también comprueba OnlyOffice si está activo
+```
+
+Detalle de diseño: [docs/CHAT-MODE.md](docs/CHAT-MODE.md) · infraestructura:
+[scripts/onlyoffice/](scripts/onlyoffice/).
+
 ## 1. Problema
 
 Queremos tener simultáneamente varias sesiones interactivas (Claude Code, OpenCode,
