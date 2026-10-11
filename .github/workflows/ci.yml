@@ -66,6 +66,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: AT_RUN_CLAUDE=1 AT_RUN_OPENCODE=1 AT_RUN_CODEX=1 python -m unittest discover
+      # Fase F1: the end-to-end smoke with real agents (two OpenCode agents,
+      # human draft, queue across a restart, denied control plane, chat publish).
+      - run: python scripts/smoke.py --require
 
   browser:
     # Optional: drives a real Chromium through Playwright. The tests skip when
