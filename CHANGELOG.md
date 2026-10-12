@@ -7,7 +7,30 @@ to run without it and ships these notes with the release.
 
 ## [0.80.0] — 2026-10-11
 
-Release de estabilidad y observabilidad. Sin cambios incompatibles.
+Release de estabilidad, seguridad y del puente Chat ↔ Cowork.
+
+**Cambio incompatible a tener en cuenta:** el control plane del socket exige
+ahora un token de control (`state/control-token`, 0600) que `crewhall.client`
+lee solo. Un script que hable con el socket sin `crewhall.client` recibe
+`control plane requires a valid control token`, y los comandos de control
+(`crewhall list`, `agent stop`…) se rechazan dentro de la terminal de un agente.
+
+- **Mensajería fiable.** Cola **FIFO por destinatario** y persistente (sobrevive
+  a un reinicio del daemon); deduplicación solo por `message_id` /
+  `idempotency_key`; un mensaje nunca borra lo que una persona está escribiendo
+  en la terminal del agente (queda en cola y se entrega al vaciar el input); el
+  texto fantasma (sugerencias tenues) de Claude y Codex no bloquea la entrega.
+- **Control plane cerrado a los agentes.** Las operaciones de control exigen el
+  token de control y se rechazan a procesos que descienden de un agente o llevan
+  su `CREWHALL_TOKEN`: un agente ya no puede aprobar sus propios permisos ni
+  escribir o matar a otros saltándose su Team.
+- **Puente Chat ↔ Cowork.** Un chat puede tener **crew** (un Team): el lead
+  delega y los miembros publican entregables con `crewhall chat publish` (o la
+  herramienta MCP `publish_artifact`), que aparecen con su autor; los
+  comentarios de OnlyOffice van al autor del artefacto, por la cola (no se
+  pierden si está ocupado) y sin reenviar los antiguos al reabrir. Web UI:
+  selector de crew, franja de actividad, badges de autor y chats en Mission
+  Control.
 
 - **No perder trabajo (Fase A).**
   - `daemon stop` ya **no mata** a los agentes tmux/ssh-tmux: para el control
@@ -17,6 +40,8 @@ Release de estabilidad y observabilidad. Sin cambios incompatibles.
   - El **historial de mensajes** se persiste en un JSONL rotado (configurable por
     entradas y días) y se recarga al arrancar: la franja de crew y el Message
     flow ya no quedan vacíos tras un reinicio.
+  - Los agentes que sobreviven al reinicio **conservan su token**
+    (`state/agent-tokens.json`, 0600): siguen pudiendo enviar mensajes.
   - `crewhall agent message` ya no bloquea 30 s ni miente: espera como el envío
     entre agentes y el CLI dice el motivo real (`busy` / `human draft` /
     `starting`).
@@ -31,8 +56,11 @@ Release de estabilidad y observabilidad. Sin cambios incompatibles.
 - **Seguridad (Fase D).** `office.base_url` solo acepta una base configurada;
   `publish_artifact` abre con `O_NOFOLLOW` y revalida el fd (TOCTOU); rate-limit
   por agente y tope de tamaño en `team_send`; los agentes Claude reciben
-  `permissions.deny` sobre el runtime/estado de crewhall (SECURITY.md detalla el
-  aislamiento por proveedor).
+  `permissions.deny` (`Read`/`Edit`, rutas absolutas `//`) sobre el token de
+  control, los archivos de control y el runtime dir de crewhall. Bloquea sus
+  herramientas de archivo y los comandos que Claude reconoce (`cat`…), no un
+  script que abra el archivo por su cuenta: SECURITY.md detalla el alcance y
+  cuándo hace falta el sandbox.
 - **Producto Chat + Cowork (Fase E).** Actividad **por conversación** (etiqueta
   `conversation_id`, con interruptor "ver todo el team"); idioma de las reglas
   por `chat.language`; favicon y estados vacíos.
