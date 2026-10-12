@@ -88,12 +88,15 @@ class Smoke:
 
     def step_human_draft(self) -> None:
         a, b = self.state["a"], self.state["b"]
+        # The previous step started a turn in smoke-b: a draft only counts as
+        # the reason once the agent is idle (otherwise it is queued as "busy").
+        assert wait(lambda: b.state().usable, 120), "smoke-b never went idle"
         b.session.write("a human draft")
         time.sleep(0.8)
         token = self.controller._agent_token(a.agent_id)
         delivery = self.controller.send_message_as(
             "smoke-a", token, "smoke-b", "while drafting")
-        assert delivery.queued, "a human draft must force queueing"
+        assert delivery.queued, f"a human draft must force queueing: {delivery.to_dict()}"
         assert delivery.queue_reason == "human draft", delivery.queue_reason
         # Clear the draft; the queue must deliver it.
         for key in b.clear_input_keys:
@@ -111,12 +114,13 @@ class Smoke:
     def step_restart(self) -> None:
         a, b = self.state["a"], self.state["b"]
         a_id = a.agent_id
-        # Queue a message to a busy recipient, then stop the control plane only.
-        b.session.write("busy")
+        # Queue a message behind a draft, then stop the control plane only.
+        assert wait(lambda: b.state().usable, 120), "smoke-b never went idle"
+        b.session.write("a draft across the restart")
         time.sleep(0.5)
         token = self.controller._agent_token(a.agent_id)
         delivery = self.controller.send_message_as("smoke-a", token, "smoke-b", "survives-restart")
-        assert delivery.queued, "expected the message to queue"
+        assert delivery.queued, f"expected the message to queue: {delivery.to_dict()}"
         self.controller.shutdown(kill_agents=False)
 
         second = Controller(adopt=True, persist=True)
@@ -125,6 +129,16 @@ class Smoke:
         assert adopted.agent_id == a_id, "agent id changed across the restart"
         assert adopted.state().usable or adopted.session.status.alive, \
             "smoke-a did not survive the restart"
+        # The surviving agent still carries its old CREWHALL_TOKEN: the new
+        # daemon must accept it (agent tokens persist across restarts).
+        after = second.send_message_as("smoke-a", token, "smoke-b", "after-restart")
+        assert after.delivered or after.queued, f"token rejected after restart: {after.to_dict()}"
+        # Clear the draft: the message queued before the restart is delivered.
+        b2 = second.get_agent("smoke-b")
+        for key in b2.clear_input_keys:
+            b2.session.send_key(key)
+        assert wait(lambda: "survives-restart" in b2.capture(), 90), \
+            "the message queued before the restart was not delivered"
         # Continue against the new control plane; keep the old one for cleanup.
         self.state["old_controller"] = self.controller
         self.controller = second
@@ -139,8 +153,13 @@ class Smoke:
         token = self.controller._agent_token(a.agent_id)
         out = self.controller.publish_artifact(a.agent_id, token, cid, source, name="deliverable.txt")
         assert out["artifact"], "publish_artifact returned nothing"
+        # Artifacts get a unique name (deliverable-<hex>.txt): match the relpath.
+        relpath = out["artifact"]["relpath"]
         files = conversations.list_files(cid, "outputs")
-        assert any(f.get("name") == "deliverable.txt" for f in files), "artifact not stored"
+        assert any(f.get("relpath") == relpath for f in files), f"artifact not stored: {files}"
+        info = conversations.info(cid)
+        produced = {o["relpath"]: o.get("producer") for o in info["outputs"]}
+        assert produced.get(relpath) == a.agent_id, f"producer not recorded: {produced}"
 
     # -- lifecycle ------------------------------------------------------
     def cleanup(self) -> None:
