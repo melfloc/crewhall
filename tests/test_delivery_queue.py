@@ -17,10 +17,12 @@ from tests.support import FakeHarness
 
 
 class _Busy(FakeHarness):
+    # Per instance: a class-level flag flipped by one test leaked into the next
+    # one in the same process and made the recipient look idle.
     busy = True
 
     def _detect(self, text):
-        return (AgentState.WORKING, "w") if type(self).busy else (AgentState.READY, "r")
+        return (AgentState.WORKING, "w") if self.busy else (AgentState.READY, "r")
 
 
 class _DraftHarness(FakeHarness):
@@ -53,7 +55,6 @@ class _DraftHarness(FakeHarness):
 
 class QueueOrdering(unittest.TestCase):
     def setUp(self) -> None:
-        _Busy.busy = True
         self.controller = Controller(adopt=False, persist=False)
 
     def test_three_queued_messages_arrive_in_order(self) -> None:
@@ -66,7 +67,7 @@ class QueueOrdering(unittest.TestCase):
             for i in range(3)
         ]
         self.assertTrue(all(d.queued for d in deliveries))
-        type(b).busy = False
+        b.busy = False
         deadline = time.monotonic() + 8
         while not deliveries[-1].delivered and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -153,7 +154,6 @@ class QueueDurability(unittest.TestCase):
 
 class SystemMessages(unittest.TestCase):
     def setUp(self) -> None:
-        _Busy.busy = True
         self.controller = Controller(adopt=False, persist=False)
 
     def test_system_message_to_busy_recipient_is_queued_then_delivered(self) -> None:
@@ -164,7 +164,7 @@ class SystemMessages(unittest.TestCase):
             b.agent_id, "[OnlyOffice comment] cambia esto", origin="office")
         self.assertTrue(delivery.queued, delivery.to_dict())
         self.assertEqual(delivery.message.sender, "system:office")
-        type(b).busy = False
+        b.busy = False
         deadline = time.monotonic() + 5
         while not delivery.delivered and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -230,7 +230,6 @@ class ForwardCollabQueues(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700)
-        _Busy.busy = True
         self.controller = Controller(adopt=False, persist=False)
         self.agent = _Busy("lead")
         self.controller.agents.add(self.agent)
@@ -281,7 +280,7 @@ class ForwardCollabQueues(unittest.TestCase):
 
     def test_forward_collab_delivers_when_agent_becomes_ready(self) -> None:
         self.server._forward_collab(self.conv["id"], "doc.txt", "you", "chat", "hola")
-        type(self.agent).busy = False
+        self.agent.busy = False
         deadline = time.monotonic() + 5
         while not self.agent.session.writes and time.monotonic() < deadline:
             time.sleep(0.05)
