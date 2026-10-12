@@ -1742,6 +1742,7 @@ class Controller:
     def send_message_as(
         self, sender: str, token: str | None, recipient: str, body: str,
         idempotency_key: str | None = None, message_id: str | None = None,
+        conversation_id: str | None = None,
     ) -> Delivery:
         """Agent-to-agent send: identity from token + Team boundary enforced."""
         sender_harness = self.agents.resolve(sender)
@@ -1751,6 +1752,7 @@ class Controller:
             sender_harness.agent_id, recipient, body,
             authorize=self._authorize_team, prefix_sender=True,
             idempotency_key=idempotency_key, message_id=message_id,
+            conversation_id=conversation_id,
             # Agents are told not to wait for answers: when the recipient is busy, hand over to the
             # bounded retry queue quickly instead of blocking the sender's turn for up to 30 s.
             wait=AGENT_SEND_WAIT,
@@ -1891,10 +1893,12 @@ class Controller:
 
     def send_message(self, sender: str, recipient: str, body: str,
                      idempotency_key: str | None = None,
-                     message_id: str | None = None) -> Delivery:
+                     message_id: str | None = None,
+                     conversation_id: str | None = None) -> Delivery:
         return self.messaging.send(
             sender, recipient, body, prefix_sender=True,
             idempotency_key=idempotency_key, message_id=message_id,
+            conversation_id=conversation_id,
             # Control plane (CLI/Web): don't block for 30 s before queueing; a
             # short grace is enough to deliver to a READY recipient, then the
             # queue takes over and reports the real reason (Fase A3).
@@ -2012,19 +2016,28 @@ class Controller:
         return meta
 
     def conversation_activity(
-        self, conversation_id: str, limit: int = 50
+        self, conversation_id: str, limit: int = 50, all_team: bool = False
     ) -> dict[str, Any]:
-        """The crew's in-flight handoffs/requests for a chat's activity strip."""
+        """The crew's in-flight handoffs/requests for a chat's activity strip.
+
+        By default only traffic tagged with this ``conversation_id`` is shown, so
+        two chats sharing a Team each see their own strip. ``all_team`` widens it
+        to every message between the crew's members (the "see all team" toggle).
+        """
         from . import chat as conversations
 
         conv = conversations.get(conversation_id)
         members = self._team_members(conv.get("team"))
         if conv.get("agent_id"):
             members.add(str(conv["agent_id"]))
-        messages = [
-            m for m in self.messaging.history(limit=None)
-            if m.get("sender") in members or m.get("recipient") in members
-        ]
+        history = self.messaging.history(limit=None)
+        if all_team:
+            messages = [
+                m for m in history
+                if m.get("sender") in members or m.get("recipient") in members
+            ]
+        else:
+            messages = [m for m in history if m.get("conversation_id") == conversation_id]
         requests = [
             r for r in self.list_requests(open_only=False)
             if r.get("sender") in members or r.get("recipient") in members

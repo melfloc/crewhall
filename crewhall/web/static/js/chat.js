@@ -22,7 +22,7 @@ const CHAT = {
 };
 
 /* Crew activity strip (handoffs/requests of a chat's Cowork team). */
-const CREW = {data:null, sig:"", tick:0};
+const CREW = {data:null, sig:"", tick:0, all:false};
 
 const chatBody = () => document.body.classList;
 
@@ -384,7 +384,7 @@ async function chatLoadActivity(force){
   const id = CHAT.active;
   if(!id || !CHAT.info || !CHAT.info.team){ CREW.data = null; chatRenderActivity(null); return; }
   let r;
-  try { r = await op("conversation_activity", {id, limit:20}); }
+  try { r = await op("conversation_activity", {id, limit:20, all_team: !!CREW.all}); }
   catch(e){ return; }
   if(CHAT.active !== id) return;
   const sig = (r.messages||[]).length + ":" + (r.requests||[]).length +
@@ -397,10 +397,15 @@ function chatRenderActivity(data){
   const box = $("chat-crew"); if(!box) return;
   const msgs = (data && data.messages) || [];
   const reqs = (data && data.requests) || [];
-  if(!CHAT.info || !CHAT.info.team || (!msgs.length && !reqs.length)){
+  if(!CHAT.info || !CHAT.info.team){
     box.classList.add("init-hidden"); box.replaceChildren(); return;
   }
   box.classList.remove("init-hidden");
+  if(!msgs.length && !reqs.length){
+    box.replaceChildren(el("div", {className:"chat-empty", role:"status"},
+      CREW.all ? "No team activity yet." : "No crew activity in this chat yet."));
+    return;
+  }
   const row = (who, status, body) => el("div", {className:"crew-row"},
     el("span", {className:"crew-who", textContent:who}),
     el("span", {className:"crew-status", textContent:status || ""}),
@@ -414,6 +419,10 @@ function chatRenderActivity(data){
       onclick:(e)=>{ const open = box.classList.toggle("open");
                      e.currentTarget.setAttribute("aria-expanded", open ? "true" : "false"); }},
       ic("users","sm"), `Crew · ${msgs.length + reqs.length}`),
+    el("button", {className:"crew-all", type:"button", "aria-pressed": CREW.all ? "true" : "false",
+      title:"Show every message of the team, not only this chat's",
+      onclick:()=>{ CREW.all = !CREW.all; CREW.sig = ""; chatLoadActivity(true); }},
+      CREW.all ? "This chat + team" : "This chat"),
     el("div", {className:"crew-rows"}, ...rows));
 }
 

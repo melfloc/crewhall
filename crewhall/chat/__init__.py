@@ -222,7 +222,7 @@ def _atomic_write(path: str, data: bytes) -> None:
 
 # Rules the chat agent reads: how to work with the isolated folders and how to
 # interact with the OnlyOffice editor so its changes appear live.
-RULES = """# crewhall · chat (agente aislado)
+_RULES_ES = """# crewhall · chat (agente aislado)
 
 Estás en un **chat aislado** de crewhall. Tu directorio de trabajo es esta
 carpeta; no leas ni escribas fuera de la carpeta de la conversación.
@@ -272,22 +272,79 @@ que lo publiquen aquí con:
 Así aparece en los artefactos con su autor, y los comentarios del usuario sobre
 ese archivo le llegan directamente a quien lo produjo.
 """
-# The professional OnlyOffice SOP is appended so every chat agent reads it on
-# each turn; the full reference lives next to it as ONLYOFFICE.md (see below).
-RULES = RULES + office_guide.RULES_SECTION
+_RULES_EN = """# crewhall · chat (isolated agent)
+
+You are in an **isolated crewhall chat**. Your working directory is this folder;
+never read or write outside the conversation folder.
+
+## Folders (environment variables)
+- `$CREWHALL_INPUTS`  — what the user uploads.
+- `$CREWHALL_OUTPUTS` — your **artifacts** (what the user sees and downloads).
+- `$CREWHALL_WORKSPACE` — scratch space (here).
+
+When the user asks you to create/edit a document, write it to
+`$CREWHALL_OUTPUTS` (or edit it through OnlyOffice, see below).
+
+## Live editing with OnlyOffice
+The user may have an artifact **open in the editor**. So your changes show up
+**live** (without a reload), do NOT edit the file directly: use the co-editor.
+Open it first (idempotent) and then edit:
+
+    crewhall office open    --conversation "$CREWHALL_CONVERSATION" --path report.docx
+    crewhall office insert  --conversation "$CREWHALL_CONVERSATION" --path report.docx --text "…"
+    crewhall office read    --conversation "$CREWHALL_CONVERSATION" --path report.docx
+    crewhall office comment --conversation "$CREWHALL_CONVERSATION" --path report.docx --text "…"
+    crewhall office comments--conversation "$CREWHALL_CONVERSATION" --path report.docx
+    crewhall office save    --conversation "$CREWHALL_CONVERSATION" --path report.docx
+
+`insert` saves by itself (the user sees it at once). If `office open` fails
+because OnlyOffice is unavailable, edit the file in `$CREWHALL_OUTPUTS` with
+your normal tools.
+
+## Replying in the document chat
+If you receive a message like `[OnlyOffice chat · user · report.docx] …`, the
+user wrote to you **inside the editor**. Reply with:
+
+    crewhall office say --conversation "$CREWHALL_CONVERSATION" --path report.docx --text "…"
+
+Anchored **comments** arrive as `[OnlyOffice comment · …] on "text": …`; make the
+requested change on that text and reply in the chat or with a comment.
+
+## If this chat has a crew (a Cowork Team)
+`crewhall agent identity` shows your Team and your teammates. You can delegate
+with `crewhall message send --to <teammate> --message "…"`. When you delegate a
+deliverable, include this conversation id (`$CREWHALL_CONVERSATION`) and ask them
+to publish it here with:
+
+    crewhall chat publish --conversation <id> <file>
+
+That way it appears among the artifacts with its author, and the user's comments
+on that file go straight to whoever produced it.
+"""
+
+
+def rules_text(lang: str | None = None) -> str:
+    """Chat rules (CLAUDE.md/AGENTS.md) in the configured language (E3)."""
+    lang = (lang or str(settings.get("chat.language") or "es")).lower()
+    base = _RULES_EN if lang == "en" else _RULES_ES
+    return base + office_guide.rules_section(lang)
+
+
+RULES = rules_text()
 
 
 def ensure_rules(directory: str) -> None:
     """Write the chat rules (CLAUDE.md / AGENTS.md) into a directory, idempotent."""
+    text = rules_text()
     for name in ("CLAUDE.md", "AGENTS.md"):
         path = os.path.join(directory, name)
         try:
             if os.path.isfile(path):
                 with open(path, encoding="utf-8") as fh:
-                    if fh.read() == RULES:
+                    if fh.read() == text:
                         continue
             with open(path, "w", encoding="utf-8") as fh:
-                fh.write(RULES)
+                fh.write(text)
             os.chmod(path, 0o600)
         except OSError:
             pass

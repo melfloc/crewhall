@@ -2016,5 +2016,29 @@ class MultiView(_Browser):
         self.assertTrue(any("1 / 3" in s for s in spans), spans)
 
 
+class EmptyStates(_Browser):
+    """Fase E4: every empty surface shows a clear empty state (no blank box)."""
+
+    def test_mission_control_empty_state(self):
+        self.agents = []
+        self.teams = []
+        self._push()
+        self.page.click("#missionBtn")
+        self.page.wait_for_selector("#missionDlg[open]")
+        self.assertIn("(no agents)", self.page.inner_text("#mission-body"))
+
+
+class ChatCrewEmpty(_Browser):
+    conversations = [{**CHAT_CONV, "team": "t1"}]
+
+    def test_crew_strip_empty_state(self):
+        # A chat with a crew but no traffic yet shows an explicit empty state.
+        self.page.evaluate("setInterface('chat')")
+        self.page.wait_for_selector("#chat:not(.init-hidden)")
+        self.page.evaluate("chatSelect('c-1'); chatSetArtifacts(true)")
+        self.page.wait_for_selector("#chat-crew .chat-empty")
+        self.assertIn("crew activity", self.page.inner_text("#chat-crew"))
+
+
 if __name__ == "__main__":
     unittest.main()

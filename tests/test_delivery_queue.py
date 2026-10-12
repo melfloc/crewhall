@@ -161,7 +161,7 @@ class SystemMessages(unittest.TestCase):
         self.controller.agents.add(b)
         messaging = Messaging(self.controller.agents, ack_timeout=0)
         delivery = messaging.send_system(
-            b.agent_id, "[OnlyOffice comentario] cambia esto", origin="office")
+            b.agent_id, "[OnlyOffice comment] cambia esto", origin="office")
         self.assertTrue(delivery.queued, delivery.to_dict())
         self.assertEqual(delivery.message.sender, "system:office")
         type(b).busy = False
@@ -169,7 +169,7 @@ class SystemMessages(unittest.TestCase):
         while not delivery.delivered and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertTrue(delivery.delivered)
-        self.assertEqual(b.session.writes, ["[OnlyOffice comentario] cambia esto"])
+        self.assertEqual(b.session.writes, ["[OnlyOffice comment] cambia esto"])
         messaging.close()
 
     def test_system_message_respects_a_human_draft(self) -> None:

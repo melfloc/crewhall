@@ -338,6 +338,7 @@ def cmd_message_send(args: argparse.Namespace) -> int:
     resp = _client(args).call(
         "team_send", sender=sender, token=token,
         recipient=args.to, body=args.message,
+        conversation_id=brand.env("CONVERSATION"),
     )
     delivery = resp["delivery"]
     _print_delivery(delivery)

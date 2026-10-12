@@ -78,7 +78,7 @@ class ChatCrew(unittest.TestCase):
     def test_activity_reports_crew_messages_and_requests(self) -> None:
         messaging = self.controller.messaging
         messaging.send(self.lead.agent_id, self.worker.agent_id, "do the report",
-                       idempotency_key="h1", wait=0.1)
+                       idempotency_key="h1", wait=0.1, conversation_id=self.conv["id"])
         activity = self.controller.conversation_activity(self.conv["id"])
         self.assertEqual(activity["team"], "crew1")
         self.assertIn(self.worker.agent_id, activity["members"])
@@ -89,7 +89,8 @@ class ChatCrew(unittest.TestCase):
         # An OnlyOffice comment arrives as system:office (not an agent): the
         # activity strip and message history must include it, not crash.
         self.controller.messaging.send_system(
-            self.lead.agent_id, "[OnlyOffice chat] hola", origin="office")
+            self.lead.agent_id, "[OnlyOffice chat] hola", origin="office",
+            conversation_id=self.conv["id"])
         activity = self.controller.conversation_activity(self.conv["id"])
         senders = [m["sender"] for m in activity["messages"]]
         self.assertIn("system:office", senders)

@@ -293,7 +293,7 @@ class Server:
             log.debug("ignored exception in a boundary guard", exc_info=True)
         if not agent_id:
             return
-        label = "comentario" if kind == "comment" else "chat"
+        label = "comment" if kind == "comment" else "chat"
         body = f"[OnlyOffice {label} · {user or 'user'} · {path}] {text}"
         # No content-based idempotency key: the co-editor already forwards each
         # chat message / comment id once (comment ids persist across reopens),
@@ -306,7 +306,8 @@ class Server:
                 self.controller.restart_agent(agent_id)
             # Never inject directly: a WORKING agent, or one whose input holds a
             # human draft, must queue the comment instead of dropping it.
-            self.controller.messaging.send_system(agent_id, body, origin="office")
+            self.controller.messaging.send_system(
+                agent_id, body, origin="office", conversation_id=conversation_id)
         except Exception as exc:  # noqa: BLE001 - a busy/stopped agent must not crash the loop
             log.info("could not forward OnlyOffice %s to %s: %s", kind, agent_id, exc)
 
@@ -846,7 +847,8 @@ class Server:
 
     def _op_conversation_activity(self, request: dict[str, Any]) -> dict[str, Any]:
         return self.controller.conversation_activity(
-            str(request["id"]), limit=int(request.get("limit", 50) or 50))
+            str(request["id"]), limit=int(request.get("limit", 50) or 50),
+            all_team=bool(request.get("all_team", False)))
 
     def _op_conversation_crew(self, request: dict[str, Any]) -> dict[str, Any]:
         from . import chat as conversations
@@ -1091,6 +1093,7 @@ class Server:
             request["recipient"], request["body"],
             idempotency_key=request.get("idempotency_key"),
             message_id=request.get("message_id"),
+            conversation_id=request.get("conversation_id"),
         )
         return {"delivery": delivery.to_dict()}
 
@@ -1168,6 +1171,7 @@ class Server:
             request["sender"], request["recipient"], request["body"],
             idempotency_key=request.get("idempotency_key"),
             message_id=request.get("message_id"),
+            conversation_id=request.get("conversation_id"),
         )
         return {"delivery": delivery.to_dict()}
 

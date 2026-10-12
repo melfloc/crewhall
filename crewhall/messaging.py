@@ -36,6 +36,8 @@ class Message:
     recipient: str
     body: str
     timestamp: float
+    # The chat conversation this message belongs to (None for plain team traffic).
+    conversation_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +46,7 @@ class Message:
             "recipient": self.recipient,
             "body": self.body,
             "timestamp": self.timestamp,
+            "conversation_id": self.conversation_id,
         }
 
 
@@ -99,6 +102,7 @@ class Delivery:
             "status": self.status,
             "acknowledged_at": self.acknowledged_at,
             "queue_reason": self.queue_reason,
+            "conversation_id": self.message.conversation_id,
             "error": self.error,
         }
 
@@ -112,6 +116,7 @@ def delivery_from_dict(record: dict[str, Any]) -> Delivery | None:
             recipient=str(record["recipient"]),
             body=str(record.get("body") or ""),
             timestamp=float(record.get("timestamp") or 0.0),
+            conversation_id=record.get("conversation_id"),
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -190,6 +195,7 @@ class Messaging:
         prefix_sender: bool = False,
         message_id: str | None = None,
         idempotency_key: str | None = None,
+        conversation_id: str | None = None,
     ) -> Delivery:
         """Deliver a message to the recipient's own terminal.
 
@@ -223,6 +229,7 @@ class Messaging:
             queue_ttl=queue_ttl,
             message_id=message_id,
             idempotency_key=idempotency_key,
+            conversation_id=conversation_id,
         )
 
     def send_system(
@@ -234,6 +241,7 @@ class Messaging:
         queue_ttl: float = 1800.0,
         idempotency_key: str | None = None,
         wait: float = 2.0,
+        conversation_id: str | None = None,
     ) -> Delivery:
         """Deliver a message with no agent sender (e.g. an OnlyOffice comment).
 
@@ -256,6 +264,7 @@ class Messaging:
             queue_ttl=queue_ttl,
             message_id=None,
             idempotency_key=idempotency_key,
+            conversation_id=conversation_id,
         )
 
     def _deliver(
@@ -273,6 +282,7 @@ class Messaging:
         queue_ttl: float,
         message_id: str | None,
         idempotency_key: str | None,
+        conversation_id: str | None = None,
     ) -> Delivery:
         """Shared delivery path for ``send`` (agent) and ``send_system``."""
         recipient_harness = self._resolve(recipient, "recipient")
@@ -297,6 +307,7 @@ class Messaging:
             recipient=recipient_harness.agent_id,
             body=body,
             timestamp=time.time(),
+            conversation_id=conversation_id,
         )
         delivery = Delivery(
             message=message,
@@ -691,6 +702,7 @@ class Messaging:
                         "timestamp": delivery.message.timestamp,
                         "expires_at": delivery.expires_at,
                         "queue_reason": delivery.queue_reason,
+                        "conversation_id": delivery.message.conversation_id,
                     })
         return items
 
@@ -725,6 +737,7 @@ class Messaging:
                 message=Message(
                     message_id=message_id, sender=sender, recipient=recipient,
                     body=body, timestamp=float(item.get("timestamp") or now),
+                    conversation_id=item.get("conversation_id"),
                 ),
                 delivered=False,
                 queued=True,

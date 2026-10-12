@@ -110,6 +110,10 @@ def _static_schema() -> list[dict[str, Any]]:
           min=0, max=3650),
         s("conversations.enabled", "conversations", "bool", True, "Chat mode",
           "Shows the chat interface (conversation sidebar, artifact panel).", restart=True),
+        s("chat.language", "conversations", "choice", "es", "Agent language",
+          "Language of the rules and guides crewhall writes for chat agents "
+          "(CLAUDE.md/AGENTS.md/ONLYOFFICE.md). The Web UI itself is English.",
+          choices=["en", "es"]),
         s("conversations.dir", "conversations", "path",
           os.path.join(brand.state_root_dir(), "conversations"), "Conversations directory",
           "Root directory for conversations (inputs/ and outputs/ per conversation). Created 0700."),
