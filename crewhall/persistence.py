@@ -283,3 +283,47 @@ class HistoryStore:
             os.replace(tmp, self.path)
         except OSError as exc:
             log.warning("could not rotate message history %s: %s", self.path, exc)
+
+
+class AgentTokenStore:
+    """The agents' identity tokens, so a restarted daemon still recognises them.
+
+    A tmux agent survives ``daemon stop`` (Fase A1) with ``CREWHALL_TOKEN`` in its
+    environment; without this file the new daemon would mint a different token
+    and the surviving agent could no longer message its Team. The file is 0600
+    in the 0700 state directory (next to ``control-token``), it is covered by the
+    agents' Claude ``permissions.deny`` rules and never goes into ``state.json``,
+    bundles or logs.
+    """
+
+    def __init__(self, path: str | None = None) -> None:
+        self.path = path or os.path.join(paths.state_dir(), "agent-tokens.json")
+
+    def load(self) -> dict[str, str]:
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except FileNotFoundError:
+            return {}
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("could not read agent tokens %s: %s", self.path, exc)
+            return {}
+        tokens = data.get("tokens") if isinstance(data, dict) else None
+        if not isinstance(tokens, dict):
+            return {}
+        return {str(k): str(v) for k, v in tokens.items() if k and v}
+
+    def save(self, tokens: dict[str, str]) -> None:
+        directory = os.path.dirname(self.path)
+        os.makedirs(directory, exist_ok=True)
+        try:
+            fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tokens-", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                os.fchmod(fh.fileno(), 0o600)
+                json.dump({"schema": SCHEMA_VERSION, "tokens": tokens}, fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            log.warning("could not persist agent tokens %s: %s", self.path, exc)
+

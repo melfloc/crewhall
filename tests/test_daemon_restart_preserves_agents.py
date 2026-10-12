@@ -80,5 +80,46 @@ class DaemonRestartPreservesAgents(unittest.TestCase):
         self.assertNotIn(sid, _tmux_sessions())
 
 
+class AgentTokensSurviveRestart(unittest.TestCase):
+    """A surviving tmux agent keeps CREWHALL_TOKEN in its env: it must stay valid."""
+
+    def setUp(self) -> None:
+        import os
+        import tempfile
+
+        root = tempfile.mkdtemp(prefix="ati-tok-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        env = mock.patch.dict(os.environ, {
+            "XDG_CONFIG_HOME": os.path.join(root, "c"),
+            "XDG_STATE_HOME": os.path.join(root, "s"),
+            "XDG_RUNTIME_DIR": os.path.join(root, "r"),
+        })
+        env.start()
+        self.addCleanup(env.stop)
+        os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700)
+
+    def test_token_is_reloaded_by_the_next_daemon(self) -> None:
+        import os
+        import stat
+
+        from crewhall import paths
+        from tests.support import FakeHarness
+
+        first = Controller(adopt=False, persist=True)
+        agent = FakeHarness("survivor")
+        first.register_agent(agent)
+        token = first._agent_token(agent.agent_id)
+        first._persist()
+        path = os.path.join(paths.state_dir(), "agent-tokens.json")
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+
+        second = Controller(adopt=False, persist=True)
+        second.restore()
+        self.assertEqual(second._agent_tokens.get(agent.agent_id), token)
+        # The token never goes into state.json (bundles export that file).
+        with open(os.path.join(paths.state_dir(), "state.json"), encoding="utf-8") as fh:
+            self.assertNotIn(token, fh.read())
+
+
 if __name__ == "__main__":
     unittest.main()

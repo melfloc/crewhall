@@ -26,7 +26,7 @@ from . import processes as procs
 from .opencode_link import OpenCodeLink, free_port
 from .messaging import Delivery, Messaging, MessagingError
 from .requests import OPEN_STATES, RequestBoard, RequestError
-from .persistence import HistoryStore, PendingQueueStore, StateStore
+from .persistence import AgentTokenStore, HistoryStore, PendingQueueStore, StateStore
 from .remote_link import RemoteLinks
 from .session import InteractiveSession
 from .team import Team, TeamError, TeamRegistry
@@ -205,6 +205,7 @@ class Controller:
         self._send_times: dict[str, collections.deque[float]] = {}
         self._store = StateStore() if persist else None
         self._pending_store = PendingQueueStore() if persist else None
+        self._token_store = AgentTokenStore() if persist else None
         history_store = None
         history_limit = 1000
         if persist:
@@ -1245,6 +1246,16 @@ class Controller:
                 self._store.save(self._store.snapshot(self))
             except Exception:  # noqa: BLE001 - persistence must never break the caller
                 log.warning("could not persist state", exc_info=True)
+        self._persist_tokens()
+
+    def _persist_tokens(self) -> None:
+        """Keep the known agents' tokens on disk (and only theirs)."""
+        if self._token_store is None:
+            return
+        known = {h.agent_id for h in self.agents.all()}
+        with self._locks_guard:
+            tokens = {a: t for a, t in self._agent_tokens.items() if a in known and t}
+        self._token_store.save(tokens)
 
     def restore(self) -> None:
         """Load persisted Teams and agent definitions (not processes).
@@ -1256,6 +1267,12 @@ class Controller:
         if self._store is None:
             return
         data = self._store.load()
+        if self._token_store is not None:
+            # Before the agents: a tmux agent that survived the restart still
+            # carries its old token, so it must stay valid (Fase A1).
+            with self._locks_guard:
+                for agent_id, token in self._token_store.load().items():
+                    self._agent_tokens.setdefault(agent_id, token)
         for team in data.get("teams", []):
             try:
                 self.teams.create(
