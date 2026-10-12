@@ -47,7 +47,7 @@ def _function_lines(path: str, name: str) -> set[int]:
 
 TARGETS = [
     Target("messaging", "crewhall/messaging.py", 90.0),
-    Target("conversations", "crewhall/conversations.py", 90.0),
+    Target("conversations", "crewhall/chat/__init__.py", 90.0),
     Target("daemon._guard_origin", "crewhall/daemon.py", 90.0, func="_guard_origin"),
     Target("controller.publish_artifact", "crewhall/controller.py", 90.0, func="publish_artifact"),
 ]
