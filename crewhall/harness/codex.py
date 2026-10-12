@@ -93,6 +93,15 @@ class CodexHarness(Harness):
         m = MODEL_FOOTER_RE.search(text or "")
         return m.group(1).strip() if m else None
 
+    @classmethod
+    def screen_input_box(cls, text: str | None) -> bool:
+        return bool(re.search(r"^\s*\u203a", text or "", re.MULTILINE))
+
+    @classmethod
+    def screen_footer(cls, text: str | None) -> bool:
+        low = (text or "").lower()
+        return "for shortcuts" in low or "for agents" in low
+
     def input_line(self) -> str:
         for line in reversed(self.session.capture().splitlines()):
             m = re.match(r"^\s*›\s?(.*)$", line)

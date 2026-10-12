@@ -9,7 +9,7 @@ import sys
 import time
 from typing import Any
 
-from . import brand, clean, paths
+from . import brand, clean, paths, watch
 from .backends import available
 from .client import Client, RpcError
 from .daemon import Server
@@ -630,6 +630,15 @@ def cmd_selftest(args: argparse.Namespace) -> int:
 def cmd_doctor(args: argparse.Namespace) -> int:
     from . import doctor
 
+    if getattr(args, "trend", False):
+        from . import health
+
+        report = health.trend_report(getattr(args, "days", 30.0))
+        if args.json:
+            print(json.dumps(report, indent=2, sort_keys=True))
+        else:
+            print(_format_trend(report))
+        return 0
     results = doctor.run_checks()
     if getattr(args, "fix_control_files", False):
         results += doctor.fix_control_files()
@@ -638,6 +647,24 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         print(doctor.format_report(results))
     return doctor.exit_code(results)
+
+
+def _format_trend(report: dict[str, Any]) -> str:
+    if not report.get("samples"):
+        return "no health journal yet (the daemon writes one sample every 10 minutes)"
+    lines = [f"health journal: {report['samples']} sample(s)  {report['since']} -> {report['until']}"]
+    for key, label, unit in (
+        ("memory_kb", "memory", "KB"), ("threads", "threads", ""),
+        ("queue", "queue", ""), ("workers_restarted", "worker restarts", ""),
+    ):
+        stat = report.get(key)
+        if stat:
+            lines.append(f"  {label:<16} min={stat['min']:g}{unit} max={stat['max']:g}{unit} "
+                         f"last={stat['last']:g}{unit}")
+    failures = report.get("failures_last_hour") or {}
+    lines.append(f"  {'failures/1h':<16} max={failures.get('max', 0)} sum={failures.get('sum', 0)}")
+    lines.append("  versions: " + (", ".join(report.get("versions") or []) or "-"))
+    return "\n".join(lines)
 
 
 def _human_bytes(n: float) -> str:
@@ -1304,6 +1331,37 @@ def cmd_service(args: argparse.Namespace) -> int:
     raise SystemExit(f"unknown service action {args.action}")
 
 
+def cmd_watch(args: argparse.Namespace) -> int:
+    """Layers 1, 2 and 7: CLI versions, screen captures and the user timers."""
+    action = args.watch_command
+    if action == "versions":
+        report = watch.check_versions(
+            notify_change=not getattr(args, "no_notify", False),
+            capture=not getattr(args, "no_capture", False),
+        )
+        if args.json:
+            print(watch.as_json(report))
+        else:
+            print(watch.format_versions_report(report))
+        screens = report.get("screens")
+        if screens is not None and not watch.screens_ok(screens):
+            return 1
+        return 0
+    if action == "screens":
+        kinds = tuple(k for k in (args.kinds or "").split(",") if k)
+        result = watch.capture_screens(kinds or watch.KINDS)
+        if args.json:
+            print(watch.as_json(result))
+        else:
+            print(watch.format_screens_report(result))
+        return 0 if watch.screens_ok(result) else 1
+    if action == "install":
+        out = watch.remove_timers() if getattr(args, "remove", False) else watch.install_timers()
+        print(json.dumps(out, indent=2, sort_keys=True))
+        return 0
+    raise SystemExit(f"unknown watch action {action}")
+
+
 def cmd_demo(args: argparse.Namespace) -> int:
     from .backends import get_backend
 
@@ -1809,6 +1867,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("doctor", help="check this machine's environment")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--trend", action="store_true",
+                   help="summarise the health journal (memory, threads, queue, failures)")
+    p.add_argument("--days", type=float, default=30.0,
+                   help="with --trend: how many days back to summarise (default 30)")
     p.add_argument("--fix-control-files", action="store_true",
                    help="refresh stale CLAUDE.md/AGENTS.md managed sections")
     p.set_defaults(func=cmd_doctor)
@@ -1854,6 +1916,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--web-port", type=int, default=8765)
     p.add_argument("--web-tailscale", action="store_true")
     p.set_defaults(func=cmd_service)
+
+    p = sub.add_parser("watch", help="long-duration watch: CLI versions, screens and timers")
+    wsub = p.add_subparsers(dest="watch_command", required=True)
+    w = wsub.add_parser("versions", help="compare CLI versions; on change run `watch screens`")
+    w.add_argument("--json", action="store_true")
+    w.add_argument("--no-notify", action="store_true", help="do not send a desktop notification")
+    w.add_argument("--no-capture", action="store_true", help="only compare, never capture screens")
+    w.set_defaults(func=cmd_watch)
+    w = wsub.add_parser("screens", help="capture each CLI start screen and run the adapter detectors")
+    w.add_argument("--json", action="store_true")
+    w.add_argument("--kinds", default=",".join(watch.KINDS),
+                   help="comma-separated kinds (default: all)")
+    w.set_defaults(func=cmd_watch)
+    w = wsub.add_parser("install", help="install and enable the user systemd timers")
+    w.add_argument("--remove", action="store_true", help="disable and remove the timers")
+    w.set_defaults(func=cmd_watch)
 
     p = sub.add_parser("ui", help="launch the interactive TUI")
     p.add_argument("--local", action="store_true", help="embed a Controller (no daemon)")

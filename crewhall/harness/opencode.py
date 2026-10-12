@@ -124,6 +124,15 @@ class OpenCodeHarness(Harness):
 
         return activity.opencode_model(text)
 
+    @classmethod
+    def screen_input_box(cls, text: str | None) -> bool:
+        blob = text or ""
+        return READY_PLACEHOLDER in blob.lower() or "\u2503" in blob
+
+    @classmethod
+    def screen_footer(cls, text: str | None) -> bool:
+        return "ctrl+p" in (text or "").lower()
+
     # OpenCode has no one-shot ``/model <name>``: ``/models`` opens its own
     # picker. We drive it (open, type to fuzzy-filter, Enter) so the Web UI can
     # still offer a real model list; the catalog comes from the local server.

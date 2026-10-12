@@ -212,6 +212,20 @@ class Harness(ABC):
         """Model display name shown on the agent's own screen."""
         return None
 
+    @classmethod
+    def screen_input_box(cls, text: str | None) -> bool:
+        """Whether the adapter's input box is visible on a captured screen.
+
+        Used by ``crewhall watch screens`` as a long-duration detector; an
+        adapter that has no reliable marker leaves it false.
+        """
+        return False
+
+    @classmethod
+    def screen_footer(cls, text: str | None) -> bool:
+        """Whether the adapter's status footer is visible on a captured screen."""
+        return False
+
     # How the Web UI may change the model:
     #  - "direct": the composer offers a model list and ``set_model`` applies the
     #    chosen name (a slash command, or driving the TUI's own picker);

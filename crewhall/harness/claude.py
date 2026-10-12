@@ -126,6 +126,14 @@ class ClaudeCodeHarness(Harness):
 
         return activity.claude_model(text)
 
+    @classmethod
+    def screen_input_box(cls, text: str | None) -> bool:
+        return "\u276f" in (text or "")
+
+    @classmethod
+    def screen_footer(cls, text: str | None) -> bool:
+        return cls._footer_present(text or "")
+
     # Claude accepts ``/model <alias|name>`` mid-session; the aliases below are
     # stable across versions (the versions they resolve to are not).
     model_switch_mode = "direct"

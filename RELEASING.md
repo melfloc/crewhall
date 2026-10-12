@@ -54,6 +54,8 @@ Reglas de compatibilidad (las comprueban los tests y `release.sh`):
 ```bash
 # 1. desarrollar en main, con tests; subir versión + CHANGELOG en el commit de release
 git commit ...
+# 1b. (una vez por release) guardar el formato de estado para la compatibilidad de la suite
+python scripts/snapshot_state.py    # -> tests/fixtures/{state,queue,history}-<versión>.*
 # 2. (recomendado) prueba real con agentes, antes de liberar
 crewhall selftest --cwd ~/Projects/crewhall
 # 3. cortar la release: compuertas → tests → build desde el commit → firma → tag

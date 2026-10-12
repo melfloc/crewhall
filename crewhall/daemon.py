@@ -37,6 +37,8 @@ PERMISSION_WAIT_MAX = 540.0
 PERMISSION_GRACE = 30.0
 # How recently a Web UI must have polled to count as "watching".
 VIEWER_FRESH = 30.0
+# How often the daemon appends a health sample to state/health/journal.jsonl.
+HEALTH_JOURNAL_EVERY = 600.0
 
 # Ops an agent (or one of its tool subprocesses) is allowed to call. Everything
 # else is the *control plane*: it needs the control token and a caller that does
@@ -199,6 +201,8 @@ class Server:
             "frontends-restore", self.frontends.restore, restart=False)
         # Deliver OnlyOffice co-authoring chat messages to the conversation's agent.
         self.controller.workers.spawn("collab-watcher", self._collab_watcher)
+        # Append a health sample (memory, threads, queue, failures, versions) every 10 min.
+        self.controller.workers.spawn("health-journal", self._health_journal)
         try:
             from . import chat as conversations
 
@@ -258,6 +262,21 @@ class Server:
         if self._lock_fd is not None:
             with contextlib.suppress(OSError):
                 self._lock_fd.close()
+
+    def _health_journal(self) -> None:
+        """Append a health sample every ``HEALTH_JOURNAL_EVERY`` seconds.
+
+        Long-duration diagnosis (``crewhall doctor --trend``); best effort, a
+        failure to write the journal must never disturb the daemon.
+        """
+        from . import health
+
+        while not self._stop.is_set():
+            try:
+                health.append_sample(controller=self.controller)
+            except Exception:  # noqa: BLE001 - health is diagnostics only
+                log.debug("health journal sample failed", exc_info=True)
+            self._stop.wait(HEALTH_JOURNAL_EVERY)
 
     def _collab_watcher(self) -> None:
         """Forward new OnlyOffice chat messages into the agent's conversation.

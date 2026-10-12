@@ -197,10 +197,24 @@ def prerequisites_ok() -> tuple[bool, str]:
     return True, ""
 
 
+def write_result(path: str, total: int, failed: list[str]) -> dict:
+    """Persist the smoke outcome (layer 3) as a 0600 JSON file."""
+    from crewhall import health
+
+    data = health.smoke_result(total, failed)
+    if path:
+        health.write_json(path, data)
+    return data
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="smoke")
     parser.add_argument("--require", action="store_true",
                         help="fail instead of skipping when the real CLIs are missing")
+    parser.add_argument("--result", default=None, metavar="PATH",
+                        help="write the outcome JSON here (default: state/health/smoke-<date>.json)")
+    parser.add_argument("--no-notify", action="store_true",
+                        help="do not send a desktop notification when a step fails")
     args = parser.parse_args(argv)
 
     ok, reason = prerequisites_ok()
@@ -209,21 +223,33 @@ def main(argv: list[str] | None = None) -> int:
         return 2 if args.require else 0
 
     smoke = Smoke()
-    failures = 0
+    failures: list[str] = []
     try:
         for name, fn in STEPS:
             started = time.monotonic()
             try:
                 fn(smoke)
             except Exception as exc:  # noqa: BLE001 - a step failure is the report
-                failures += 1
+                failures.append(name)
                 print(f"✗ {name}: {type(exc).__name__}: {exc}")
             else:
                 print(f"✓ {name} ({time.monotonic() - started:.1f}s)")
     finally:
         smoke.cleanup()
 
-    print(f"{len(STEPS) - failures}/{len(STEPS)} steps passed")
+    result_path = args.result
+    if result_path is None:
+        from crewhall import health
+
+        result_path = health.smoke_path()
+    write_result(result_path, len(STEPS), failures)
+    if failures and not args.no_notify:
+        from crewhall import watch
+
+        watch.notify("crewhall smoke failed",
+                     f"{len(failures)}/{len(STEPS)} step(s) failed: {', '.join(failures)}")
+
+    print(f"{len(STEPS) - len(failures)}/{len(STEPS)} steps passed")
     return 1 if failures else 0
 
 
