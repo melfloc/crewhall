@@ -179,3 +179,15 @@ class CodexHarnessReal(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoEscapeAsClearKey(unittest.TestCase):
+    def test_no_adapter_clears_input_with_the_interrupt_key(self):
+        # ESC interrupts a turn in every supported CLI; as a "clear" key it ate
+        # the first characters of the next injected message.
+        from crewhall.harness import HARNESSES
+
+        for kind, cls in HARNESSES.items():
+            self.assertNotIn("ESC", cls.clear_input_keys, kind)
+            self.assertIn("CTRL_U", cls.clear_input_keys, kind)
+

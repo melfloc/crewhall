@@ -21,6 +21,15 @@ FOOTER_RE = re.compile(
 )
 
 
+def trust_yes_selected(screen: str) -> bool:
+    """Whether the folder-trust dialog's cursor (❯) is on "Yes, I trust this folder"."""
+    for line in screen.splitlines():
+        text = line.strip().lower()
+        if text.startswith("\u276f") and "yes" in text and "trust" in text:
+            return True
+    return False
+
+
 class ClaudeCodeHarness(Harness):
     """Adapter for the Claude Code interactive TUI.
 
@@ -203,10 +212,16 @@ class ClaudeCodeHarness(Harness):
         while time.monotonic() < deadline:
             low = self.session.capture().lower()
             if "trust this folder" in low or "accessing workspace" in low:
-                self.session.send_key("DOWN")
-                time.sleep(0.2)
-                self.session.send_key("ENTER")
-                return True
+                # The dialog is drawn before it accepts keys and "No, exit" is
+                # the default: an ENTER that lands before the DOWN registers
+                # closes Claude. Only confirm once "Yes" is visibly selected.
+                while time.monotonic() < deadline:
+                    self.session.send_key("DOWN")
+                    time.sleep(0.4)
+                    if trust_yes_selected(self.session.capture()):
+                        self.session.send_key("ENTER")
+                        return True
+                return False
             if "shift+tab to cycle" in low or "esc to interrupt" in low:
                 return False  # already past the dialog
             time.sleep(0.3)

@@ -142,7 +142,12 @@ class Harness(ABC):
 
     # Keys used to clear residual input. Adapters override when a key has a
     # side effect on their TUI (see ClaudeCodeHarness).
-    clear_input_keys: tuple[str, ...] = ("CTRL_U", "ESC")
+    # ESC is never a clearing key: in Claude, OpenCode and Codex it is the
+    # *interrupt* key. Sent to an agent that is (or is about to be) working it
+    # arms "esc again to interrupt" and swallows the next keystrokes, so a
+    # message typed right after lost its first characters ("[from: …" became
+    # "rom: …"). Ctrl+U clears the input line in all three.
+    clear_input_keys: tuple[str, ...] = ("CTRL_U",)
 
     @classmethod
     def command(cls) -> list[str]:

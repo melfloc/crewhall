@@ -344,6 +344,30 @@ class ClaudeKeyedSession(FakeSession):
         self._render()
 
 
+class ClaudeTrustDialog(unittest.TestCase):
+    def test_enter_only_after_yes_is_visibly_selected(self):
+        # Regression: the dialog is drawn before it takes keys and "No, exit" is
+        # the default, so a fixed DOWN+ENTER could exit Claude.
+        no = " Accessing workspace:\n \u276f No, exit\n   Yes, I trust this folder"
+        yes = " Accessing workspace:\n   No, exit\n \u276f Yes, I trust this folder"
+        session = FakeSession(screen=no, name="c")
+        downs = []
+
+        def send_key(key):
+            FakeSession.send_key(session, key)
+            if key == "DOWN":
+                downs.append(key)
+                if len(downs) >= 2:  # the first DOWN is swallowed
+                    session.screen = yes
+            elif key == "ENTER":
+                self.assertIn("\u276f Yes", session.screen)
+
+        session.send_key = send_key
+        harness = ClaudeCodeHarness(session, name="c")
+        self.assertTrue(harness.accept_workspace_trust(timeout=5))
+        self.assertEqual(session.keys, ["DOWN", "DOWN", "ENTER"])
+
+
 class ClaudeInputSafety(unittest.TestCase):
     def test_human_draft_is_never_cleared_and_send_is_refused(self):
         # A human typing in the agent's own terminal must not lose their draft
