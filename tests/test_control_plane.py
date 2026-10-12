@@ -89,22 +89,29 @@ class GuardOriginUnit(unittest.TestCase):
         self.assertIn("not available to agents", denied["error"])
 
 
+    def _spawn_with_env(self, env: dict) -> subprocess.Popen:
+        """A child whose /proc environ is its own: wait until it has exec'd.
+
+        Between fork and exec, /proc/<pid>/environ still shows the parent's
+        environment, so reading it right after Popen is racy.
+        """
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "print('ready', flush=True); import time; time.sleep(30)"],
+            env=env, stdout=subprocess.PIPE, text=True)
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        self.assertEqual(proc.stdout.readline().strip(), "ready")
+        self.addCleanup(proc.stdout.close)
+        return proc
+
     def test_caller_carrying_an_agent_token_in_its_env_is_locked_out(self) -> None:
         # A double-forked child is reparented away from the agent, but it still
         # inherits the agent's CREWHALL_TOKEN.
         self.server.controller.agent_root_pids = lambda: set()
         self.server.controller.agent_tokens = lambda: ["tok-agent-1"]
-        env = {**os.environ, "CREWHALL_TOKEN": "tok-agent-1"}
-        proc = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(30)"], env=env)
-        self.addCleanup(proc.wait)
-        self.addCleanup(proc.kill)
+        proc = self._spawn_with_env({**os.environ, "CREWHALL_TOKEN": "tok-agent-1"})
         self.assertTrue(self.server._caller_is_agent(proc.pid))
-        other = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(30)"],
-            env={**os.environ, "CREWHALL_TOKEN": "someone-else"})
-        self.addCleanup(other.wait)
-        self.addCleanup(other.kill)
+        other = self._spawn_with_env({**os.environ, "CREWHALL_TOKEN": "someone-else"})
         self.assertFalse(self.server._caller_is_agent(other.pid))
 
     def test_agent_may_co_edit_only_its_own_chat(self) -> None:
