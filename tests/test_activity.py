@@ -155,13 +155,13 @@ class ControllerActivity(unittest.TestCase):
         c = self._controller()
         h = self._harness(screen="▝▜██████▀  Sonnet 5.5 · Claude Pro",
                           snap={"model": "claude-sonnet-5-5"})
-        with mock.patch("crewhall.controller.procs.agent_processes", return_value={"shells": []}), \
+        with mock.patch("crewhall.services.agents.procs.agent_processes", return_value={"shells": []}), \
              mock.patch.object(c, "_agent_root", return_value=1, create=True):
             self.assertEqual(c._activity(h, self._summary())["model"], "claude-sonnet-5-5")
 
     def test_screen_fallback_and_exited_keeps_last_model(self):
         c, h = self._controller(["--model", "opus"]), self._harness(screen="▝▜██████▀  Sonnet 5.5 · Claude Pro")
-        with mock.patch("crewhall.controller.procs.agent_processes", return_value={"shells": []}), \
+        with mock.patch("crewhall.services.agents.procs.agent_processes", return_value={"shells": []}), \
              mock.patch.object(c, "_agent_root", return_value=1, create=True):
             self.assertEqual(c._activity(h, self._summary())["model"], "Sonnet 5.5")
             h.capture.return_value = ""
@@ -169,6 +169,6 @@ class ControllerActivity(unittest.TestCase):
 
     def test_args_are_the_last_resort(self):
         c, h = self._controller(["--model=opus"]), self._harness(screen="")
-        with mock.patch("crewhall.controller.procs.agent_processes", return_value={"shells": []}), \
+        with mock.patch("crewhall.services.agents.procs.agent_processes", return_value={"shells": []}), \
              mock.patch.object(c, "_agent_root", return_value=1, create=True):
             self.assertEqual(c._activity(h, self._summary())["model"], "opus")
