@@ -189,11 +189,15 @@ if __name__ == "__main__":
 
 
 class WatchUnitsOnAnInstall(unittest.TestCase):
-    def test_runner_timers_are_skipped_without_scripts(self):
+    def test_smoke_timer_ships_in_the_package_soak_stays_checkout_only(self):
         tmp = tempfile.mkdtemp(prefix="at-root-")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         with mock.patch.object(watch.paths, "project_root", return_value=tmp):
             units, skipped = watch.available_units()
-        self.assertEqual(units, ["crewhall-watch-versions"])
-        self.assertEqual(set(skipped), {"crewhall-watch-smoke", "crewhall-watch-soak"})
+        self.assertEqual(units, ["crewhall-watch-versions", "crewhall-watch-smoke"])
+        self.assertEqual(set(skipped), {"crewhall-watch-soak"})
+        # The installed smoke timer must run the module, not a checkout script.
+        self.assertEqual(
+            watch._watch_command("crewhall-watch-smoke")[1:],
+            ["-P", "-m", "crewhall.cli", "watch", "smoke", "--require"])
 

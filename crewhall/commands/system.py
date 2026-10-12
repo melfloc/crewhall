@@ -376,6 +376,17 @@ def cmd_watch(args: argparse.Namespace) -> int:
         else:
             print(watch.format_screens_report(result))
         return 0 if watch.screens_ok(result) else 1
+    if action == "smoke":
+        from .. import smoke
+
+        argv: list[str] = []
+        if getattr(args, "require", False):
+            argv.append("--require")
+        if getattr(args, "result", None):
+            argv += ["--result", args.result]
+        if getattr(args, "no_notify", False):
+            argv.append("--no-notify")
+        return smoke.main(argv)
     if action == "install":
         out = watch.remove_timers() if getattr(args, "remove", False) else watch.install_timers()
         print(json.dumps(out, indent=2, sort_keys=True))

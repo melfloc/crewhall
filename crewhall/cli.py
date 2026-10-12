@@ -603,6 +603,14 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--save-fixtures", action="store_true",
                    help="also write the captures to tests/fixtures/screens (git checkout only)")
     w.set_defaults(func=cmd_watch)
+    w = wsub.add_parser("smoke", help="run the end-to-end smoke test with real agents")
+    w.add_argument("--require", action="store_true",
+                   help="fail instead of skipping when the real CLIs are missing")
+    w.add_argument("--result", default=None, metavar="PATH",
+                   help="write the outcome JSON here (default: state/health/smoke-<date>.json)")
+    w.add_argument("--no-notify", action="store_true",
+                   help="do not send a desktop notification when a step fails")
+    w.set_defaults(func=cmd_watch)
     w = wsub.add_parser("install", help="install and enable the user systemd timers")
     w.add_argument("--remove", action="store_true", help="disable and remove the timers")
     w.set_defaults(func=cmd_watch)
@@ -628,3 +636,7 @@ def main(argv: list[str] | None = None) -> int:
     except SessionTimeout as exc:
         print(f"timeout: {exc}", file=sys.stderr)
         return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

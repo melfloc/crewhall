@@ -315,7 +315,7 @@ def _watch_command(unit: str) -> list[str]:
     if unit == "crewhall-watch-versions":
         return [_python(), "-P", "-m", "crewhall.cli", "watch", "versions"]
     if unit == "crewhall-watch-smoke":
-        return [_python(), os.path.join(root, "scripts", "smoke.py"), "--require"]
+        return [_python(), "-P", "-m", "crewhall.cli", "watch", "smoke", "--require"]
     return [_python(), os.path.join(root, "scripts", "soak.py")]
 
 
@@ -359,17 +359,18 @@ def unit_dir() -> str:
 def available_units() -> tuple[list[str], dict[str, str]]:
     """Units that can run here, and the skipped ones with the reason.
 
-    The smoke and soak runners live in ``scripts/`` of a git checkout; an installed
-    package (a managed install) does not ship them, so those timers would fail.
+    The smoke runner ships inside the package (``crewhall watch smoke``), so its
+    timer works on a managed install too. The soak runner still lives only in
+    ``scripts/`` of a git checkout: an installed package does not ship it, so
+    its timer would fail and is skipped.
     """
     root = paths.project_root()
     ok: list[str] = []
     skipped: dict[str, str] = {}
     for unit in WATCH_UNITS:
-        script = {"crewhall-watch-smoke": "smoke.py",
-                  "crewhall-watch-soak": "soak.py"}.get(unit)
-        if script and not os.path.isfile(os.path.join(root, "scripts", script)):
-            skipped[unit] = f"scripts/{script} is not available here (installed package)"
+        if unit == "crewhall-watch-soak" and not os.path.isfile(
+                os.path.join(root, "scripts", "soak.py")):
+            skipped[unit] = "scripts/soak.py is not available here (installed package)"
         else:
             ok.append(unit)
     return ok, skipped
