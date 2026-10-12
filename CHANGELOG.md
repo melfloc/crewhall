@@ -5,6 +5,16 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.80.1] — 2026-10-12
+
+Primera release instalable de la línea 0.80 (el tag `v0.80.0` se creó sin
+construir la release). Incluye todo lo de 0.80.0 más:
+
+- Test del guard de control plane: espera a que el proceso hijo haga `exec`
+  antes de leer `/proc/<pid>/environ` (fallaba de forma intermitente en CI).
+- Un comentario de test ya no contiene una ruta tipo `/home/...` (escáner de
+  privacidad).
+
 ## [0.80.0] — 2026-10-11
 
 Release de estabilidad, seguridad y del puente Chat ↔ Cowork.
