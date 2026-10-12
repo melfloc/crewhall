@@ -229,6 +229,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="do not send a desktop notification when a step fails")
     args = parser.parse_args(argv)
 
+    # Resolve the default result path before isolating: it belongs to the real
+    # health journal (``doctor --trend``), not to the throwaway state dir.
+    from . import health
+
+    result_path = args.result or health.smoke_path()
     _isolate()
 
     ok, reason = prerequisites_ok()
@@ -251,11 +256,6 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         smoke.cleanup()
 
-    result_path = args.result
-    if result_path is None:
-        from . import health
-
-        result_path = health.smoke_path()
     write_result(result_path, len(STEPS), failures)
     if failures and not args.no_notify:
         from . import watch

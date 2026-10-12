@@ -105,6 +105,9 @@ sigterm = true
 # COVERAGE_PROCESS_START set (and the coverage .pth installed) their lines are
 # measured too, which is what the thresholds below are about.
 branch = false
+# The real-agent smoke runner is exercised by the nightly real-agents job, not
+# by the unit suite (it lived in scripts/, outside the measured source, before).
+omit = ["crewhall/smoke.py"]
 
 [tool.coverage.report]
 skip_covered = false

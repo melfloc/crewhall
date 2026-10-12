@@ -39,5 +39,30 @@ class SmokeResult(unittest.TestCase):
             self.assertFalse(watch.notify("t", "b"))
 
 
+class SmokeResultLandsInTheRealJournal(unittest.TestCase):
+    def test_default_result_path_is_resolved_before_isolation(self):
+        from crewhall import smoke
+
+        real = health.smoke_path()
+        self.addCleanup(lambda: os.path.exists(real) and os.unlink(real))
+        throwaway = tempfile.mkdtemp(prefix="at-smoke-iso-")
+        self.addCleanup(shutil.rmtree, throwaway, ignore_errors=True)
+
+        def isolate():
+            # What smoke._isolate does: point the state dir somewhere else.
+            os.environ["XDG_STATE_HOME"] = throwaway
+            return throwaway
+
+        fake = mock.Mock()
+        with mock.patch.dict(os.environ), \
+                mock.patch.object(smoke, "_isolate", side_effect=isolate), \
+                mock.patch.object(smoke, "prerequisites_ok", return_value=(True, "")), \
+                mock.patch.object(smoke, "Smoke", return_value=fake), \
+                mock.patch.object(smoke, "STEPS", []):
+            self.assertEqual(smoke.main(["--no-notify"]), 0)
+        self.assertTrue(os.path.exists(real), "smoke result missing from the real journal")
+        fake.cleanup.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
