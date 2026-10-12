@@ -357,20 +357,31 @@ def _run_journaled(op: str, log: Log, fn: Callable[[Log], dict[str, Any]]) -> di
     return result
 
 
-def wait_daemon_gone(timeout: float = 45.0) -> None:
+def wait_daemon_gone(timeout: float = 45.0, *, expect_version: str | None = None) -> bool:
     """Wait until the old daemon has really finished (it keeps its lock while closing agents/frontends).
 
     The socket disappears first; starting the new daemon in that window makes it exit with
-    "another daemon already holds the lock"."""
+    "another daemon already holds the lock".
+
+    Live agents re-start the daemon on their own: their hooks and CLI calls autostart it
+    as soon as the socket is gone, from the venv that is *already swapped*. When the lock
+    is held by such a daemon that already serves ``expect_version``, the restart has in
+    effect happened: return True instead of mistaking it for the old daemon still
+    shutting down (which used to roll a good update back). False: the lock is free.
+    """
     deadline = time.monotonic() + timeout
     while True:
         try:
             with open(paths.lock_path(), "a") as fh:
                 fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return
+                return False
         except OSError:
+            running = daemon_version() if expect_version else None
+            if expect_version and running == expect_version:
+                return True
             if time.monotonic() >= deadline:
-                raise UpdateError("the old daemon is still shutting down (lock held)") from None
+                who = f" (a daemon reporting {running!r} holds it)" if running else ""
+                raise UpdateError(f"the old daemon is still shutting down (lock held){who}") from None
             time.sleep(0.2)
 
 
@@ -395,11 +406,12 @@ def restart_daemon(prefix: str, expect_version: str, *, force: bool, log: Log) -
             # update stops the control plane without losing the running work.
             Client(autostart=False).call("shutdown", kill_agents=False)
         deadline = time.monotonic() + 20
-        while ping() and time.monotonic() < deadline:
+        while ping() and daemon_version() != expect_version and time.monotonic() < deadline:
             time.sleep(0.2)
-        if ping():
+        if ping() and daemon_version() != expect_version:
             raise UpdateError("the old daemon did not stop")
-        wait_daemon_gone()
+        if wait_daemon_gone(expect_version=expect_version):
+            log("a live agent already started the new daemon")
     log("starting the new daemon…")
     ensure_daemon(start_timeout=30.0)
     got = daemon_version()

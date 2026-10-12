@@ -382,6 +382,42 @@ class DaemonHandover(unittest.TestCase):
             self.assertGreaterEqual(time.monotonic() - t0, 0.4)  # it really waited for the release
 
 
+    def test_a_new_daemon_started_by_live_agents_counts_as_restarted(self):
+        # Regression (0.80.2 -> 0.80.3 on a real host): live agents autostart the daemon
+        # from the already-swapped venv as soon as the socket is gone. The lock was
+        # then held by the *new* version, mistaken for the old one still shutting
+        # down, and a good update was rolled back after 45 s.
+        import fcntl
+
+        tmp = tempfile.mkdtemp(prefix="at-lock-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        lock = os.path.join(tmp, "daemon.lock")
+        holder = open(lock, "w")
+        self.addCleanup(holder.close)
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        with mock.patch("crewhall.paths.lock_path", return_value=lock):
+            with mock.patch.object(updater, "daemon_version", return_value="9.9.9"):
+                self.assertTrue(updater.wait_daemon_gone(timeout=5, expect_version="9.9.9"))
+            # Held by some *other* version: still an error, and it says who.
+            with mock.patch.object(updater, "daemon_version", return_value="1.0.0"):
+                with self.assertRaisesRegex(UpdateError, "reporting '1.0.0'"):
+                    updater.wait_daemon_gone(timeout=0.5, expect_version="9.9.9")
+
+    def test_restart_succeeds_when_an_agent_already_brought_up_the_new_daemon(self):
+        versions = iter(["0.1.0", "9.9.9", "9.9.9", "9.9.9", "9.9.9", "9.9.9"])
+        log = []
+        with mock.patch.object(updater, "check_restart_allowed"), \
+                mock.patch("crewhall.client.ping", return_value=True), \
+                mock.patch("crewhall.client.Client"), \
+                mock.patch("crewhall.client.ensure_daemon"), \
+                mock.patch.object(updater, "daemon_version", side_effect=lambda: next(versions, "9.9.9")), \
+                mock.patch.object(updater, "wait_daemon_gone", return_value=True), \
+                mock.patch.object(updater.subprocess, "run",
+                                  return_value=mock.Mock(returncode=0)):
+            updater.restart_daemon("/nonexistent", "9.9.9", force=False, log=log.append)
+        self.assertIn("a live agent already started the new daemon", log)
+
+
 class StateCompatibility(unittest.TestCase):
     """Every released state format must stay loadable (RELEASING.md)."""
 

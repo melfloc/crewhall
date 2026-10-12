@@ -5,6 +5,17 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.80.4] — 2026-10-12
+
+- **Una actualización con agentes vivos ya no revierte sola.** Al parar el
+  daemon, los agentes (hooks, llamadas al CLI) lo vuelven a arrancar enseguida
+  desde el entorno ya actualizado; el actualizador tomaba ese daemon nuevo por el
+  viejo "aún parando", esperaba 45 s y revertía una actualización correcta. Ahora
+  un daemon que ya sirve la versión esperada cuenta como reinicio hecho, y si el
+  candado lo tiene otra versión el error dice cuál.
+- Test de la cola de mensajes que fallaba según el orden de ejecución (un
+  atributo de clase compartido entre tests).
+
 ## [0.80.3] — 2026-10-12
 
 - **`crewhall update --restart` ya no exige `--force-restart` con agentes
