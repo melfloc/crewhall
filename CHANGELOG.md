@@ -5,6 +5,18 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [Unreleased]
+
+- `crewhall watch smoke`: el smoke con agentes reales viene dentro del paquete,
+  así que su timer funciona también en una instalación gestionada (el soak sigue
+  siendo solo del checkout). `scripts/smoke.py` queda como envoltorio.
+- Corregido: los timers de `crewhall watch` lanzaban `python -m crewhall.cli`,
+  que no ejecutaba nada; el timer de versiones estaba inerte.
+- Corregido: el resultado del smoke se escribía en su directorio temporal
+  aislado, no en el diario de salud real que lee `doctor --trend`.
+- Interno: `web/server.py` y `ui/model.py` partidos por dominio, sin cambios de
+  superficie (`scripts/surface_check.py <ref>` lo comprueba).
+
 ## [0.81.0] — 2026-10-12
 
 **Vigilancia en el tiempo.** crewhall depende de cómo dibujan su pantalla Claude
