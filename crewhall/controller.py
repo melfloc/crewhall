@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import glob
 import logging
 import os
@@ -200,6 +201,8 @@ class Controller:
         self.track_conversations = settings.get("agents.conversations")
         self._agent_locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
+        # Per-agent recent send timestamps (anti-loop rate limit, D2).
+        self._send_times: dict[str, collections.deque[float]] = {}
         self._store = StateStore() if persist else None
         self._pending_store = PendingQueueStore() if persist else None
         history_store = None
@@ -1743,6 +1746,7 @@ class Controller:
         """Agent-to-agent send: identity from token + Team boundary enforced."""
         sender_harness = self.agents.resolve(sender)
         self._check_token(sender_harness.agent_id, token)
+        self._check_send_limits(sender_harness.agent_id, body)
         return self.messaging.send(
             sender_harness.agent_id, recipient, body,
             authorize=self._authorize_team, prefix_sender=True,
@@ -1751,6 +1755,24 @@ class Controller:
             # bounded retry queue quickly instead of blocking the sender's turn for up to 30 s.
             wait=AGENT_SEND_WAIT,
         )
+
+    def _check_send_limits(self, agent_id: str, body: str) -> None:
+        """Anti-loop guards for agent-to-agent sends (D2): a size cap and a
+        per-agent rate limit. Both are generous and configurable."""
+        max_chars = int(settings.get("messaging.max_body_chars"))
+        if len(body) > max_chars:
+            raise MessagingError(f"message too large ({len(body)} > {max_chars} characters)")
+        limit = int(settings.get("messaging.rate_per_minute"))
+        if limit <= 0:
+            return
+        now = time.time()
+        with self._locks_guard:
+            times = self._send_times.setdefault(agent_id, collections.deque())
+            while times and now - times[0] > 60.0:
+                times.popleft()
+            if len(times) >= limit:
+                raise MessagingError("rate limit: too many messages; slow down")
+            times.append(now)
 
     def register_agent(self, harness: Harness) -> None:
         self.agents.add(harness)
@@ -1915,6 +1937,7 @@ class Controller:
         compromised worker cannot exfiltrate files outside its scope.
         """
         import os as _os
+        import stat as _stat
 
         from . import chat as conversations
 
@@ -1929,10 +1952,25 @@ class Controller:
         if not any(real == r or real.startswith(r + _os.sep) for r in roots):
             raise conversations.ConversationError(
                 "the source is outside the allowed directories")
-        if _os.path.getsize(real) > conversations.max_bytes():
-            raise conversations.ConversationError("file too large")
-        with open(real, "rb") as fh:
-            data = fh.read()
+        # Open with O_NOFOLLOW and re-check on the *opened* fd: the islink/root
+        # checks above are advisory, a symlink swapped in between them and the
+        # open (TOCTOU) must not let an outside file through.
+        nofollow = getattr(_os, "O_NOFOLLOW", 0)
+        fd = _os.open(real, _os.O_RDONLY | nofollow)
+        try:
+            st = _os.fstat(fd)
+            if not _stat.S_ISREG(st.st_mode):
+                raise conversations.ConversationError("source is not a regular file")
+            if st.st_size > conversations.max_bytes():
+                raise conversations.ConversationError("file too large")
+            data = b""
+            while True:
+                chunk = _os.read(fd, 1 << 20)
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            _os.close(fd)
         info = conversations.store_artifact(
             conversation_id, name or _os.path.basename(real), data)
         conversations.set_producer(conversation_id, info["relpath"], sender_h.agent_id)

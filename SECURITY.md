@@ -34,13 +34,29 @@ care about:
   control token. This stops an agent that merely *uses* `crewhall` (or a careless
   tool it runs) from approving its own permission prompts, writing to an unrelated
   agent, or killing sessions.
-- **Limit (read this)**: this is **defence in depth, not an isolation boundary**.
+- **Limit (read this)**: the control-plane guard alone is **defence in depth**.
   An agent that deliberately escapes both checks (`setsid`/double fork *and* a
-  scrubbed environment) runs as you and can read the `control-token` file. Real
-  isolation requires sandboxing the agent away from crewhall's state directory
-  (a different Unix user, or the agent CLI's own filesystem sandbox denying
-  `$XDG_STATE_HOME/crewhall`). Until then, treat Team limits as a coordination
-  guardrail against confused agents, not as protection against a hostile one.
+  scrubbed environment) runs as you and, without the CLI sandbox below, could
+  read the `control-token` file.
+- **Isolation (D1)**: on top of the guard, crewhall asks each provider's own
+  sandbox to deny its file tools access to crewhall's private state. The
+  generated Claude settings (`--settings`, `hooks.ensure_claude_settings`) carry
+  `permissions.deny` rules for `$XDG_RUNTIME_DIR/crewhall/**` (where the control
+  token and sockets live) and for the control files under
+  `$XDG_STATE_HOME/crewhall/` (`*.json`, `*.jsonl`, `hooks/`, `mcp/`, `backups/`,
+  `launch/`). The chat workspace (`state/conversations/`) stays readable: it is
+  the agent's own working directory.
+  - **Claude Code**: enforced through `permissions.deny` in the settings file
+    crewhall already passes with `--settings`.
+  - **OpenCode / Codex**: use their own permission/sandbox configuration; when
+    their sandbox is off (Codex is launched with `--dangerously-bypass-approvals
+    -and-sandbox` for interactivity), isolation degrades to the control-plane
+    guard. Enable the provider sandbox and restrict its writable roots to your
+    project for a hard boundary.
+  - The agent-ops socket must remain reachable (the MCP server connects to it),
+    so the runtime *directory* is denied to the file tools, not the socket path
+    itself. A real end-to-end check (an agent trying to read `control-token`)
+    runs in the nightly real-agents job.
 - **Web UI**: authenticated (token/session) unless bound to localhost and the
   token requirement is off; Host/Origin allow-lists; strict security headers and
   CSP; per-IP login throttling; no inline scripts/styles.

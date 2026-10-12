@@ -78,6 +78,32 @@ def claude_settings(remote: bool = False) -> dict:
             "timeout": PERMISSION_HOOK_TIMEOUT,
         }],
     }]
+    # D1: deny the agent's own file tools access to crewhall's private control
+    # state (the control token lives in the runtime dir; the state dir holds the
+    # control files). The chat workspace under state/conversations/ is left
+    # readable — that is the agent's own working directory. See SECURITY.md for
+    # the exact strength per provider.
+    deny = settings.setdefault("permissions", {}).setdefault("deny", [])
+    state = paths.state_dir()
+    runtime = paths.runtime_dir()
+    for pattern in (
+        f"Read({runtime}/**)",
+        f"Write({runtime}/**)",
+        f"Edit({runtime}/**)",
+        f"Read({state}/*.json)",
+        f"Read({state}/*.jsonl)",
+        f"Write({state}/*.json)",
+        f"Write({state}/*.jsonl)",
+        f"Edit({state}/*.json)",
+        f"Edit({state}/*.jsonl)",
+        f"Read({state}/hooks/**)",
+        f"Write({state}/hooks/**)",
+        f"Read({state}/mcp/**)",
+        f"Write({state}/mcp/**)",
+        f"Read({state}/backups/**)",
+        f"Read({state}/launch/**)",
+    ):
+        deny.append(pattern)
     return settings
 
 
