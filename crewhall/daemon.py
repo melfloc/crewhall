@@ -13,7 +13,7 @@ import threading
 import time
 from typing import Any
 
-from . import paths, settings
+from . import paths, protocol, settings
 from .controller import AgentNotFound, Controller, SessionNotFound
 from .chat import ConversationError
 from .terminals import TerminalError
@@ -487,7 +487,8 @@ class Server:
 
         info = build_info()
         return {"pid": os.getpid(), "sessions": len(self.controller.registry.all()),
-                "version": info["version"], "build": info.get("commit"), "channel": info["kind"]}
+                "version": info["version"], "build": info.get("commit"),
+                "channel": info["kind"], "protocol": protocol.PROTOCOL_VERSION}
 
     def _op_health(self, request: dict[str, Any]) -> dict[str, Any]:
         """Background-worker and queue health (surfaced by `doctor`)."""

@@ -124,15 +124,18 @@ def ensure_daemon(socket_path: str | None = None, start_timeout: float = 10.0) -
     """
     path = socket_path or paths.socket_path()
     if ping(path):
+        _warn_protocol(path)
         return
     with _exclusive(paths.spawn_lock_path()):
         if ping(path):  # another client started it while we waited
+            _warn_protocol(path)
             return
         _spawn(path)
         deadline = time.monotonic() + start_timeout
         proc = _SPAWNED[-1] if _SPAWNED else None
         while time.monotonic() < deadline:
             if ping(path):
+                _warn_protocol(path)
                 return
             # A spawned daemon can exit at once when the previous one is still
             # releasing its lock (a graceful shutdown is not instantaneous).
@@ -144,6 +147,30 @@ def ensure_daemon(socket_path: str | None = None, start_timeout: float = 10.0) -
     raise RpcError(
         f"daemon did not start within {start_timeout}s (see {paths.log_path()})"
     )
+
+
+_PROTOCOL_WARNED = False
+
+
+def _warn_protocol(path: str) -> None:
+    """Warn once per process when the daemon's protocol version differs (F3)."""
+    global _PROTOCOL_WARNED
+    if _PROTOCOL_WARNED:
+        return
+    _PROTOCOL_WARNED = True
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            sock.connect(path)
+            sock.sendall(b'{"op":"ping"}\n')
+            response = _read_line(sock) or {}
+    except OSError:
+        return
+    from . import protocol
+
+    message = protocol.warning(response.get("protocol"))
+    if message:
+        print(message, file=sys.stderr)
 
 
 _SPAWNED: list[subprocess.Popen] = []

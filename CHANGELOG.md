@@ -5,6 +5,40 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.80.0] — 2026-10-11
+
+Release de estabilidad y observabilidad. Sin cambios incompatibles.
+
+- **No perder trabajo (Fase A).**
+  - `daemon stop` ya **no mata** a los agentes tmux/ssh-tmux: para el control
+    plane y el siguiente daemon los readopta (mismo `agent_id`, conversación
+    intacta). `daemon stop --kill-agents` mantiene el comportamiento anterior;
+    el backend PTY no puede sobrevivir (lo avisa `doctor`).
+  - El **historial de mensajes** se persiste en un JSONL rotado (configurable por
+    entradas y días) y se recarga al arrancar: la franja de crew y el Message
+    flow ya no quedan vacíos tras un reinicio.
+  - `crewhall agent message` ya no bloquea 30 s ni miente: espera como el envío
+    entre agentes y el CLI dice el motivo real (`busy` / `human draft` /
+    `starting`).
+- **Observabilidad (Fase B).** Auditoría de los `except Exception` (los `pass`
+  mudos ahora registran o justifican); `daemon.log` con `RotatingFileHandler` y
+  `daemon logs --follow [--agent]`; registro de **workers** supervisados con
+  latido, reinicio ante excepción, op `health` y check en `doctor`.
+- **Calidad estática (Fase C).** `mypy` en CI (estricto en messaging/team/
+  requests/persistence/harness), `coverage` con umbrales (80% global, 90% en
+  messaging/conversaciones y funciones clave), ruff con `BLE`/`SIM`, y los
+  paquetes `office/` y `chat/`.
+- **Seguridad (Fase D).** `office.base_url` solo acepta una base configurada;
+  `publish_artifact` abre con `O_NOFOLLOW` y revalida el fd (TOCTOU); rate-limit
+  por agente y tope de tamaño en `team_send`; los agentes Claude reciben
+  `permissions.deny` sobre el runtime/estado de crewhall (SECURITY.md detalla el
+  aislamiento por proveedor).
+- **Producto Chat + Cowork (Fase E).** Actividad **por conversación** (etiqueta
+  `conversation_id`, con interruptor "ver todo el team"); idioma de las reglas
+  por `chat.language`; favicon y estados vacíos.
+- **Entrega (Fase F).** `scripts/smoke.py` (prueba de humo con agentes reales en
+  el job nightly), versionado del protocolo del socket con aviso al cliente.
+
 ## [0.79.1] — 2026-10-11
 
 - **Validación de documentos OOXML (evita el “archivo corrupto” en MS Office).**

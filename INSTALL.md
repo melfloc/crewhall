@@ -43,6 +43,21 @@ git clone <repo> crewhall && cd crewhall
 scripts/install.sh --service --web
 ```
 
+## Opción C — pipx (rápida, sin servicios)
+
+Para probar crewhall sin servicios systemd, en una máquina con Python ≥ 3.11:
+
+```bash
+# instala la CLI en su propio entorno aislado y la deja en el PATH
+pipx install crewhall        # (o: pipx install crewhall==0.80.0)
+crewhall doctor              # comprueba el entorno
+crewhall daemon run          # arranca el control plane en primer plano (Ctrl-C para parar)
+```
+
+`pipx` no instala los servicios `systemd` de usuario; si los quieres, usa la
+Opción A/B. Para actualizar: `pipx upgrade crewhall`. El daemon se reinicia solo
+al primer comando; `crewhall update --restart` aplica una actualización pendiente.
+
 (Compila el wheel al instalar: necesita red para obtener `setuptools`.)
 
 ## Opciones del instalador

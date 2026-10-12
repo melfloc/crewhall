@@ -66,9 +66,26 @@ The stdio MCP server exposes: `whoami`, `list_teammates`, `send_message`,
 The project is **beta**. The stable surface above is frozen for the 1.x line once
 the 1.0 criteria are met:
 
-1. **Phase 0 complete**: the control-token + process-credential gate, the
-   human-draft-safe input handling, and the durable FIFO delivery queue, all with
-   tests.
-2. **Green CI**: the full test suite passes on every supported Python (3.11–3.14).
+1. **Phases A–D complete**: no-loss restarts (A), persistent history and honest
+   queue reasons (A), observability (B), verified types/coverage/lint and the
+   `office/`+`chat/` split (C), and real agent isolation plus the surface review
+   (D), each with tests.
+2. **Green CI**: the full test suite passes on every supported Python (3.11–3.14),
+   and the `lint`, `typecheck` and `coverage` jobs are green.
 3. **API stability**: the CLI commands, agent-token/control-token RPC surface and
-   MCP tools above change only additively across two consecutive releases.
+   MCP tools above change only additively across **two consecutive releases**;
+   the socket `protocol` version (reported in `ping`) does not regress.
+4. **Smoke green**: `scripts/smoke.py` passes in the nightly real-agents job for
+   **two weeks** without a skip.
+5. **Lossless upgrade**: the A1 restart (daemon stop/run keeps tmux agents with
+   the same `agent_id` and their conversation, queued messages delivered) is
+   covered by the integration test and by the smoke.
+
+## Deprecation policy
+
+Removing or renaming any item above is a MAJOR change and follows the same
+deprecation rule as the CLI: announce it in `CHANGELOG.md` and keep the old form
+working (with a runtime warning) for **at least one release** before removal.
+The socket `protocol` number is bumped only when an op is removed or a reply shape
+changes incompatibly; a client that sees a different number warns the user
+(`crewhall.protocol.warning`) but still connects.
