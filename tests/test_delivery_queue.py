@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest import mock
 
-from crewhall import conversations
+from crewhall import chat as conversations
 from crewhall.controller import Controller
 from crewhall.daemon import Server
 from crewhall.harness import AgentState
@@ -256,7 +256,7 @@ class ForwardCollabQueues(unittest.TestCase):
         self.assertEqual(len(self.controller.messaging.history()), 2)
 
     def test_reopened_document_does_not_reforward_old_comments(self) -> None:
-        from crewhall import office_collab
+        from crewhall.office import collab as office_collab
 
         forwarded = []
 

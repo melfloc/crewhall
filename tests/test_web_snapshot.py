@@ -69,7 +69,7 @@ class SnapshotIntegration(unittest.TestCase):
         shutil.rmtree(cls.root, ignore_errors=True)
 
     def test_crew_chat_appears_in_the_snapshot(self):
-        from crewhall import conversations
+        from crewhall import chat as conversations
 
         # A conversation that carries a crew (the team is validated by the op;
         # here we only need the stored meta to prove the snapshot wiring).

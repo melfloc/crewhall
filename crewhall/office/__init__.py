@@ -22,7 +22,7 @@ import time
 import zipfile
 from typing import Any
 
-from . import settings
+from .. import settings
 
 DOCUMENT_TYPES = {
     ".docx": "word", ".doc": "word", ".odt": "word", ".rtf": "word",

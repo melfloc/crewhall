@@ -10,7 +10,8 @@ import unittest
 import urllib.error
 import urllib.request
 
-from crewhall import conversations, office, settings
+from crewhall import office, settings
+from crewhall import chat as conversations
 from crewhall.web.server import WebServer
 
 

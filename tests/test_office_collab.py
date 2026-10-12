@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from crewhall import office_collab, settings
+from crewhall import settings
+from crewhall.office import collab as office_collab
 
 
 class _Base(unittest.TestCase):
@@ -43,14 +44,14 @@ class Bootstrap(_Base):
 
     def test_chromium_binary_absent(self):
         settings.patch({"office.chromium": ""})
-        with mock.patch("crewhall.office_collab.shutil.which", return_value=None):
+        with mock.patch("crewhall.office.collab.shutil.which", return_value=None):
             self.assertIsNone(office_collab.chromium_binary())
 
 
 class Registry(_Base):
     def test_open_without_chromium_fails_clearly(self):
         reg = office_collab.CollabRegistry()
-        with mock.patch("crewhall.office_collab.chromium_binary", return_value=None):
+        with mock.patch("crewhall.office.collab.chromium_binary", return_value=None):
             with self.assertRaises(office_collab.CollabError):
                 reg.open("c-1", "doc.docx", {"document": {"key": "k"}}, "http://ds")
 

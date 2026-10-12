@@ -7,7 +7,8 @@ import time
 import unittest
 from unittest import mock
 
-from crewhall import office, office_setup, settings
+from crewhall import office, settings
+from crewhall.office import setup as office_setup
 
 
 class _Base(unittest.TestCase):
@@ -175,7 +176,7 @@ class Lifecycle(unittest.TestCase):
         env.start(); self.addCleanup(env.stop)
 
     def _docker(self):
-        return mock.patch("crewhall.office_setup.shutil.which", return_value="/usr/bin/docker")
+        return mock.patch("crewhall.office.setup.shutil.which", return_value="/usr/bin/docker")
 
     def test_stop_without_setup_raises(self):
         with self._docker(), mock.patch.object(office_setup, "_docker_prefix", return_value=["docker"]):

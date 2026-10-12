@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from crewhall import conversations
+from crewhall import chat as conversations
 from crewhall.controller import Controller
 from crewhall.messaging import MessagingError
 from tests.support import FakeHarness

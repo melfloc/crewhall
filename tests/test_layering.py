@@ -28,14 +28,14 @@ class ImportIsolation(unittest.TestCase):
     def test_messaging_does_not_load_chat_or_office(self):
         mods = _modules_after("import crewhall.messaging")
         self.assertNotIn("crewhall.office", mods)
-        self.assertNotIn("crewhall.office_guide", mods)
-        self.assertNotIn("crewhall.office_collab", mods)
-        self.assertNotIn("crewhall.conversations", mods)
+        self.assertNotIn("crewhall.office.guide", mods)
+        self.assertNotIn("crewhall.office.collab", mods)
+        self.assertNotIn("crewhall.chat", mods)
 
     def test_core_does_not_load_office(self):
         mods = _modules_after("import crewhall")
         self.assertNotIn("crewhall.office", mods)
-        self.assertNotIn("crewhall.conversations", mods)
+        self.assertNotIn("crewhall.chat", mods)
 
 
 class OfficeDisabled(unittest.TestCase):

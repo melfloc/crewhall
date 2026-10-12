@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from crewhall import conversations
-from crewhall.conversations import ConversationError
+from crewhall import chat as conversations
+from crewhall.chat import ConversationError
 
 
 class ConversationsExtra(unittest.TestCase):

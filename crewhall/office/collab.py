@@ -26,7 +26,7 @@ import time
 import urllib.request
 from typing import Any
 
-from . import settings
+from .. import settings
 import contextlib
 
 CANDIDATES = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
@@ -446,7 +446,7 @@ _FORWARDED_LOCK = threading.Lock()
 
 
 def _forwarded_path(conversation_id: str) -> str | None:
-    from . import conversations
+    from .. import chat as conversations
 
     try:
         return os.path.join(conversations.conversation_dir(conversation_id), _FORWARDED_FILE)

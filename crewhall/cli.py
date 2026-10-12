@@ -1901,7 +1901,7 @@ def cmd_office(args: argparse.Namespace) -> int:
 
     action = args.office_command
     if action == "setup":
-        from . import office_setup
+        from .office import setup as office_setup
 
         try:
             res = office_setup.setup(port=getattr(args, "port", 8081),
@@ -1915,12 +1915,12 @@ def cmd_office(args: argparse.Namespace) -> int:
         print(_json.dumps(res, indent=2))
         return 0
     if action == "status":
-        from . import office_setup
+        from .office import setup as office_setup
 
         print(_json.dumps(office_setup.status(), indent=2))
         return 0
     if action in ("stop", "restart"):
-        from . import office_setup
+        from .office import setup as office_setup
 
         try:
             res = (office_setup.stop if action == "stop" else office_setup.restart)()

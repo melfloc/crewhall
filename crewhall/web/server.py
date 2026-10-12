@@ -485,7 +485,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _conversation_upload(self, query: dict[str, list[str]]) -> None:
         """Accept a file for a conversation and store it in its ``inputs/``."""
-        from .. import audit, conversations
+        from .. import audit
+        from .. import chat as conversations
 
         if not self._guard():
             return
@@ -515,7 +516,8 @@ class Handler(BaseHTTPRequestHandler):
         """Serve an artifact from a conversation (session or download token)."""
         import mimetypes
 
-        from .. import audit, conversations, office
+        from .. import audit, office
+        from .. import chat as conversations
 
         cid = (query.get("id") or [""])[0]
         rel = (query.get("path") or [""])[0]
@@ -565,7 +567,8 @@ class Handler(BaseHTTPRequestHandler):
         import io
         import zipfile
 
-        from .. import audit, conversations
+        from .. import audit
+        from .. import chat as conversations
 
         cid = (query.get("id") or [""])[0]
         try:
@@ -622,7 +625,7 @@ class Handler(BaseHTTPRequestHandler):
         return "\n".join(lines)
 
     def _office_config(self, query: dict[str, list[str]]) -> None:
-        from .. import conversations, office
+        from .. import chat as conversations, office
 
         if not office.enabled():
             return self._error("not found", 404)
@@ -652,7 +655,8 @@ class Handler(BaseHTTPRequestHandler):
     def _office_callback(self, query: dict[str, list[str]]) -> None:
         import urllib.request
 
-        from .. import audit, conversations, office
+        from .. import audit, office
+        from .. import chat as conversations
 
         if not office.enabled() or not self._host_ok():
             return self._error("not found", 404)

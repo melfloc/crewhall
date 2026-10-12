@@ -7,7 +7,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from crewhall import conversations, office_guide
+from crewhall import chat as conversations
+from crewhall.office import guide as office_guide
 
 
 class _Base(unittest.TestCase):

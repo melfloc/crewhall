@@ -16,7 +16,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from crewhall import bundle, cli, office_setup, specs, updater
+from crewhall import bundle, cli, specs, updater
+from crewhall.office import setup as office_setup
 
 
 def _session(**over: object) -> dict:
@@ -1562,24 +1563,24 @@ class ChatAndOfficeTest(CliTestCase):
         self.assertIn("not JSON", err)
 
     def test_office_setup_and_lifecycle(self) -> None:
-        with mock.patch("crewhall.office_setup.setup", return_value={"ok": True}):
+        with mock.patch("crewhall.office.setup.setup", return_value={"ok": True}):
             rc, out, _e, _c = self.run_cli(["office", "setup"])
         self.assertEqual(rc, 0)
-        with mock.patch("crewhall.office_setup.setup",
+        with mock.patch("crewhall.office.setup.setup",
                         side_effect=office_setup.SetupError("bad")):
             rc, _o, err, _c = self.run_cli(["office", "setup"])
         self.assertEqual(rc, 1)
         self.assertIn("error: bad", err)
-        with mock.patch("crewhall.office_setup.status", return_value={"ok": True}):
+        with mock.patch("crewhall.office.setup.status", return_value={"ok": True}):
             rc, out, _e, _c = self.run_cli(["office", "status"])
         self.assertEqual(rc, 0)
-        with mock.patch("crewhall.office_setup.stop", return_value={"ok": True}):
+        with mock.patch("crewhall.office.setup.stop", return_value={"ok": True}):
             rc, _o, _e, _c = self.run_cli(["office", "stop"])
         self.assertEqual(rc, 0)
-        with mock.patch("crewhall.office_setup.restart", return_value={"ok": True}):
+        with mock.patch("crewhall.office.setup.restart", return_value={"ok": True}):
             rc, _o, _e, _c = self.run_cli(["office", "restart"])
         self.assertEqual(rc, 0)
-        with mock.patch("crewhall.office_setup.stop",
+        with mock.patch("crewhall.office.setup.stop",
                         side_effect=office_setup.SetupError("nope")):
             rc, _o, _e, _c = self.run_cli(["office", "stop"])
         self.assertEqual(rc, 1)

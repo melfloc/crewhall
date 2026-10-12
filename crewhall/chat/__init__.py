@@ -20,7 +20,8 @@ import threading
 import time
 from typing import Any
 
-from . import office_guide, paths, settings
+from .. import paths, settings
+from ..office import guide as office_guide
 import contextlib
 
 # An artifact/input name is reduced to a safe basename; an oversized extension

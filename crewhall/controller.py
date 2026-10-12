@@ -1146,7 +1146,7 @@ class Controller:
             # the environment; a remote agent has no access to this host's disk.
             # Its cwd is forced into the conversation's own workspace so the chat
             # is fully isolated (never the user's project nor the daemon's cwd).
-            from . import conversations as _conversations
+            from . import chat as _conversations
 
             try:
                 conv_env = _conversations.env(conversation)
@@ -1573,7 +1573,7 @@ class Controller:
         self, sender: str, token: str | None, conversation_id: str,
     ) -> bool:
         """Whether an authenticated agent leads ``conversation_id`` or is in its crew."""
-        from . import conversations
+        from . import chat as conversations
 
         sender_h = self.agents.resolve(sender)
         self._check_token(sender_h.agent_id, token)
@@ -1916,7 +1916,7 @@ class Controller:
         """
         import os as _os
 
-        from . import conversations
+        from . import chat as conversations
 
         sender_h = self.agents.resolve(sender)
         if not self.agent_in_conversation(sender_h.agent_id, token, conversation_id):
@@ -1946,7 +1946,7 @@ class Controller:
         Without this the stored ``team`` and the lead's real membership drift:
         an existing lead could not delegate until it was recreated.
         """
-        from . import conversations
+        from . import chat as conversations
 
         conv = conversations.get(conversation_id)
         new_team = None
@@ -1977,7 +1977,7 @@ class Controller:
         self, conversation_id: str, limit: int = 50
     ) -> dict[str, Any]:
         """The crew's in-flight handoffs/requests for a chat's activity strip."""
-        from . import conversations
+        from . import chat as conversations
 
         conv = conversations.get(conversation_id)
         members = self._team_members(conv.get("team"))

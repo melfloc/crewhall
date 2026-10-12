@@ -42,7 +42,7 @@ os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from crewhall import Controller  # noqa: E402
-from crewhall import conversations  # noqa: E402
+from crewhall import chat as conversations  # noqa: E402
 from crewhall.messaging import MessagingError  # noqa: E402
 
 MODEL = os.environ.get("SMOKE_MODEL")
