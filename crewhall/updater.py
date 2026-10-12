@@ -244,7 +244,22 @@ def backup_before_update() -> str | None:
 
 
 # -- daemon restart + health ---------------------------------------------------
+# Backends whose agents outlive a daemon restart (the new daemon re-adopts them).
+SURVIVABLE_BACKENDS = ("tmux", "ssh-tmux")
+# First daemon whose `shutdown(kill_agents=False)` keeps those agents (Fase A1).
+KEEPS_AGENTS_SINCE = (0, 80, 0)
+
+
 def _running_agents() -> list[str]:
+    """Agents a daemon restart would actually disrupt (their names, for the refusal).
+
+    Since 0.80 an update restarts the daemon with ``kill_agents=False``: idle agents
+    on tmux/ssh-tmux survive and are re-adopted with the same identity. So only these
+    count: any live agent when the *running* daemon predates 0.80 (it ignores the
+    flag and closes them), an agent on a backend that cannot survive its parent
+    (PTY), and an agent in the middle of a turn (its hooks and replies would hit a
+    control plane that is briefly down).
+    """
     from .client import Client, ping
 
     if not ping():
@@ -253,7 +268,27 @@ def _running_agents() -> list[str]:
         agents = Client(autostart=False).call("agent_list")["agents"]
     except Exception:  # noqa: BLE001
         return []
-    return [a["name"] or a["agent_id"] for a in agents if a["state"] not in ("exited", "error")]
+    live = [a for a in agents if a.get("state") not in ("exited", "error")]
+    if not live:
+        return []
+    running = daemon_version()
+    try:
+        keeps = running is not None and parse_version(running) >= KEEPS_AGENTS_SINCE
+    except UpdateError:
+        keeps = False  # unknown/older build: assume it closes agents
+    if not keeps:
+        return [_agent_label(a, "this daemon closes agents on restart") for a in live]
+    at_risk = []
+    for a in live:
+        if a.get("backend") not in SURVIVABLE_BACKENDS:
+            at_risk.append(_agent_label(a, f"{a.get('backend')} backend cannot survive"))
+        elif a.get("state") == "working":
+            at_risk.append(_agent_label(a, "working"))
+    return at_risk
+
+
+def _agent_label(agent: dict[str, Any], why: str) -> str:
+    return f"{agent.get('name') or agent.get('agent_id')} ({why})"
 
 
 def daemon_version() -> str | None:
@@ -265,6 +300,61 @@ def daemon_version() -> str | None:
         return Client(autostart=False).call("ping").get("version") or "unknown (older build)"
     except Exception:  # noqa: BLE001
         return None
+
+
+# -- update journal ------------------------------------------------------------
+# Every step and every failure of an update/rollback is appended to
+# state/update.log, so a rollback that happened over SSH (or behind a filtered
+# deploy output) can still be explained afterwards.
+UPDATE_LOG_MAX = 256 * 1024
+
+
+def update_log_path() -> str:
+    from . import brand
+
+    # brand.state_root_dir(), not paths.state_dir(): the latter creates the dir.
+    return os.path.join(brand.state_root_dir(), "update.log")
+
+
+def _journal_write(line: str) -> None:
+    path = update_log_path()
+    if not os.path.isdir(os.path.dirname(path)):
+        return  # never create the state dir as a side effect of logging
+    try:
+        if os.path.exists(path) and os.path.getsize(path) > UPDATE_LOG_MAX:
+            with open(path, "rb") as fh:
+                fh.seek(-UPDATE_LOG_MAX // 2, os.SEEK_END)
+                tail = fh.read()
+            with open(path, "wb") as fh:
+                fh.write(tail)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+    except OSError:
+        pass  # noqa: BLE001 - the journal must never break an update
+
+
+def _journaled(op: str, log: Log) -> Log:
+    """A ``log`` that also appends each line to the update journal."""
+    def write(message: str) -> None:
+        _journal_write(f"[{op}] {message}")
+        log(message)
+    return write
+
+
+def _run_journaled(op: str, log: Log, fn: Callable[[Log], dict[str, Any]]) -> dict[str, Any]:
+    jlog = _journaled(op, log)
+    _journal_write(f"[{op}] start (installed {__version__}, daemon {daemon_version()})")
+    try:
+        result = fn(jlog)
+    except RestartRefused as exc:
+        _journal_write(f"[{op}] refused: {exc}")
+        raise
+    except Exception as exc:
+        _journal_write(f"[{op}] FAILED: {type(exc).__name__}: {exc}")
+        raise
+    _journal_write(f"[{op}] done: {json.dumps(result, default=str)[:500]}")
+    return result
 
 
 def wait_daemon_gone(timeout: float = 45.0) -> None:
@@ -288,8 +378,9 @@ def check_restart_allowed(force: bool) -> None:
     running = _running_agents()
     if running and not force:
         raise RestartRefused(
-            f"{len(running)} agent(s) are running ({', '.join(running[:5])}): restarting the daemon would "
-            "close them. Wait until they are idle, or pass --force-restart."
+            f"{len(running)} agent(s) would be disrupted by a daemon restart "
+            f"({', '.join(running[:5])}). Idle tmux agents survive it; wait until these "
+            "are idle, or pass --force-restart."
         )
 
 
@@ -331,6 +422,13 @@ def check(source: str) -> dict[str, Any]:
 
 def apply(source: str, *, restart: bool = False, force: bool = False,
           allow_downgrade: bool = False, force_restart: bool = False, log: Log = _noop) -> dict[str, Any]:
+    return _run_journaled("update", log, lambda jlog: _apply(
+        source, restart=restart, force=force, allow_downgrade=allow_downgrade,
+        force_restart=force_restart, log=jlog))
+
+
+def _apply(source: str, *, restart: bool, force: bool, allow_downgrade: bool,
+           force_restart: bool, log: Log) -> dict[str, Any]:
     prefix = _require_managed()
     if restart:  # refuse BEFORE changing anything: a refused restart must leave the machine exactly as it was
         check_restart_allowed(force_restart)
@@ -388,7 +486,8 @@ def apply(source: str, *, restart: bool = False, force: bool = False,
                 _swap_back(prefix)
                 with contextlib.suppress(UpdateError):
                     restart_daemon(prefix, __version__, force=True, log=log)
-                raise UpdateError(f"update rolled back to {__version__}: {exc}") from exc
+                raise UpdateError(f"update rolled back to {__version__}: {exc} "
+                                  f"(details: {update_log_path()})") from exc
         else:
             result["restart_pending"] = bool(daemon_version() and daemon_version() != manifest["version"])
         return result
@@ -446,6 +545,11 @@ def _swap_back(prefix: str) -> None:
 
 def restart_pending(*, force_restart: bool = False, log: Log = _noop) -> dict[str, Any]:
     """Apply an already-installed update: restart the daemon on the installed code (when idle)."""
+    return _run_journaled("restart", log, lambda jlog: _restart_pending(
+        force_restart=force_restart, log=jlog))
+
+
+def _restart_pending(*, force_restart: bool, log: Log) -> dict[str, Any]:
     prefix = _require_managed()
     check_restart_allowed(force_restart)
     dv = daemon_version()
@@ -457,6 +561,11 @@ def restart_pending(*, force_restart: bool = False, log: Log = _noop) -> dict[st
 
 def rollback(*, restart: bool = False, force: bool = False, force_restart: bool = False,
              log: Log = _noop) -> dict[str, Any]:
+    return _run_journaled("rollback", log, lambda jlog: _rollback(
+        restart=restart, force=force, force_restart=force_restart, log=jlog))
+
+
+def _rollback(*, restart: bool, force: bool, force_restart: bool, log: Log) -> dict[str, Any]:
     prefix = _require_managed()
     if restart:
         check_restart_allowed(force_restart)

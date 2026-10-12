@@ -299,7 +299,7 @@ class UpdaterApply(unittest.TestCase):
 
     def test_restart_refuses_while_agents_run_unless_forced(self):
         with mock.patch.object(updater, "_running_agents", return_value=["orq", "eje"]):
-            with self.assertRaisesRegex(UpdateError, "would close them"):
+            with self.assertRaisesRegex(UpdateError, "would be disrupted by a daemon restart"):
                 updater.restart_daemon(self.prefix, "1.0.0", force=False, log=lambda m: None)
 
     def test_a_refused_restart_changes_nothing_and_never_restarts_the_daemon(self):
@@ -332,6 +332,22 @@ class UpdaterApply(unittest.TestCase):
         with mock.patch.object(updater, "_running_agents", return_value=["a"]):
             with self.assertRaises(updater.RestartRefused):
                 updater.restart_pending()
+
+    def test_failed_restart_rollback_is_recorded_in_the_update_journal(self):
+        # Regression: a rollback over SSH left no trace of *why* it happened.
+        os.makedirs(os.path.join(self.tmp, "state", "crewhall"), exist_ok=True)
+        boom = updater.UpdateError("daemon reports version '0.80.1', expected 99.0.0")
+        with mock.patch.object(updater, "check_restart_allowed"), \
+                mock.patch.object(updater, "restart_daemon", side_effect=[boom, None]):
+            with self.assertRaisesRegex(UpdateError, "rolled back"):
+                updater.apply(make_release(self.tmp, "99.0.0"), restart=True)
+        with open(updater.update_log_path(), encoding="utf-8") as fh:
+            journal = fh.read()
+        self.assertIn("[update] start", journal)
+        self.assertIn("restart failed", journal)
+        self.assertIn("expected 99.0.0", journal)
+        self.assertIn("[update] FAILED", journal)
+        self.assertEqual(os.stat(updater.update_log_path()).st_mode & 0o777, 0o600)
 
     def test_agents_appearing_between_the_check_and_the_restart_keep_the_install_without_restarting(self):
         refused = updater.RestartRefused("1 agent(s) are running")
@@ -404,3 +420,35 @@ class BuildInfo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RestartRisk(unittest.TestCase):
+    """Which live agents a daemon restart would really disrupt (Fase A1 aware)."""
+
+    def _risk(self, agents, daemon="0.80.2"):
+        client = mock.Mock()
+        client.call.return_value = {"agents": agents}
+        with mock.patch("crewhall.client.ping", return_value=True), \
+                mock.patch("crewhall.client.Client", return_value=client), \
+                mock.patch.object(updater, "daemon_version", return_value=daemon):
+            return updater._running_agents()
+
+    def test_idle_tmux_agents_survive_a_restart(self):
+        agents = [{"name": "orq", "state": "ready", "backend": "tmux"},
+                  {"name": "eje", "state": "waiting_input", "backend": "ssh-tmux"},
+                  {"name": "old", "state": "exited", "backend": "pty"}]
+        self.assertEqual(self._risk(agents), [])
+
+    def test_working_or_pty_agents_are_at_risk(self):
+        agents = [{"name": "busy", "state": "working", "backend": "tmux"},
+                  {"name": "pty", "state": "ready", "backend": "pty"}]
+        risk = self._risk(agents)
+        self.assertEqual(len(risk), 2)
+        self.assertTrue(risk[0].startswith("busy (working"))
+        self.assertIn("pty backend", risk[1])
+
+    def test_a_pre_080_daemon_closes_every_live_agent(self):
+        agents = [{"name": "orq", "state": "ready", "backend": "tmux"}]
+        self.assertEqual(len(self._risk(agents, daemon="0.79.1")), 1)
+        self.assertEqual(len(self._risk(agents, daemon="unknown (older build)")), 1)
+

@@ -5,6 +5,18 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.80.3] — 2026-10-12
+
+- **`crewhall update --restart` ya no exige `--force-restart` con agentes
+  inactivos.** Desde 0.80 el reinicio conserva los agentes tmux/ssh-tmux, pero la
+  comprobación previa seguía negándose con "cerraría los agentes". Ahora solo se
+  niega si el reinicio afectaría de verdad a alguien: un agente trabajando, uno
+  en backend PTY, o un daemon anterior a 0.80 (que aún los cierra al parar). El
+  mensaje lo explica por agente.
+- **Registro de actualizaciones** en `state/update.log` (0600, acotado): cada
+  paso y cada fallo de `update`, `update --restart` y `update --rollback`. Un
+  rollback automático indica en su mensaje dónde mirar el motivo.
+
 ## [0.80.2] — 2026-10-12
 
 - **Co-edición en vivo de OnlyOffice ("Live") con el Document Server publicado en
