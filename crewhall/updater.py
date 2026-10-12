@@ -53,7 +53,8 @@ class UpdateError(RuntimeError):
 
 
 class RestartRefused(UpdateError):
-    """A restart was requested but would close running agents. A *refusal*, never a failure:
+    """A restart was requested but would disrupt agents (working, on PTY, or a pre-0.80
+    daemon that closes them). A *refusal*, never a failure:
     it must not trigger a rollback or any daemon restart."""
 
 

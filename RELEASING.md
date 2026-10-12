@@ -14,8 +14,10 @@
    `crewhall update` solo actúa sobre instalaciones *gestionadas* (creadas por `install.sh`);
    en un checkout de desarrollo se niega.
 3. **Actualizar no puede destruir trabajo en curso.** Instalar una versión nueva no reinicia el daemon
-   (reiniciarlo cierra los agentes). El reinicio es una decisión explícita (`--restart`) y se niega
-   mientras haya agentes corriendo salvo `--force-restart`.
+   por sí solo. El reinicio es una decisión explícita (`--restart`). Desde 0.80 los agentes tmux/ssh-tmux
+   **sobreviven** al reinicio (el daemon nuevo los readopta con su identidad), así que solo se niega si
+   afectaría a alguien: un agente trabajando, uno en backend PTY, o un daemon anterior a 0.80 (que aún
+   los cierra). `--force-restart` salta esa comprobación.
 4. **Todo es reversible.** Se conserva la versión anterior (`venv.prev`) y una copia de config+estado
    previa a cada update; `update --rollback` vuelve atrás; un reinicio que no deja el sistema sano
    revierte solo.
@@ -84,9 +86,10 @@ Salida: `releases/vX.Y.Z/` → `release.json`, `crewhall-X.Y.Z-installer.tar.gz`
 6. con `--restart`: reinicia el daemon, comprueba versión y `doctor`; si algo falla, **revierte solo**.
 
 Sin `--restart`, `crewhall update --status` y `doctor` avisan de *"reinicio pendiente"* mientras el
-daemon siga con el código viejo. Se aplica cuando no haya agentes corriendo con `crewhall update --restart`
-(sin `--from`). **Una negativa por haber agentes activos no cambia nada** (se comprueba antes de instalar y
-nunca dispara rollback ni reinicio): sale con código 3; `--force-restart` es la única vía que los cierra.
+daemon siga con el código viejo. Se aplica con `crewhall update --restart` (sin `--from`); los agentes
+tmux inactivos siguen corriendo. **Una negativa (algún agente trabajando o en PTY) no cambia nada** (se
+comprueba antes de instalar y nunca dispara rollback ni reinicio): sale con código 3. Cada paso y cada
+fallo de `update`/`--restart`/`--rollback` queda en `state/update.log`.
 
 `--check` solo informa (exit 10 si hay versión nueva). `--rollback [--restart]` vuelve a la anterior.
 

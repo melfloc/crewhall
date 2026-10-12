@@ -610,7 +610,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         if out.get("restart_pending"):
             print("The running daemon still uses the old code (agents were not touched).\n"
                   "Apply it when idle with: "
-                  "crewhall update --restart   # (refused while agents run; --force-restart closes them)")
+                  "crewhall update --restart   # (idle tmux agents survive; refused only if one is working or on PTY)")
     return 0
 
 
@@ -1794,8 +1794,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status", action="store_true", help="show installed/daemon versions and rollback state")
     p.add_argument("--rollback", action="store_true", help="swap back to the previous version")
     p.add_argument("--restart", action="store_true",
-                   help="also restart the daemon (refused while agents run, unless --force-restart)")
-    p.add_argument("--force-restart", action="store_true", help="restart even if agents are running (closes them)")
+                   help="also restart the daemon (idle tmux agents survive it; refused if an agent is working or on PTY, unless --force-restart)")
+    p.add_argument("--force-restart", action="store_true", help="restart even if an agent is working or on PTY (a PTY agent is closed; a working one loses its turn's hooks)")
     p.add_argument("--force", action="store_true", help="reinstall the same version / ignore schema warning")
     p.add_argument("--allow-downgrade", action="store_true")
     p.set_defaults(func=cmd_update)
