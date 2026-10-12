@@ -48,6 +48,27 @@ class Bootstrap(_Base):
             self.assertIsNone(office_collab.chromium_binary())
 
 
+class ChromiumFlags(_Base):
+    def test_editor_iframe_is_kept_in_process(self):
+        # Regression: with the Document Server on another host (Tailscale name)
+        # the editor iframe is cross-site; site isolation moved it out of the
+        # page we drive and the co-editor never became ready.
+        captured = []
+
+        def popen(args, *a, **k):
+            captured.append(list(args))
+            raise RuntimeError("stop after launch")
+
+        with mock.patch("crewhall.office.collab.chromium_binary", return_value="/bin/true"), \
+                mock.patch("crewhall.office.collab.subprocess.Popen", side_effect=popen):
+            with self.assertRaises(RuntimeError):
+                office_collab.CoEditor({"document": {"key": "k"}}, "http://ds.example:8081")
+        args = captured[0]
+        for flag in office_collab.SAME_PROCESS_FLAGS:
+            self.assertIn(flag, args)
+        self.assertTrue(args[-1].startswith("http://127.0.0.1:"))  # the page stays last
+
+
 class Registry(_Base):
     def test_open_without_chromium_fails_clearly(self):
         reg = office_collab.CollabRegistry()

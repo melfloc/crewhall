@@ -5,6 +5,18 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.80.2] — 2026-10-12
+
+- **Co-edición en vivo de OnlyOffice ("Live") con el Document Server publicado en
+  otro host** (un nombre de Tailscale o una IP de LAN): el editor headless nunca
+  quedaba listo y la Web UI devolvía 502. El iframe del editor era *cross-site*
+  respecto a la página de arranque (127.0.0.1) y el aislamiento de sitios de
+  Chromium lo movía a otro proceso, fuera del alcance de crewhall. El Chromium
+  headless (perfil desechable, solo carga nuestra página y el Document Server)
+  se lanza ahora sin aislamiento de sitios. Con el Document Server en 127.0.0.1
+  no cambiaba nada.
+- CHANGELOG de 0.80.1 sin rutas de usuario (escáner de privacidad del CI).
+
 ## [0.80.1] — 2026-10-12
 
 Primera release instalable de la línea 0.80 (el tag `v0.80.0` se creó sin
@@ -12,7 +24,7 @@ construir la release). Incluye todo lo de 0.80.0 más:
 
 - Test del guard de control plane: espera a que el proceso hijo haga `exec`
   antes de leer `/proc/<pid>/environ` (fallaba de forma intermitente en CI).
-- Un comentario de test ya no contiene una ruta tipo `/home/...` (escáner de
+- Un comentario de test ya no contiene una ruta de usuario (escáner de
   privacidad).
 
 ## [0.80.0] — 2026-10-11

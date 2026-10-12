@@ -54,6 +54,18 @@ try {
 # OnlyOffice 8.1 entry point (the parent ``DocsAPI.DocEditor`` has no
 # ``createConnector``). ``read`` returns the document text; ``insert`` appends
 # at the cursor; ``command`` calls a method on the editor.
+# The bootstrap page is served from 127.0.0.1 and embeds the Document Server's
+# editor iframe. When the Document Server is published under another host (a
+# Tailscale name, a LAN IP) the iframe is cross-site, and Chromium's site
+# isolation moves it to its own process/target: its execution context never
+# shows up on the page we drive, so the co-editor never becomes "ready". This
+# headless browser only ever loads our page and the configured Document Server,
+# in a throwaway profile, so keeping them in one process is safe.
+SAME_PROCESS_FLAGS = (
+    "--disable-site-isolation-trials",
+    "--disable-features=IsolateOrigins,site-per-process",
+)
+
 READY_EXPR = ("(function(){try{return (typeof Asc!=='undefined' && typeof Asc.editor==='object'"
               " && typeof Asc.editor.ContentToHTML==='function')"
               " ? String(Asc.editor.ContentToHTML()).length : 0;}catch(e){return 0;}})()")
@@ -216,6 +228,7 @@ class CoEditor:
         args = [
             self.binary, "--headless=new", "--disable-gpu", "--no-sandbox",
             "--disable-dev-shm-usage", "--no-first-run", "--disable-extensions",
+            *SAME_PROCESS_FLAGS,
             f"--user-data-dir={self.profile}",
             f"--remote-debugging-port={self.port}",
             url,
