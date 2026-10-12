@@ -50,3 +50,7 @@ web-token
 allowed_signers
 audit.jsonl
 state.json
+
+# coverage data (local runs and CI)
+.coverage
+.coverage.*
