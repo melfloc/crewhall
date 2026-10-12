@@ -4,13 +4,27 @@ import logging
 import os
 import queue
 import threading
-from dataclasses import dataclass, field
 from typing import Any
 from collections.abc import Callable
 
-from .. import brand
-from ..types import parse_agent_args
 from .control import ControlPort
+from .keys import KEY_FORWARD
+from .keys import (
+    exit_sequence,
+    next_sequence,
+    prev_sequence,
+    translate_sequence,
+)
+from .modals import HELP_LINES, Modal, ModalField, UiModals, agent_info_lines
+from .palette import COMMANDS, CONTEXT_COMMANDS, UiPalette
+
+__all__ = [
+    "AppModel", "TaskRunner", "Modal", "ModalField",
+    "COMMANDS", "CONTEXT_COMMANDS", "HELP_LINES", "agent_info_lines",
+    "exit_sequence", "prev_sequence", "next_sequence", "translate_sequence",
+    "KEY_FORWARD", "HEADERS", "STATE_SYMBOL", "STATE_WORD", "BACKEND_DESC",
+    "TERMINAL_STATES",
+]
 
 log = logging.getLogger("crewhall.ui")
 
@@ -39,138 +53,6 @@ BACKEND_DESC = {"tmux": "persistent / attachable", "pty": "native / ephemeral"}
 # States where the agent can no longer receive input (auto-leave Interactive Focus).
 TERMINAL_STATES = {"exited", "error"}
 
-# UI key name -> backend key name (keys.py canonical) for Interactive Focus.
-# Ctrl+B is streamed to the agent (it is tmux's default prefix; crewhall
-# must not consume it). The exit key is Ctrl+Alt+B (ESC + Ctrl+B).
-KEY_FORWARD = {
-    "up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT",
-    "home": "HOME", "end": "END", "pgup": "PAGE_UP", "pgdn": "PAGE_DOWN",
-    "tab": "TAB", "enter": "ENTER", "backspace": "BACKSPACE", "delete": "DELETE",
-    "esc": "ESC", "ctrl_b": "CTRL_B", "ctrl_c": "CTRL_C", "ctrl_d": "CTRL_D",
-    "ctrl_p": "CTRL_P",
-}
-
-# Ctrl+Alt+B is delivered by terminals/tmux as ESC followed by Ctrl+B (0x02).
-DEFAULT_EXIT_SEQUENCE = b"\x1b\x02"
-# Ctrl+Alt+J / Ctrl+Alt+K are ESC followed by the letter.
-DEFAULT_PREV_SEQUENCE = b"\x1bJ"
-DEFAULT_NEXT_SEQUENCE = b"\x1bK"
-
-_CONTROL_CHARS = {2: "ctrl_b", 3: "ctrl_c", 4: "ctrl_d", 16: "ctrl_p"}
-
-
-def _env_sequence(name: str, default: bytes) -> bytes:
-    raw = brand.env(name)
-    if not raw:
-        return default
-    try:
-        return raw.encode("utf-8").decode("unicode_escape").encode("latin-1")
-    except Exception:  # noqa: BLE001
-        return default
-
-
-def exit_sequence() -> bytes:
-    return _env_sequence("EXIT_SEQUENCE", DEFAULT_EXIT_SEQUENCE)
-
-
-def prev_sequence() -> bytes:
-    return _env_sequence("PREV_SEQUENCE", DEFAULT_PREV_SEQUENCE)
-
-
-def next_sequence() -> bytes:
-    return _env_sequence("NEXT_SEQUENCE", DEFAULT_NEXT_SEQUENCE)
-
-
-def translate_sequence(data: bytes) -> list[str]:
-    """Map a raw byte sequence to UI keys.
-
-    Special Ctrl+Alt combinations become named UI actions
-    (``exit_interactive`` / ``interactive_prev`` / ``interactive_next``);
-    everything else is forwarded verbatim (ESC included).
-    """
-    if not data:
-        return []
-    for seq, name in (
-        (exit_sequence(), "exit_interactive"),
-        (prev_sequence(), "interactive_prev"),
-        (next_sequence(), "interactive_next"),
-    ):
-        if seq and data[: len(seq)] == seq:
-            rest = data[len(seq):]
-            rest_keys = [k for b in rest if (k := _byte_key(b)) is not None]
-            return [name, *rest_keys]
-    return [k for k in (_byte_key(b) for b in data) if k]
-
-
-def _byte_key(byte: int) -> str | None:
-    if byte == 27:
-        return "esc"
-    if byte == 9:
-        return "tab"
-    if byte in (10, 13):
-        return "enter"
-    if byte in (8, 127):
-        return "backspace"
-    if byte in _CONTROL_CHARS:
-        return _CONTROL_CHARS[byte]
-    if byte == 0:
-        return "ctrl_space"
-    if 32 <= byte < 127:
-        return chr(byte)
-    return None
-
-# (label, action) — order defines palette order.
-COMMANDS: list[tuple[str, str]] = [
-    ("New Agent", "create_agent"),
-    ("New Team", "create_team"),
-    ("Add Members", "add_members"),
-    ("Remove Members", "remove_members"),
-    ("Send Message", "message"),
-    ("Delete Agent", "delete_agent"),
-    ("Delete Team", "delete_team"),
-    ("Agent Info", "agent_info"),
-    ("Agent Activity", "activity"),
-    ("Terminals", "terminals"),
-    ("Refresh", "refresh"),
-    ("Help", "help"),
-    ("Quit", "quit"),
-]
-CONTEXT_COMMANDS = {
-    "add_members",
-    "remove_members",
-    "delete_team",
-    "message",
-    "delete_agent",
-    "agent_info",
-}
-
-
-@dataclass
-class ModalField:
-    name: str
-    label: str
-    type: str = "text"  # text | select | checklist
-    value: str = ""
-    options: list[str] = field(default_factory=list)
-    index: int = 0
-    checked: list[bool] = field(default_factory=list)
-    cursor: int = 0
-    editable: bool = True
-
-
-@dataclass
-class Modal:
-    kind: str
-    title: str
-    fields: list[ModalField] = field(default_factory=list)
-    focus: int = 0
-    error: str | None = None
-    button: int = 1
-    target: str | None = None
-    action: str | None = None
-    lines: list[str] = field(default_factory=list)
-    index: int = 0
-
 
 class TaskRunner:
     def __init__(self) -> None:
@@ -194,7 +76,7 @@ class TaskRunner:
                 return out
 
 
-class AppModel:
+class AppModel(UiModals, UiPalette):
     """Headless application state and behaviour on top of a ControlPort."""
 
     def __init__(
@@ -585,132 +467,6 @@ class AppModel:
     def _new_modal(self, kind: str, title: str, **kwargs: Any) -> None:
         self.modal = Modal(kind=kind, title=title, **kwargs)
 
-    def open_create_agent(self, team_id: str | None = None) -> None:
-        kinds = [h["kind"] for h in self.meta.get("harnesses", [])] or ["opencode"]
-        backends = self.meta.get("backends", []) or ["pty"]
-        bdef = backends.index("tmux") if "tmux" in backends else 0
-        title = "NEW AGENT IN TEAM" if team_id else "NEW AGENT"
-        hosts = [h["name"] for h in self.meta.get("hosts", [])]
-        team = next((t for t in self.teams if t["team_id"] == team_id), None) if team_id else None
-        team_host = (team or {}).get("host")
-        if team_host and team_host not in hosts:
-            hosts = [*hosts, team_host]
-        # A remote team fixes the host: its agents run there, in its directory.
-        host_index = (hosts.index(team_host) + 1) if team_host else 0
-        host_field = (
-            [ModalField("host", "Run on (a host = directory on that machine)", "select",
-                        options=["(this machine)", *hosts], index=host_index)]
-            if hosts else []
-        )
-        self._new_modal(
-            "create_agent",
-            title,
-            target=team_id,
-            fields=[
-                ModalField("name", "Name", "text", ""),
-                ModalField("kind", "Agent type", "select", options=kinds, index=0),
-                ModalField("backend", "Backend", "select", options=backends, index=bdef),
-                *host_field,
-                ModalField("cwd", "Working directory", "text",
-                           (team or {}).get("workspace") or "" if team_host else self.cwd),
-                ModalField("args", "Command arguments (optional)", "text", ""),
-            ],
-            button=0,
-        )
-
-    def open_create_team(self) -> None:
-        self._new_modal(
-            "create_team",
-            "NEW TEAM",
-            fields=[ModalField("name", "Name", "text", "")],
-            button=0,
-        )
-
-    def open_add_members(self) -> None:
-        team = self.selected_team()
-        if team is None:
-            self.status = "select a team first"
-            self.status_kind = "warning"
-            return
-        member_ids = {m["agent_id"] for m in team["members"]}
-        names = [str(a.get("name") or a["agent_id"]) for a in self.agents
-                 if a["agent_id"] not in member_ids]
-        self._new_modal(
-            "add_members",
-            f"ADD MEMBERS \u00b7 {team['name']}",
-            target=team["team_id"],
-            fields=[
-                ModalField("members", "Agents", "checklist", options=names,
-                           checked=[False] * len(names), cursor=0)
-            ],
-            button=0,
-        )
-
-    def open_remove_members(self) -> None:
-        team = self.selected_team()
-        if team is None:
-            self.status = "select a team first"
-            self.status_kind = "warning"
-            return
-        names = [m.get("name") for m in team["members"]]
-        self._new_modal(
-            "remove_members",
-            f"REMOVE MEMBERS \u00b7 {team['name']}",
-            target=team["team_id"],
-            fields=[
-                ModalField("members", "Members", "checklist", options=names,
-                           checked=[False] * len(names), cursor=0)
-            ],
-            button=0,
-        )
-
-    def open_message(self) -> None:
-        agent = self.selected_agent()
-        if agent is None:
-            self.status = "select an agent to send from"
-            self.status_kind = "warning"
-            return
-        sender = agent.get("name") or agent["agent_id"]
-        recips = [n for n in self.agent_names() if n != sender]
-        if not recips:
-            self.status = "no other agent to send to"
-            self.status_kind = "warning"
-            return
-        self._new_modal(
-            "message",
-            "SEND MESSAGE",
-            fields=[
-                ModalField("from", "From", "text", sender, editable=False),
-                ModalField("to", "To", "select", options=recips),
-                ModalField("body", "Message", "text", ""),
-            ],
-            target=sender,
-            button=0,
-        )
-
-    def open_confirm(self, action: str, target: str, title: str, lines: list[str]) -> None:
-        self._new_modal("confirm", title, target=target, action=action, lines=lines, button=1)
-
-    def open_help(self) -> None:
-        self._new_modal("help", "HELP", lines=HELP_LINES)
-
-    def open_activity(self) -> None:
-        self._new_modal("activity", "ACTIVITY", lines=self.activity_lines(), index=0)
-
-    def open_agent_info(self) -> None:
-        agent = self.selected_agent()
-        if agent is None:
-            self.status = "no agent selected"
-            self.status_kind = "warning"
-            return
-        self._new_modal("agent_info", "AGENT INFO", lines=agent_info_lines(agent), index=0)
-
-    def open_palette(self) -> None:
-        self._new_modal(
-            "palette", "COMMAND PALETTE",
-            fields=[ModalField("query", ">", "text", "")], button=0,
-        )
-
     def activity_lines(self) -> list[str]:
         lines: list[str] = []
         for message in self.activity:
@@ -720,23 +476,6 @@ class AppModel:
             lines.append(f"{mark}  {sender} \u2192 {recipient}")
             lines.append(f"     {message['body']}")
         return lines or ["(no activity yet)"]
-
-    def available_commands(self) -> list[tuple[str, str]]:
-        agent = self.selected_agent()
-        team = self.selected_team()
-        out: list[tuple[str, str]] = []
-        for label, action in COMMANDS:
-            if action in CONTEXT_COMMANDS:
-                if action in ("add_members", "remove_members", "delete_team") and not team:
-                    continue
-                if action in ("message", "delete_agent", "agent_info") and not agent:
-                    continue
-            out.append((label, action))
-        return out
-
-    def filtered_commands(self) -> list[tuple[str, str]]:
-        query = self.modal.fields[0].value.lower() if self.modal else ""
-        return [c for c in self.available_commands() if query in c[0].lower()]
 
     # ------------------------------------------------------------ key routes
     def handle_key(self, key: str) -> None:
@@ -879,122 +618,6 @@ class AppModel:
             self.status = f"input failed: {exc}"
             self.status_kind = "error"
 
-    def _modal_key(self, key: str) -> None:
-        modal = self.modal
-        assert modal is not None
-        if modal.kind in ("help", "agent_info", "activity"):
-            if key in ("esc", "enter", "q", "?"):
-                self.close_modal()
-            elif key == "up":
-                modal.index = max(0, modal.index - 1)
-            elif key == "down":
-                modal.index += 1
-            return
-        if modal.kind == "palette":
-            self._palette_key(key)
-            return
-        if modal.kind == "confirm":
-            if key in ("esc", "n", "N"):
-                self.close_modal()
-            elif key in ("y", "Y"):
-                self._confirm_yes()
-            elif key in ("left", "right", "tab"):
-                modal.button = 1 - modal.button
-            elif key == "enter":
-                if modal.button == 0:
-                    self._confirm_yes()
-                else:
-                    self.close_modal()
-            return
-        if key == "esc":
-            self.close_modal()
-        elif key == "tab":
-            modal.focus = (modal.focus + 1) % len(modal.fields)
-        elif key == "enter":
-            self._submit_modal()
-        elif modal.fields:
-            self._field_key(modal.fields[modal.focus], key)
-
-    def _field_key(self, field: ModalField, key: str) -> None:
-        if field.type == "text":
-            if not field.editable:
-                return
-            if key == "backspace":
-                field.value = field.value[:-1]
-            elif len(key) == 1 and key.isprintable():
-                field.value += key
-        elif field.type == "select":
-            if key in ("left", "up"):
-                field.index = max(0, field.index - 1)
-            elif key in ("right", "down"):
-                field.index = min(max(0, len(field.options) - 1), field.index + 1)
-        elif field.type == "checklist":
-            if key == "up":
-                field.cursor = max(0, field.cursor - 1)
-            elif key == "down":
-                field.cursor = min(max(0, len(field.options) - 1), field.cursor + 1)
-            elif key in ("space", " ", "x") and field.options:
-                field.checked[field.cursor] = not field.checked[field.cursor]
-
-    def _palette_key(self, key: str) -> None:
-        modal = self.modal
-        assert modal is not None
-        if key == "esc":
-            self.close_modal()
-        elif key == "up":
-            modal.index = max(0, modal.index - 1)
-        elif key == "down":
-            modal.index += 1
-        elif key == "backspace":
-            modal.fields[0].value = modal.fields[0].value[:-1]
-            modal.index = 0
-        elif key == "enter":
-            self._run_palette()
-        elif len(key) == 1 and key.isprintable():
-            modal.fields[0].value += key
-            modal.index = 0
-
-    def _run_palette(self) -> None:
-        assert self.modal is not None
-        commands = self.filtered_commands()
-        if not commands:
-            return
-        index = min(self.modal.index, len(commands) - 1)
-        action = commands[index][1]
-        self.close_modal()
-        self.run_command(action)
-
-    def run_command(self, action: str) -> None:
-        if action == "create_agent":
-            team = self.selected_team()
-            self.open_create_agent(team["team_id"] if team else None)
-        elif action == "create_team":
-            self.open_create_team()
-        elif action == "add_members":
-            self.open_add_members()
-        elif action == "remove_members":
-            self.open_remove_members()
-        elif action == "message":
-            self.open_message()
-        elif action == "delete_agent":
-            self._nav_key("d")
-        elif action == "delete_team":
-            self._nav_key("R")
-        elif action == "agent_info":
-            self.open_agent_info()
-        elif action == "activity":
-            self.open_activity()
-        elif action == "terminals":
-            self.show_terminals()
-        elif action == "refresh":
-            self.refresh()
-            self.status = "refreshed"
-            self.status_kind = "info"
-        elif action == "help":
-            self.open_help()
-        elif action == "quit":
-            self.should_quit = True
-
     def show_terminals(self) -> None:
         """Minimal TUI support: the TUI cannot suspend, so show the exact
         ``attach`` command (see NOTES.md)."""
@@ -1012,98 +635,6 @@ class AppModel:
         self.status = (f"{len(terms)} terminal(s); attach: "
                        f"crewhall terminal attach {first}")
         self.status_kind = "info"
-
-    def _confirm_yes(self) -> None:
-        modal = self.modal
-        assert modal is not None
-        action, target = modal.action, modal.target
-        self.close_modal()
-        if action == "remove_agent" and target:
-            self.remove_agent(target)
-        elif action == "remove_team" and target:
-            self.remove_team(target)
-
-    def _option(self, field: ModalField) -> str | None:
-        if not field.options:
-            return None
-        return field.options[min(field.index, len(field.options) - 1)]
-
-    def _checked(self, field: ModalField) -> list[str]:
-        return [o for o, c in zip(field.options, field.checked, strict=False) if c]
-
-    def _submit_modal(self) -> None:
-        modal = self.modal
-        assert modal is not None
-        kind = modal.kind
-        if kind == "create_agent":
-            fields = {f.name: f for f in modal.fields}
-            name = fields["name"].value.strip()
-            harness = self._option(fields["kind"]) or "opencode"
-            backend = self._option(fields["backend"])
-            host = self._option(fields["host"]) if "host" in fields else None
-            host = None if host == "(this machine)" else host
-            team_obj = next((t for t in self.teams if t["team_id"] == modal.target), None)
-            if team_obj and team_obj.get("host"):
-                if host and host != team_obj["host"]:
-                    modal.error = f"team runs on {team_obj['host']}: pick that host"
-                    return
-                host = team_obj["host"]
-            cwd = fields["cwd"].value.strip() or (None if host else self.cwd)
-            extra = fields["args"].value.strip()
-            if not name:
-                modal.error = "name is required"
-                return
-            try:
-                parse_agent_args(extra)
-            except ValueError as exc:
-                modal.error = str(exc)
-                return
-            if name in self.agent_names():
-                modal.error = f'agent "{name}" already exists'
-                return
-            if not host and cwd and not os.path.isdir(os.path.expanduser(cwd)):
-                modal.error = "working directory does not exist"
-                return
-            team = modal.target
-            self.close_modal()
-            self.create_agent(name, harness, backend, cwd, team=team, args=extra or None, host=host)
-        elif kind == "create_team":
-            name = modal.fields[0].value.strip()
-            if not name:
-                modal.error = "name is required"
-                return
-            self.close_modal()
-            self.create_team(name, [])
-        elif kind == "add_members":
-            field = modal.fields[0]
-            team = modal.target
-            if team is None:
-                return
-            if not field.options:
-                # No agents available: offer to create one in this team.
-                self.close_modal()
-                self.open_create_agent(team)
-                return
-            names = self._checked(field)
-            self.close_modal()
-            self.add_members(team, names)
-        elif kind == "remove_members":
-            names = self._checked(modal.fields[0])
-            team = modal.target
-            if team is None:
-                return
-            self.close_modal()
-            self.remove_members(team, names)
-        elif kind == "message":
-            fields = {f.name: f for f in modal.fields}
-            body = fields["body"].value.strip()
-            to = self._option(fields["to"])
-            sender = modal.target or fields["from"].value
-            if not to or not body:
-                modal.error = "recipient and message are required"
-                return
-            self.close_modal()
-            self.send_message(sender, to, body)
 
     # ------------------------------------------------------------- footer
     def footer_hints(self) -> list[str]:
@@ -1128,49 +659,3 @@ class AppModel:
                 return ["\u2191\u2193 Navigate", "d Delete", "? Help"]
             return ["\u2191\u2193 Navigate", "Enter Interactive", "m Message", "d Delete", "? Help"]
         return ["\u2191\u2193 Navigate", "n New Agent", "t New Team", "? Help"]
-
-
-HELP_LINES = [
-    "NAVIGATION",
-    "  \u2191 \u2193        move selection (j / k)",
-    "  Enter      team: expand/collapse \u00b7 agent: INTERACTIVE FOCUS",
-    "  PgUp PgDn  scroll transcript",
-    "  Home End   transcript top / follow",
-    "  Esc        cancel / close modal",
-    "",
-    "AGENTS",
-    "  n  New Agent (or New Agent in Team)   d  Delete Agent",
-    "  Enter  Interactive Focus \u00b7 keyboard goes to the agent TUI",
-    "",
-    "INTERACTIVE FOCUS",
-    "  type directly into the agent (Claude Code / OpenCode)",
-    "  Esc, arrows, Ctrl+B/C/D, Tab, /slash commands -> the agent",
-    "  Ctrl+Alt+K   view next agent   (CREWHALL_NEXT_SEQUENCE)",
-    "  Ctrl+Alt+J   view previous agent (CREWHALL_PREV_SEQUENCE)",
-    "  Ctrl+Alt+B   return to Navigator (CREWHALL_EXIT_SEQUENCE)",
-    "",
-    "TEAMS",
-    "  t  New Team           a  Add Members",
-    "  x  Remove Members     n  New Agent in Team",
-    "  R  Delete Team",
-    "",
-    "MESSAGING",
-    "  m  Send Message (from selected agent)",
-    "",
-    "APPLICATION",
-    "  Ctrl+P  Command Palette (Navigator only)   e  Activity",
-    "  ?  Help                                    q  Quit",
-]
-
-
-def agent_info_lines(agent: dict[str, Any]) -> list[str]:
-    return [
-        f"name      {agent.get('name') or '-'}",
-        f"id        {agent['agent_id']}",
-        f"harness   {agent['kind']}",
-        f"backend   {agent['backend']}",
-        f"state     {agent['state']}",
-        f"pid       {agent.get('pid')}",
-        f"cwd       {agent.get('cwd') or '-'}",
-        f"evidence  {agent.get('evidence', '')}",
-    ]
