@@ -29,6 +29,7 @@ import time
 from typing import Any, cast
 
 from . import brand, health, paths
+from .harness.claude import trust_yes_selected
 from .harness import AgentState, get_harness
 from .harness.versions import parse_version
 
@@ -36,7 +37,20 @@ KINDS = ("claude", "codex", "opencode")
 
 
 def screens_dir() -> str:
-    return os.path.join(paths.project_root(), "tests", "fixtures", "screens")
+    """Where captures land: the state dir, never the repo or an installed venv.
+
+    Promoting a capture to ``tests/fixtures/screens`` is a deliberate step
+    (``watch screens --save-fixtures`` from a git checkout).
+    """
+    return os.path.join(health.health_dir(), "screens")
+
+
+def fixtures_dir() -> str | None:
+    """``tests/fixtures/screens`` of a git checkout, or None (installed package)."""
+    root = paths.project_root()
+    if not os.path.isdir(os.path.join(root, ".git")):
+        return None
+    return os.path.join(root, "tests", "fixtures", "screens")
 
 
 def notify(title: str, body: str, *, sender: str | None = None) -> bool:
@@ -164,16 +178,18 @@ def _sanitize(text: str) -> str:
 
 
 def _version_label(kind: str, text: str) -> str:
-    parsed = parse_version(text)
-    if parsed:
-        return ".".join(str(p) for p in parsed)
-    raw = cli_version(kind) or ""
-    parsed = parse_version(raw)
-    return ".".join(str(p) for p in parsed) if parsed else "unknown"
+    # The CLI's own --version first: the screen also shows other version-like
+    # numbers (a model name such as "DeepSeek V4.1" was taken for OpenCode 4.1).
+    for source in (cli_version(kind) or "", text):
+        parsed = parse_version(source)
+        if parsed:
+            return ".".join(str(p) for p in parsed)
+    return "unknown"
 
 
 def capture_screens(kinds: tuple[str, ...] = KINDS, *, socket: str | None = None,
-                    settle: float = 6.0, cwd: str | None = None) -> dict[str, Any]:
+                    settle: float = 6.0, cwd: str | None = None,
+                    save_fixtures: bool = False) -> dict[str, Any]:
     """Capture each CLI's start screen in a private tmux server (no prompt)."""
     results: dict[str, Any] = {}
     if shutil.which("tmux") is None:
@@ -187,15 +203,61 @@ def capture_screens(kinds: tuple[str, ...] = KINDS, *, socket: str | None = None
             if exe is None:
                 results[kind] = {"ok": False, "error": f"{kind} not installed"}
                 continue
-            results[kind] = _capture_one(kind, exe, socket, cwd, settle)
+            results[kind] = _capture_one(kind, exe, socket, cwd, settle,
+                                         save_fixtures=save_fixtures)
     finally:
         subprocess.run(["tmux", "-L", socket, "kill-server"],
                        capture_output=True, check=False)
     return results
 
 
-def _capture_one(kind: str, exe: str, socket: str, cwd: str, settle: float) -> dict[str, Any]:
-    name = "watch"
+# Folder-trust dialogs (the CLI asks before working in a folder it has not seen).
+TRUST_MARKERS = ("trust this folder", "accessing workspace", "is this a project you created",
+                 "do you trust")
+
+
+def _pane(base: list[str], name: str, escapes: bool = False) -> str:
+    args = [*base, "capture-pane", "-p", "-t", name]
+    if escapes:
+        args.insert(-2, "-e")
+    return subprocess.run(args, capture_output=True, text=True, check=False).stdout
+
+
+def _accept_trust(kind: str, base: list[str], name: str, settle: float) -> str | None:
+    """Get past a folder-trust dialog in our own throwaway folder.
+
+    The folder is crewhall-owned and empty (like a chat workspace, which crewhall
+    already trusts on the user's behalf). Claude's dialog is handled with its
+    known key sequence; for any other CLI the dialog is reported, never guessed.
+    Returns an error string when a dialog is still in the way.
+    """
+    deadline = time.monotonic() + settle
+    while time.monotonic() < deadline:
+        low = _pane(base, name).lower()
+        if any(marker in low for marker in TRUST_MARKERS):
+            if kind != "claude":
+                return (f"{kind} shows a folder-trust dialog in the watch folder; open {kind} "
+                        "there once and trust it, then re-run")
+            # The dialog is drawn before it accepts keys, and "No, exit" is the
+            # default: an Enter that lands before the Down registers closes
+            # Claude. Move down, *see* the selection on "Yes", only then confirm.
+            for _ in range(6):
+                subprocess.run([*base, "send-keys", "-t", name, "Down"], check=False)
+                time.sleep(0.5)
+                if trust_yes_selected(_pane(base, name)):
+                    subprocess.run([*base, "send-keys", "-t", name, "Enter"], check=False)
+                    time.sleep(settle)  # let the real TUI mount after the dialog
+                    return None
+            return "claude's folder-trust dialog did not accept the selection"
+        time.sleep(0.5)
+    return None
+
+
+def _capture_one(kind: str, exe: str, socket: str, cwd: str, settle: float,
+                 *, save_fixtures: bool = False) -> dict[str, Any]:
+    # One session per CLI, closed afterwards: reusing a single name made every
+    # CLI after the first fail with "duplicate session".
+    name = f"watch-{kind}"
     base = ["tmux", "-L", socket]
     started = subprocess.run(
         [*base, "-f", "/dev/null", "new-session", "-d", "-s", name,
@@ -204,22 +266,29 @@ def _capture_one(kind: str, exe: str, socket: str, cwd: str, settle: float) -> d
     )
     if started.returncode != 0:
         return {"ok": False, "error": f"could not start {kind}: {started.stderr.strip()}"}
-    time.sleep(settle)
-    plain = subprocess.run([*base, "capture-pane", "-p", "-t", name],
-                           capture_output=True, text=True, check=False).stdout
-    escaped = subprocess.run([*base, "capture-pane", "-p", "-e", "-t", name],
-                             capture_output=True, text=True, check=False).stdout
-    plain = _sanitize(plain)
-    escaped = _sanitize(escaped)
+    try:
+        blocked = _accept_trust(kind, base, name, settle)
+        if blocked:
+            return {"ok": False, "error": blocked}
+        plain = _sanitize(_pane(base, name))
+        escaped = _sanitize(_pane(base, name, escapes=True))
+    finally:
+        subprocess.run([*base, "kill-session", "-t", name], capture_output=True, check=False)
     report = screen_report(kind, plain, escaped)
     version = _version_label(kind, plain)
-    directory = screens_dir()
-    os.makedirs(directory, exist_ok=True)
-    path = os.path.join(directory, f"{kind}-{version}.txt")
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(plain)
-    return {"ok": not failing_detectors(report), "detectors": report,
-            "path": path, "version": version}
+    out: dict[str, Any] = {"ok": not failing_detectors(report), "detectors": report,
+                           "version": version}
+    for directory in (screens_dir(), fixtures_dir() if save_fixtures else None):
+        if not directory:
+            continue
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, f"{kind}-{version}.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(plain)
+        out.setdefault("path", path)
+        if directory != screens_dir():
+            out["fixture"] = path
+    return out
 
 
 def screens_ok(result: dict[str, Any]) -> bool:
@@ -287,10 +356,29 @@ def unit_dir() -> str:
     return os.path.join(base, "systemd", "user")
 
 
-def _write_units() -> list[str]:
+def available_units() -> tuple[list[str], dict[str, str]]:
+    """Units that can run here, and the skipped ones with the reason.
+
+    The smoke and soak runners live in ``scripts/`` of a git checkout; an installed
+    package (a managed install) does not ship them, so those timers would fail.
+    """
+    root = paths.project_root()
+    ok: list[str] = []
+    skipped: dict[str, str] = {}
+    for unit in WATCH_UNITS:
+        script = {"crewhall-watch-smoke": "smoke.py",
+                  "crewhall-watch-soak": "soak.py"}.get(unit)
+        if script and not os.path.isfile(os.path.join(root, "scripts", script)):
+            skipped[unit] = f"scripts/{script} is not available here (installed package)"
+        else:
+            ok.append(unit)
+    return ok, skipped
+
+
+def _write_units(units: list[str] | None = None) -> list[str]:
     os.makedirs(unit_dir(), exist_ok=True)
     paths_written = []
-    for unit in WATCH_UNITS:
+    for unit in units if units is not None else list(WATCH_UNITS):
         service = os.path.join(unit_dir(), f"{unit}.service")
         timer = os.path.join(unit_dir(), f"{unit}.timer")
         with open(service, "w", encoding="utf-8") as fh:
@@ -302,10 +390,11 @@ def _write_units() -> list[str]:
 
 
 def install_timers() -> dict[str, Any]:
-    files = _write_units()
+    units, skipped = available_units()
+    files = _write_units(units)
     reloaded = _systemctl("daemon-reload")
-    enabled = {unit: _systemctl("enable", "--now", f"{unit}.timer") for unit in WATCH_UNITS}
-    return {"files": files, "daemon_reload": reloaded, "enable": enabled}
+    enabled = {unit: _systemctl("enable", "--now", f"{unit}.timer") for unit in units}
+    return {"files": files, "daemon_reload": reloaded, "enable": enabled, "skipped": skipped}
 
 
 def remove_timers() -> dict[str, Any]:

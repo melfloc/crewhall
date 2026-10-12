@@ -600,6 +600,8 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--json", action="store_true")
     w.add_argument("--kinds", default=",".join(watch.KINDS),
                    help="comma-separated kinds (default: all)")
+    w.add_argument("--save-fixtures", action="store_true",
+                   help="also write the captures to tests/fixtures/screens (git checkout only)")
     w.set_defaults(func=cmd_watch)
     w = wsub.add_parser("install", help="install and enable the user systemd timers")
     w.add_argument("--remove", action="store_true", help="disable and remove the timers")

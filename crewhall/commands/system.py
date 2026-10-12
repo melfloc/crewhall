@@ -369,7 +369,8 @@ def cmd_watch(args: argparse.Namespace) -> int:
         return 0
     if action == "screens":
         kinds = tuple(k for k in (args.kinds or "").split(",") if k)
-        result = watch.capture_screens(kinds or watch.KINDS)
+        result = watch.capture_screens(kinds or watch.KINDS,
+                                       save_fixtures=getattr(args, "save_fixtures", False))
         if args.json:
             print(watch.as_json(result))
         else:

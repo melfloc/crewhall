@@ -85,6 +85,75 @@ class ScreenDetectors(unittest.TestCase):
         self.assertFalse(watch.screens_ok({}))
 
 
+class ScreenCapture(unittest.TestCase):
+    """Layer 2 against a (scripted) tmux: the bugs the real run exposed."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp(prefix="at-watch-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        patcher = mock.patch.object(health, "health_dir", return_value=self.tmp)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _tmux(self, screens):
+        """A fake ``subprocess.run`` for tmux: one screen per kind, records calls."""
+        calls = []
+
+        def run(args, **_k):
+            calls.append(list(args))
+            out = ""
+            if "capture-pane" in args:
+                target = args[args.index("-t") + 1]
+                out = screens.get(target.removeprefix("watch-"), "")
+            return mock.Mock(returncode=0, stdout=out, stderr="")
+        return calls, run
+
+    def test_each_cli_gets_its_own_session_and_captures_stay_out_of_the_repo(self):
+        screens = {k: _fixture(k, "ready.txt") for k in ("claude", "codex", "opencode")}
+        calls, run = self._tmux(screens)
+        with mock.patch.object(watch.subprocess, "run", side_effect=run), \
+                mock.patch.object(watch.shutil, "which", side_effect=lambda k: f"/bin/{k}"), \
+                mock.patch.object(watch, "cli_version", return_value="9.9.9"), \
+                mock.patch.object(watch.time, "sleep"):
+            result = watch.capture_screens(settle=0.01)
+        sessions = [c[c.index("-s") + 1] for c in calls if "new-session" in c]
+        self.assertEqual(sessions, ["watch-claude", "watch-codex", "watch-opencode"])
+        for kind, out in result.items():
+            self.assertTrue(out["path"].startswith(self.tmp), out)   # state dir, not the repo
+            self.assertTrue(out["path"].endswith(f"{kind}-9.9.9.txt"))  # --version, not the screen
+
+    def test_version_label_prefers_the_cli_over_numbers_on_screen(self):
+        with mock.patch.object(watch, "cli_version", return_value="opencode 1.19.0"):
+            self.assertEqual(watch._version_label("opencode", "DeepSeek V4.1 Flash"), "1.19.0")
+
+    def test_trust_dialog_is_confirmed_only_once_yes_is_selected(self):
+        no = " \u276f No, exit\n   Yes, I trust this folder\n Accessing workspace:"
+        yes = "   No, exit\n \u276f Yes, I trust this folder\n Accessing workspace:"
+        # The first DOWN is swallowed (dialog not interactive yet), the second lands.
+        frames = iter([no, no, yes])
+        sent = []
+
+        def run(args, **_k):
+            if "send-keys" in args:
+                sent.append(args[-1])
+            screen = next(frames, yes) if "capture-pane" in args else ""
+            return mock.Mock(returncode=0, stdout=screen, stderr="")
+
+        with mock.patch.object(watch.subprocess, "run", side_effect=run), \
+                mock.patch.object(watch.time, "sleep"):
+            self.assertIsNone(watch._accept_trust("claude", ["tmux"], "watch-claude", 1.0))
+        self.assertEqual(sent, ["Down", "Down", "Enter"])  # never Enter while "No" is selected
+
+    def test_other_clis_trust_dialog_is_reported_not_guessed(self):
+        def run(args, **_k):
+            return mock.Mock(returncode=0, stdout="Do you trust the files in this folder?",
+                             stderr="")
+        with mock.patch.object(watch.subprocess, "run", side_effect=run), \
+                mock.patch.object(watch.time, "sleep"):
+            err = watch._accept_trust("codex", ["tmux"], "watch-codex", 1.0)
+        self.assertIn("folder-trust dialog", err)
+
+
 class WatchInstall(unittest.TestCase):
     """Layer 7: `watch install` writes and removes the user timers."""
 
@@ -117,3 +186,14 @@ class WatchInstall(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WatchUnitsOnAnInstall(unittest.TestCase):
+    def test_runner_timers_are_skipped_without_scripts(self):
+        tmp = tempfile.mkdtemp(prefix="at-root-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with mock.patch.object(watch.paths, "project_root", return_value=tmp):
+            units, skipped = watch.available_units()
+        self.assertEqual(units, ["crewhall-watch-versions"])
+        self.assertEqual(set(skipped), {"crewhall-watch-smoke", "crewhall-watch-soak"})
+
