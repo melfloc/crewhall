@@ -24,6 +24,19 @@ class ClaudeSandbox(unittest.TestCase):
         self.assertTrue(any(paths.state_dir() in rule for rule in deny))
         self.assertTrue(any("Read(" in rule for rule in deny))
 
+    def test_deny_rules_cover_the_token_with_absolute_paths(self) -> None:
+        # Regression: rules written as ``Read(/home/...)`` are anchored at the
+        # settings file, not at ``/``, and the token (no extension, in the state
+        # dir) was not covered at all.
+        deny = hooks.claude_settings()["permissions"]["deny"]
+        token = paths.control_token_path()
+        self.assertIn(f"Read(/{token})", deny)
+        self.assertIn(f"Edit(/{token})", deny)
+        for rule in deny:
+            tool, _, rest = rule.partition("(")
+            self.assertIn(tool, ("Read", "Edit"), rule)  # Write(path) is ignored by Claude
+            self.assertTrue(rest.startswith("//"), rule)
+
     def test_generated_file_carries_the_deny(self) -> None:
         path = hooks.ensure_claude_settings()
         with open(path, encoding="utf-8") as fh:

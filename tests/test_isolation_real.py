@@ -55,6 +55,17 @@ class ControlTokenIsolated(unittest.TestCase):
             data = json.load(fh)
         deny = data.get("permissions", {}).get("deny", [])
         self.assertTrue(any(paths.runtime_dir() in rule for rule in deny))
+        # The control token itself is covered, for both path tools.
+        token = paths.control_token_path()
+        self.assertIn(f"Read(/{token})", deny)
+        self.assertIn(f"Edit(/{token})", deny)
+        for rule in deny:
+            tool, _, rest = rule.partition("(")
+            # Claude only consults Read/Edit for paths (Write(path) is ignored
+            # and warned about), and an absolute path needs ``//``: a single
+            # leading ``/`` is anchored at the settings file, not at ``/``.
+            self.assertIn(tool, ("Read", "Edit"), rule)
+            self.assertTrue(rest.startswith("//"), rule)
 
 
 if __name__ == "__main__":

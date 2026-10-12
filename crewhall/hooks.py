@@ -78,33 +78,39 @@ def claude_settings(remote: bool = False) -> dict:
             "timeout": PERMISSION_HOOK_TIMEOUT,
         }],
     }]
-    # D1: deny the agent's own file tools access to crewhall's private control
-    # state (the control token lives in the runtime dir; the state dir holds the
-    # control files). The chat workspace under state/conversations/ is left
-    # readable — that is the agent's own working directory. See SECURITY.md for
-    # the exact strength per provider.
+    # D1: deny the agent's file tools (and the file commands Claude recognises in
+    # Bash: cat, head, tail, sed, tee, redirections) access to crewhall's private
+    # control state: the control token and control files in the state dir, and
+    # the runtime dir (daemon log/pid). The chat workspace under
+    # state/conversations/ stays readable: it is the agent's own working dir.
+    #
+    # Claude Code path rules: ``//abs/path`` is absolute; a single leading ``/``
+    # is anchored at the settings source (NOT the filesystem root), so it must
+    # never be used here. Only ``Read``/``Edit`` rules are consulted for paths
+    # (a ``Write(path)`` rule is ignored and warned about at startup).
     deny = settings.setdefault("permissions", {}).setdefault("deny", [])
-    state = paths.state_dir()
-    runtime = paths.runtime_dir()
-    for pattern in (
-        f"Read({runtime}/**)",
-        f"Write({runtime}/**)",
-        f"Edit({runtime}/**)",
-        f"Read({state}/*.json)",
-        f"Read({state}/*.jsonl)",
-        f"Write({state}/*.json)",
-        f"Write({state}/*.jsonl)",
-        f"Edit({state}/*.json)",
-        f"Edit({state}/*.jsonl)",
-        f"Read({state}/hooks/**)",
-        f"Write({state}/hooks/**)",
-        f"Read({state}/mcp/**)",
-        f"Write({state}/mcp/**)",
-        f"Read({state}/backups/**)",
-        f"Read({state}/launch/**)",
-    ):
-        deny.append(pattern)
+    state = paths.state_dir().rstrip("/")
+    runtime = paths.runtime_dir().rstrip("/")
+    for target in claude_deny_targets(state, runtime):
+        for tool in ("Read", "Edit"):
+            rule = f"{tool}(/{target})"
+            if rule not in deny:
+                deny.append(rule)
     return settings
+
+
+def claude_deny_targets(state: str, runtime: str) -> list[str]:
+    """Absolute paths (or globs) an agent's file tools must not touch (D1)."""
+    return [
+        f"{state}/control-token",
+        f"{state}/*.json",
+        f"{state}/*.jsonl",
+        f"{state}/hooks/**",
+        f"{state}/mcp/**",
+        f"{state}/backups/**",
+        f"{state}/launch/**",
+        f"{runtime}/**",
+    ]
 
 
 def remote_claude_settings_json() -> str:

@@ -38,25 +38,36 @@ care about:
   An agent that deliberately escapes both checks (`setsid`/double fork *and* a
   scrubbed environment) runs as you and, without the CLI sandbox below, could
   read the `control-token` file.
-- **Isolation (D1)**: on top of the guard, crewhall asks each provider's own
-  sandbox to deny its file tools access to crewhall's private state. The
-  generated Claude settings (`--settings`, `hooks.ensure_claude_settings`) carry
-  `permissions.deny` rules for `$XDG_RUNTIME_DIR/crewhall/**` (where the control
-  token and sockets live) and for the control files under
-  `$XDG_STATE_HOME/crewhall/` (`*.json`, `*.jsonl`, `hooks/`, `mcp/`, `backups/`,
-  `launch/`). The chat workspace (`state/conversations/`) stays readable: it is
-  the agent's own working directory.
-  - **Claude Code**: enforced through `permissions.deny` in the settings file
-    crewhall already passes with `--settings`.
+- **Isolation (D1)**: on top of the guard, crewhall asks each provider to keep
+  its agent away from crewhall's private state. The generated Claude settings
+  (`--settings`, `hooks.ensure_claude_settings`) carry `permissions.deny` rules
+  (`Read` and `Edit`, absolute `//` paths) for the control token
+  (`$XDG_STATE_HOME/crewhall/control-token`), the control files next to it
+  (`*.json`, `*.jsonl`, `hooks/`, `mcp/`, `backups/`, `launch/`) and the runtime
+  dir (`$XDG_RUNTIME_DIR/crewhall/**`: socket, log, pid). The chat workspace
+  (`state/conversations/`) stays readable: it is the agent's own working
+  directory.
+  - **Claude Code, what this blocks**: Claude's own file tools and the file
+    commands Claude Code recognises in Bash (`cat`, `head`, `tail`, `sed`, `tee`,
+    redirections). **What it does not block**: a script the agent runs that
+    opens the file itself (for example `python -c "open(...)"`), or a command
+    that reads it without naming it. Per Claude Code's own documentation only
+    its **sandbox** (`sandbox.enabled`) enforces paths at the OS level for every
+    subprocess. crewhall does not enable it for you, because it also restricts
+    the agent's network and writes; enable it in your Claude settings if you
+    need a hard boundary.
   - **OpenCode / Codex**: use their own permission/sandbox configuration; when
     their sandbox is off (Codex is launched with `--dangerously-bypass-approvals
     -and-sandbox` for interactivity), isolation degrades to the control-plane
     guard. Enable the provider sandbox and restrict its writable roots to your
     project for a hard boundary.
-  - The agent-ops socket must remain reachable (the MCP server connects to it),
-    so the runtime *directory* is denied to the file tools, not the socket path
-    itself. A real end-to-end check (an agent trying to read `control-token`)
-    runs in the nightly real-agents job.
+  - The deny rules only cover file access. The agent-ops socket stays usable
+    (it is how `crewhall message send` and the MCP server work), and the guard
+    above keeps control ops off it. A real end-to-end check (a Claude agent
+    asked to read `control-token`) runs in the nightly real-agents job.
+  - **Bottom line**: against a confused or prompt-injected agent this is a solid
+    barrier; against an agent deliberately working around it, only an OS sandbox
+    (provider sandbox, a separate Unix user or a container) is a boundary.
 - **Web UI**: authenticated (token/session) unless bound to localhost and the
   token requirement is off; Host/Origin allow-lists; strict security headers and
   CSP; per-IP login throttling; no inline scripts/styles.
