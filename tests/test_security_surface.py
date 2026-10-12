@@ -33,25 +33,31 @@ class ClaudeSandbox(unittest.TestCase):
 
 
 class OfficeBaseUrl(unittest.TestCase):
-    """D2: office_collab_open must not accept an arbitrary base."""
+    """D2: office_collab_open must not accept an arbitrary agent base."""
 
-    def test_unconfigured_rejects_arbitrary_base(self) -> None:
+    def test_agent_base_unconfigured_rejects_arbitrary(self) -> None:
         with mock.patch("crewhall.settings.get", return_value=""):
-            self.assertEqual(office.base_url("http://evil.example"), "")
+            self.assertEqual(office.agent_base("http://evil.example"), "")
 
-    def test_same_origin_is_accepted(self) -> None:
+    def test_agent_base_same_origin_is_accepted(self) -> None:
         values = {"office.base_url": "", "web.public_url": "",
                   "office.public_url": "http://127.0.0.1:8081"}
         with mock.patch("crewhall.settings.get",
                         side_effect=lambda k, d=None: values.get(k, d)):
-            self.assertEqual(office.base_url("http://127.0.0.1:8081"),
+            self.assertEqual(office.agent_base("http://127.0.0.1:8081"),
                              "http://127.0.0.1:8081")
-            self.assertEqual(office.base_url("http://evil.example"), "")
+            self.assertEqual(office.agent_base("http://evil.example"), "")
 
-    def test_configured_base_wins(self) -> None:
+    def test_agent_base_configured_wins(self) -> None:
         with mock.patch("crewhall.settings.get",
                         side_effect=lambda k, d=None: "http://cfg" if k == "office.base_url" else d):
-            self.assertEqual(office.base_url("http://evil.example"), "http://cfg")
+            self.assertEqual(office.agent_base("http://evil.example"), "http://cfg")
+
+    def test_web_base_url_still_trusts_the_request(self) -> None:
+        # The Web UI passes its own request base; that is legitimate.
+        with mock.patch("crewhall.settings.get", return_value=""):
+            self.assertEqual(office.base_url("http://127.0.0.1:9999"),
+                             "http://127.0.0.1:9999")
 
 
 class _ControllerCase(unittest.TestCase):

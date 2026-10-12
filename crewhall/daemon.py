@@ -893,7 +893,7 @@ class Server:
         if not ok:
             raise ValueError(f"the artifact is not a valid {os.path.splitext(path)[1]} file "
                              f"({why}); regenerate it before co-editing it")
-        base = office.base_url(str(request.get("base") or ""))
+        base = office.agent_base(str(request.get("base") or ""))
         if not base:
             raise ValueError("office.base_url (or web.public_url) must be set "
                              "so the Document Server can fetch the document")

@@ -71,9 +71,24 @@ def public_url() -> str:
 def base_url(request_base: str = "") -> str:
     """Base URL the Document Server uses to reach crewhall.
 
-    Only a *configured* base is trusted. A caller-supplied ``request_base`` is
-    accepted just when its origin matches the configured Document Server, so an
-    agent cannot make crewhall hand the editor an arbitrary URL (D2).
+    ``request_base`` is the caller's own origin. The Web UI passes its own
+    (trusted) request base here; an agent-supplied base must go through
+    :func:`agent_base` instead (D2).
+    """
+    configured = str(settings.get("office.base_url") or "").rstrip("/")
+    if configured:
+        return configured
+    web = str(settings.get("web.public_url") or "").rstrip("/")
+    if web:
+        return web
+    return request_base.rstrip("/")
+
+
+def agent_base(request_base: str = "") -> str:
+    """Like :func:`base_url` but never trusts an arbitrary agent-supplied base.
+
+    Only a configured base, or a caller base whose origin matches the configured
+    Document Server, is accepted; anything else is refused (empty).
     """
     configured = str(settings.get("office.base_url") or "").rstrip("/")
     if configured:
