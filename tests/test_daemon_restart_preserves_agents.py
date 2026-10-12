@@ -33,7 +33,7 @@ class DaemonStopCli(unittest.TestCase):
 
         client = _FakeClient()
         args = argparse.Namespace(action="stop", kill_agents=kill_agents)
-        with mock.patch.object(cli, "_client", return_value=client):
+        with mock.patch("crewhall.commands.common._client", return_value=client):
             rc = cli.cmd_daemon(args)
         self.assertEqual(rc, 0)
         op, kwargs = client.calls[0]

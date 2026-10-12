@@ -81,7 +81,7 @@ class HostStatusTests(unittest.TestCase):
                   "tunnel_state": "connected", "state": "ok", "agents": 2, "checked_at": None}]
         client = mock.Mock()
         client.call.return_value = {"hosts": hosts}
-        with mock.patch.object(cli, "_client", return_value=client):
+        with mock.patch("crewhall.commands.common._client", return_value=client):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 cli.cmd_host_list(SimpleNamespace(json=False))

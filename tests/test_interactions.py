@@ -325,8 +325,8 @@ class ClaudeHookWiring(unittest.TestCase):
         client.call.return_value = response
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"CREWHALL_AGENT_ID": "a1", "CREWHALL_TOKEN": "t"}), \
-                mock.patch.object(cli, "_client", lambda args: client), \
-                mock.patch.object(cli, "_hook_payload", lambda: dict(BASH)), \
+                mock.patch("crewhall.commands.common._client", lambda args: client), \
+                mock.patch("crewhall.commands.agents._hook_payload", lambda: dict(BASH)), \
                 mock.patch("sys.stdout", out):
             code = cli.cmd_agent_hook(mock.Mock(event="permission_request"))
         return code, out.getvalue(), client
@@ -348,8 +348,8 @@ class ClaudeHookWiring(unittest.TestCase):
         client.call.return_value = response
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"CREWHALL_AGENT_ID": "a1", "CREWHALL_TOKEN": "t"}), \
-                mock.patch.object(cli, "_client", lambda args: client), \
-                mock.patch.object(cli, "_hook_payload", lambda: dict(ASK)), \
+                mock.patch("crewhall.commands.common._client", lambda args: client), \
+                mock.patch("crewhall.commands.agents._hook_payload", lambda: dict(ASK)), \
                 mock.patch("sys.stdout", out):
             code = cli.cmd_agent_hook(mock.Mock(event="question_request"))
         return code, out.getvalue()

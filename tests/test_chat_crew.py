@@ -136,7 +136,7 @@ class ChatCrew(unittest.TestCase):
                "CREWHALL_CONVERSATION": self.conv["id"]}
         args = argparse.Namespace(path=src, conversation=None, name=None, socket=None)
         with mock.patch.dict(os.environ, env), \
-                mock.patch.object(cli, "_client", lambda _a: _Client()):
+                mock.patch("crewhall.commands.common._client", lambda _a: _Client()):
             self.assertEqual(cli.cmd_chat_publish(args), 0)
         op, params = calls[0]
         self.assertEqual(op, "conversation_publish")

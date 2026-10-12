@@ -112,7 +112,7 @@ class CliTestCase(unittest.TestCase):
                 client: FakeClient | None = None) -> tuple[int, str, str, FakeClient]:
         client = client or FakeClient(responses)
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(cli, "_client", return_value=client):
+        with mock.patch("crewhall.commands.common._client", return_value=client):
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 try:
                     rc = cli.main(argv)
@@ -924,7 +924,7 @@ class BundleTest(CliTestCase):
     def test_export(self) -> None:
         with mock.patch("crewhall.bundle.export_bundle",
                         return_value={"path": "/tmp/b.tar.gz", "files": ["profiles.toml"]}), \
-                mock.patch.object(cli, "Client",
+                mock.patch("crewhall.commands.system.Client",
                                   return_value=mock.MagicMock(
                                       call=mock.MagicMock(return_value={"teams": []}))):
             rc, out, _e, _c = self.run_cli(["bundle", "export", "/tmp/b.tar.gz",
@@ -943,7 +943,7 @@ class BundleTest(CliTestCase):
     def test_export_daemon_down(self) -> None:
         with mock.patch("crewhall.bundle.export_bundle",
                         return_value={"path": "/tmp/b.tar.gz", "files": []}), \
-                mock.patch.object(cli, "Client",
+                mock.patch("crewhall.commands.system.Client",
                                   side_effect=RuntimeError("no daemon")):
             rc, _o, err, _c = self.run_cli(["bundle", "export", "/tmp/b.tar.gz"])
         self.assertEqual(rc, 0)
@@ -991,13 +991,13 @@ class BundleTest(CliTestCase):
 
 class AgentHookTest(CliTestCase):
     def test_requires_agent(self) -> None:
-        with mock.patch.object(cli, "_hook_payload", return_value={}):
+        with mock.patch("crewhall.commands.agents._hook_payload", return_value={}):
             rc, _o, _e, _c = self.run_cli(["agent", "hook", "session_start"])
         self.assertEqual(rc, 2)
 
     def test_lifecycle_event(self) -> None:
         with self.env(CREWHALL_AGENT_ID="a", CREWHALL_TOKEN="t"), \
-                mock.patch.object(cli, "_hook_payload", return_value={"session_id": "c1"}):
+                mock.patch("crewhall.commands.agents._hook_payload", return_value={"session_id": "c1"}):
             rc, _o, _e, c = self.run_cli(["agent", "hook", "session_start"])
         self.assertEqual(rc, 0)
         _op, kw = c.calls[0]
@@ -1006,7 +1006,7 @@ class AgentHookTest(CliTestCase):
     def test_permission_request_decision(self) -> None:
         decision = {"behavior": "allow"}
         with self.env(CREWHALL_AGENT_ID="a"), \
-                mock.patch.object(cli, "_hook_payload", return_value={}):
+                mock.patch("crewhall.commands.agents._hook_payload", return_value={}):
             rc, out, _e, _c = self.run_cli(
                 ["agent", "hook", "permission_request"],
                 {"agent_permission_request": {"decision": decision}},
@@ -1016,7 +1016,7 @@ class AgentHookTest(CliTestCase):
 
     def test_permission_request_exception(self) -> None:
         with self.env(CREWHALL_AGENT_ID="a"), \
-                mock.patch.object(cli, "_hook_payload", return_value={}):
+                mock.patch("crewhall.commands.agents._hook_payload", return_value={}):
             rc, out, _e, _c = self.run_cli(
                 ["agent", "hook", "permission_request"],
                 {"agent_permission_request": RuntimeError("boom")},
@@ -1027,7 +1027,7 @@ class AgentHookTest(CliTestCase):
     def test_question_allow(self) -> None:
         decision = {"behavior": "allow", "updatedInput": {"x": 1}}
         with self.env(CREWHALL_AGENT_ID="a"), \
-                mock.patch.object(cli, "_hook_payload", return_value={}):
+                mock.patch("crewhall.commands.agents._hook_payload", return_value={}):
             rc, out, _e, _c = self.run_cli(
                 ["agent", "hook", "question_request"],
                 {"agent_permission_request": {"decision": decision}},
@@ -1038,7 +1038,7 @@ class AgentHookTest(CliTestCase):
     def test_question_deny(self) -> None:
         decision = {"behavior": "deny", "message": "no"}
         with self.env(CREWHALL_AGENT_ID="a"), \
-                mock.patch.object(cli, "_hook_payload", return_value={}):
+                mock.patch("crewhall.commands.agents._hook_payload", return_value={}):
             rc, out, _e, _c = self.run_cli(
                 ["agent", "hook", "question_request"],
                 {"agent_permission_request": {"decision": decision}},
@@ -1047,7 +1047,7 @@ class AgentHookTest(CliTestCase):
 
     def test_question_exception(self) -> None:
         with self.env(CREWHALL_AGENT_ID="a"), \
-                mock.patch.object(cli, "_hook_payload", return_value={}):
+                mock.patch("crewhall.commands.agents._hook_payload", return_value={}):
             rc, out, _e, _c = self.run_cli(
                 ["agent", "hook", "question_request"],
                 {"agent_permission_request": RuntimeError("boom")},
@@ -1057,7 +1057,7 @@ class AgentHookTest(CliTestCase):
 
     def test_question_no_decision(self) -> None:
         with self.env(CREWHALL_AGENT_ID="a"), \
-                mock.patch.object(cli, "_hook_payload", return_value={}):
+                mock.patch("crewhall.commands.agents._hook_payload", return_value={}):
             rc, out, _e, _c = self.run_cli(
                 ["agent", "hook", "question_request"],
                 {"agent_permission_request": {}},
@@ -1318,7 +1318,7 @@ class DaemonTest(CliTestCase):
             path = fh.name
         self.addCleanup(os.unlink, path)
         with mock.patch.object(cli.paths, "log_path", return_value=path), \
-                mock.patch.object(cli, "_follow_log", return_value=0) as follow:
+                mock.patch("crewhall.commands.system._follow_log", return_value=0) as follow:
             rc, _o, _e, _c = self.run_cli(["daemon", "logs", "--follow"])
         self.assertEqual(rc, 0)
         self.assertTrue(follow.called)
@@ -1334,8 +1334,8 @@ class DaemonTest(CliTestCase):
         server = mock.MagicMock()
         server.socket_path = "/tmp/sock"
         server.serve_forever.side_effect = KeyboardInterrupt
-        with mock.patch.object(cli, "Controller", return_value=mock.MagicMock()), \
-                mock.patch.object(cli, "Server", return_value=server):
+        with mock.patch("crewhall.commands.system.Controller", return_value=mock.MagicMock()), \
+                mock.patch("crewhall.commands.system.Server", return_value=server):
             rc, out, _e, _c = self.run_cli(["daemon", "run"])
         self.assertEqual(rc, 0)
         self.assertIn("crewhall daemon on", out)
@@ -1631,15 +1631,15 @@ class MiscTest(CliTestCase):
             def close(self):
                 pass
 
-        with mock.patch.object(cli, "available", return_value=["pty"]), \
+        with mock.patch("crewhall.commands.system.available", return_value=["pty"]), \
                 mock.patch("crewhall.backends.get_backend", return_value=object()), \
-                mock.patch.object(cli, "InteractiveSession", FakeDemoSession):
+                mock.patch("crewhall.commands.system.InteractiveSession", FakeDemoSession):
             rc, out, _e, _c = self.run_cli(["demo"])
         self.assertEqual(rc, 0)
         self.assertIn("captured: HELLO_FROM_42", out)
 
     def test_default_client(self) -> None:
-        with mock.patch.object(cli, "Client") as client_cls:
+        with mock.patch("crewhall.commands.common.Client") as client_cls:
             cli._client(__import__("argparse").Namespace())
         self.assertTrue(client_cls.called)
 
