@@ -5,6 +5,40 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.81.0] — 2026-10-12
+
+**Vigilancia en el tiempo.** crewhall depende de cómo dibujan su pantalla Claude
+Code, OpenCode y Codex; estas capas detectan a tiempo que una actualización de
+uno de ellos lo rompe.
+
+- `crewhall watch versions`: compara las versiones de los CLIs con las de la
+  última vez y, si cambian, lanza el canario de pantallas y avisa en el escritorio.
+- `crewhall watch screens`: arranca cada CLI en un tmux privado (sin enviar
+  prompts, sin coste), pasa los detectores de su adaptador y guarda la captura
+  en `state/health/screens/` (`--save-fixtures` la copia a los fixtures desde
+  el repo).
+- `crewhall watch install [--remove]`: timers de systemd de usuario (versiones a
+  diario; smoke diario y soak semanal cuando se ejecuta desde el repo).
+- `scripts/soak.py`: prueba de resistencia con agentes reales (mensajes,
+  borradores, reinicios del daemon, un agente que muere) y sus invariantes.
+- Diario de salud del daemon (`state/health/journal.jsonl`, cada 10 min) y
+  `crewhall doctor --trend`.
+- Fixtures de estado, cola e historial por versión: cada versión nueva debe
+  cargar los de las anteriores.
+
+**Arreglos**
+- `ESC` ya no se usa para limpiar el input: en los tres CLIs es la tecla de
+  interrumpir, y enviada a un agente ocupado se comía los primeros caracteres
+  del mensaje siguiente (`[from: …` llegaba como `rom: …`). Ahora `Ctrl+U`.
+- El diálogo de confianza de carpeta de Claude solo se confirma cuando "Yes" está
+  seleccionado (antes un `ENTER` adelantado podía elegir "No, exit" y cerrar el
+  agente de un chat).
+
+**Interno.** `cli.py`, `daemon.py` y `controller.py` se dividieron en
+`commands/`, `ops/` y `services/` (ningún archivo del núcleo supera las 800
+líneas), sin cambios en las operaciones del socket, la API de `Controller` ni los
+comandos (verificado por comparación automática).
+
 ## [0.80.4] — 2026-10-12
 
 - **Una actualización con agentes vivos ya no revierte sola.** Al parar el
