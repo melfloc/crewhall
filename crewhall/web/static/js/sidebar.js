@@ -144,10 +144,11 @@ function render(){
     if(filtering && !shown.length) return;
     const collapsed = S.collapsed.has(t.team_id) && !filtering;
     const working = members.filter(m => m.state === "working").length;
+    const leadSet = new Set(t.leads||[]);
     const body = el("div", {className:"team-body"},
       t.workspace || t.host ? el("div", {className:"team-ws", style:"padding:6px 8px 4px", title:t.host ? `${t.host}:${t.workspace||""}` : t.workspace},
         ic("folder","sm"), " ", t.host ? `${t.host}:${t.workspace||"~"}` : t.workspace) : null,
-      orderAgents(shown, t.team_id).map(a => dndAgentRow(a, t.team_id)), !members.length ? el("div", {className:"empty-side"}, "No members yet") : null,
+      orderAgents(shown, t.team_id).map(a => dndAgentRow(a, t.team_id, leadSet.has(a.agent_id))), !members.length ? el("div", {className:"empty-side"}, "No members yet") : null,
       t.missing?.length ? el("div", {className:"team-missing"}, `× ${t.missing.join(", ")} (missing)`) : null);
     const more = el("button", {className:"btn icon sm ghost", type:"button", "aria-label":`Actions for team ${t.name}`, title:"Team actions",
       onclick:(e)=>{ e.stopPropagation(); openMenu(more, [
@@ -155,6 +156,7 @@ function render(){
         {label:"Mission control", icon:"activity", run:()=>openMission(t.team_id)},
         {label:"Add members…", icon:"users", run:()=>teamAction("add-members", t.team_id)},
         {label:"Remove members…", icon:"x", run:()=>teamAction("rm-members", t.team_id)},
+        {label:"Set leads…", icon:"user", run:()=>teamAction("set-leads", t.team_id)},
         {label:"Set workspace…", icon:"folder", run:()=>teamAction("set-ws", t.team_id)}, "-",
         {label:"Delete team", icon:"trash", danger:true, run:()=>teamAction("rm-team", t.team_id)}]); }}, ic("more","sm"));
     const head = el("div", {className:"team-head", role:"button", tabIndex:0, "aria-expanded":!collapsed,
@@ -167,6 +169,7 @@ function render(){
       ic("chev","sm chev"),
       el("div", {className:"team-title"}, el("div", {className:"team-name"}, el("span", {className:"nm"}, t.name),
         el("span", {className:"chip"}, members.length),
+        leadSet.size ? el("span", {className:"chip", title:`leads: ${[...leadSet].map(id=>{const m=agentById(id);return m?m.name||id:id;}).join(", ")}`}, "lead", leadSet.size > 1 ? " " + leadSet.size : null) : null,
         working ? el("span", {className:"chip", style:"color:var(--work)", title:`${working} working`}, dot("working"), working) : null)),
       more);
     const teamEl = el("div", {className:"team" + (collapsed ? " collapsed" : ""), dataset:{team:t.team_id},
@@ -220,7 +223,7 @@ function subNodes(a){
   if(st === "working" && !x.detail) out.push(" ", timerSpan(a));
   return out;
 }
-function agentRow(a){
+function agentRow(a, lead){
   const st = a.state || "unknown", sel = a.agent_id === S.selected;
   const recent = S.doneAt[a.agent_id] && Date.now() - S.doneAt[a.agent_id] < 2400;
   const n = (a.interactions||[]).length;
@@ -234,13 +237,14 @@ function agentRow(a){
       oncontextmenu:(e)=>{ e.preventDefault(); openMenu(more, agentMenu(a)); }},
     el("span", {className:`avatar ${st}`, style:`--h:${hue(a.kind||a.name)}`}, (a.name||a.agent_id||"?").trim().charAt(0) || "?",
       el("span", {className:"st"}, dot(st, actOf(a).kind))),
-    el("span", {className:"info"}, el("span", {className:"nm", title:a.name||a.agent_id}, a.name||a.agent_id),
+    el("span", {className:"info"}, el("span", {className:"nm", title:a.name||a.agent_id}, a.name||a.agent_id,
+        lead ? el("span", {className:"chip", title:"team lead"}, "lead") : null),
       el("span", {className:"sub"}, el("span", {className:"mono", style:"opacity:.8"}, a.kind), el("span", {style:"opacity:.5"}, "·"), el("span", {className:"act", title:actText(a), style:"overflow:hidden;text-overflow:ellipsis"}, ...sub))),
     n ? el("span", {className:"badge pulse", title:"waiting for your answer"}, n) : null, more);
   return row;
 }
-function dndAgentRow(a, key){
-  const row = agentRow(a);
+function dndAgentRow(a, key, lead){
+  const row = agentRow(a, lead);
   row.draggable = true;
   row.addEventListener("dragstart", (e)=>dragStart(e, "agent", a.agent_id));
   row.addEventListener("dragend", dragEnd);

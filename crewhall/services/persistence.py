@@ -90,6 +90,16 @@ class ServicesPersistence:
                 except Exception:  # noqa: BLE001 - a stale membership is skipped
                     log.debug("could not restore membership of %s in %s",
                               agent_id, team.get("team_id"), exc_info=True)
+        # Leads reference members, so they can only be restored once membership
+        # exists. Old state has no "leads" key: that just means no leads.
+        for team in data.get("teams", []):
+            leads = team.get("leads") or []
+            if not leads:
+                continue
+            try:
+                self.teams.set_leads(team["team_id"], list(leads))
+            except Exception:  # noqa: BLE001 - a stale lead is skipped
+                log.debug("could not restore leads of %s", team.get("team_id"), exc_info=True)
         # Resume messages that were still queued when the daemon stopped. The
         # recipients exist as EXITED entities; the queue worker revives them.
         if self._pending_store is not None:

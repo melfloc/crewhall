@@ -199,4 +199,12 @@ def parse_team_data(
         workspace = os.path.expanduser(workspace)
         if not os.path.isabs(workspace):
             workspace = os.path.join(base, workspace)
-    return {"name": team["name"], "workspace": workspace, "host": team_host, "agents": out}
+    raw_leads = team.get("leads") or []
+    if not isinstance(raw_leads, list) or not all(isinstance(x, str) and x for x in raw_leads):
+        raise SpecError("[team] leads must be a list of agent names")
+    names = {entry["name"] for entry in out}
+    for lead in raw_leads:
+        if lead not in names:
+            raise SpecError(f"[team] lead {lead!r} is not one of the team's agents")
+    return {"name": team["name"], "workspace": workspace, "host": team_host,
+            "leads": list(raw_leads), "agents": out}

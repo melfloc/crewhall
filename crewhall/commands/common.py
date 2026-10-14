@@ -89,17 +89,20 @@ def _print_delivery(delivery: dict[str, Any]) -> None:
 def _print_team(team: dict[str, Any]) -> None:
     members = team.get("members", [])
     missing = team.get("missing", [])
+    leads = set(team.get("leads") or [])
     where = f"  host={team['host']}" if team.get("host") else ""
     ws = f"  workspace={team['workspace']}" if team.get("workspace") else ""
     print(f"● {team['team_id']}  name={team['name']}  members={len(members)}{where}{ws}")
     for member in members:
         name = member.get("name") or "-"
+        badge = "  [lead]" if member["agent_id"] in leads else ""
         print(
             f"    ● {member['agent_id']}  name={name}  "
-            f"kind={member['kind']}  state={member['state']}"
+            f"kind={member['kind']}  state={member['state']}{badge}"
         )
     for agent_id in missing:
-        print(f"    ○ {agent_id}  (missing)")
+        badge = "  [lead]" if agent_id in leads else ""
+        print(f"    ○ {agent_id}  (missing){badge}")
 
 
 def _print_terminal(info: dict[str, Any]) -> None:

@@ -37,6 +37,10 @@ class OpsTeams(OpsBase):
         team = self.controller.remove_team_member(request["target"], request["agent"])
         return {"team": self.controller.team_info(team.team_id)}
 
+    def _op_team_set_leads(self, request: dict[str, Any]) -> dict[str, Any]:
+        team = self.controller.set_team_leads(request["target"], request.get("agents") or [])
+        return {"team": self.controller.team_info(team.team_id)}
+
     def _op_team_set_workspace(self, request: dict[str, Any]) -> dict[str, Any]:
         extra = {"host": request["host"] or None} if "host" in request else {}
         team = self.controller.set_team_workspace(

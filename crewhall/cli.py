@@ -43,7 +43,7 @@ from .commands.system import (
 )
 from .commands.teams import (
     cmd_team_add_member, cmd_team_create, cmd_team_info, cmd_team_list, cmd_team_remove,
-    cmd_team_remove_member, cmd_team_set_workspace, cmd_team_up,
+    cmd_team_remove_member, cmd_team_set_leads, cmd_team_set_workspace, cmd_team_up,
 )
 from .commands.terminals import (
     cmd_terminal_attach, cmd_terminal_capture, cmd_terminal_close, cmd_terminal_key,
@@ -430,6 +430,11 @@ def build_parser() -> argparse.ArgumentParser:
     trm.add_argument("target")
     trm.add_argument("agent")
     trm.set_defaults(func=cmd_team_remove_member)
+
+    tsl = tsub.add_parser("set-leads", help="set the team's leads (no agents = clear)")
+    tsl.add_argument("target")
+    tsl.add_argument("agents", nargs="*", help="member names or ids that become leads")
+    tsl.set_defaults(func=cmd_team_set_leads)
 
     p = sub.add_parser("message", help="agent-to-agent messaging (Team-scoped)")
     msub = p.add_subparsers(dest="message_command", required=True)

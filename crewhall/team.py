@@ -45,6 +45,9 @@ class Team:
     # A configured SSH host: the workspace is then a path *on that host* and only
     # agents running there may be members.  None = a local team (as before).
     host: str | None = None
+    # Members with authority over the team (a subset of ``agent_ids``). Leads may
+    # interrupt/signal/restart the team's members. Empty = no leads (old state).
+    leads: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +58,7 @@ class Team:
             "workspace": self.workspace,
             "workspace_mode": self.workspace_mode,
             "host": self.host,
+            "leads": list(self.leads),
         }
 
 
@@ -84,6 +88,7 @@ class TeamRegistry:
         workspace_mode: str | None = None,
         created_at: float | None = None,
         host: str | None = None,
+        leads: list[str] | tuple[str, ...] | None = None,
         verify_remote: bool = True,
     ) -> Team:
         if not isinstance(name, str) or not name.strip():
@@ -106,6 +111,7 @@ class TeamRegistry:
         ws = self._validate_ws(workspace, host, verify_remote)
         if workspace_mode not in (None, "shared", "worktree"):
             raise TeamError("workspace_mode must be 'shared' or 'worktree'")
+        resolved_leads = self._resolve_leads(resolved, leads)
         team = Team(
             team_id=team_id or new_team_id(),
             name=name.strip(),
@@ -114,12 +120,34 @@ class TeamRegistry:
             workspace=ws,
             workspace_mode=workspace_mode,
             host=host or None,
+            leads=resolved_leads,
         )
         with self._lock:
             if team.team_id in self._teams:
                 raise TeamError(f"team id already exists: {team.team_id}")
             self._teams[team.team_id] = team
         return team
+
+    def _resolve_leads(
+        self, members: list[str], leads: list[str] | tuple[str, ...] | None
+    ) -> tuple[str, ...]:
+        """Resolve lead references, which must be a subset of the members."""
+        if not leads:
+            return ()
+        resolved: list[str] = []
+        for target in leads:
+            try:
+                agent_id = self._resolve_agent(target).agent_id
+            except TeamError:
+                if target in members:
+                    agent_id = target
+                else:
+                    raise TeamError(f"lead {target!r} is not a member of the team") from None
+            if agent_id not in members:
+                raise TeamError(f"lead {agent_id!r} is not a member of the team")
+            if agent_id not in resolved:
+                resolved.append(agent_id)
+        return tuple(resolved)
 
     def _validate_ws(self, workspace: str | None, host: str | None, verify: bool) -> str | None:
         if not workspace:
@@ -163,6 +191,7 @@ class TeamRegistry:
                 workspace=ws,
                 workspace_mode=team.workspace_mode,
                 host=new_host,
+                leads=team.leads,
             )
             self._teams[team.team_id] = updated
             return updated
@@ -191,9 +220,24 @@ class TeamRegistry:
                     f"{team.team_id}"
                 )
             remaining = tuple(a for a in team.agent_ids if a != agent_id)
-            return self._replace(team, remaining)
+            # Removing a member also removes it from the leads.
+            return self._replace(team, remaining, tuple(l for l in team.leads if l != agent_id))
 
-    def _replace(self, team: Team, agent_ids: tuple[str, ...]) -> Team:
+    def set_leads(
+        self, target_team: str, agents: list[str] | tuple[str, ...]
+    ) -> Team:
+        """Replace the set of leads (must be existing members). Empty clears them."""
+        with self._lock:
+            team = self.get(target_team)
+            resolved = self._resolve_leads(list(team.agent_ids), agents)
+            return self._replace(team, team.agent_ids, resolved)
+
+    def _replace(
+        self, team: Team, agent_ids: tuple[str, ...],
+        leads: tuple[str, ...] | None = None,
+    ) -> Team:
+        if leads is None:
+            leads = tuple(l for l in team.leads if l in agent_ids)
         updated = Team(
             team_id=team.team_id,
             name=team.name,
@@ -202,6 +246,7 @@ class TeamRegistry:
             workspace=team.workspace,
             workspace_mode=team.workspace_mode,
             host=team.host,
+            leads=tuple(l for l in leads if l in agent_ids),
         )
         self._teams[team.team_id] = updated
         return updated

@@ -94,3 +94,11 @@ def cmd_team_remove_member(args: argparse.Namespace) -> int:
     )["team"]
     _print_team(team)
     return 0
+
+
+def cmd_team_set_leads(args: argparse.Namespace) -> int:
+    team = common._client(args).call(
+        "team_set_leads", target=args.target, agents=args.agents
+    )["team"]
+    _print_team(team)
+    return 0

@@ -8,6 +8,7 @@ from typing import Any
 from .. import settings
 from ..backends import ssh_tmux as ssh_tmux_backend
 from ..harness import Harness
+from ..messaging import MessagingError
 from ..team import Team, TeamError
 from ..controller import _shq, _ssh_hint
 
@@ -57,6 +58,20 @@ class ServicesTeams:
                 host=entry.get("host"),
             )
             created.append(agent_name)
+        # Leads may be named by agent name or id (as in the membership).
+        spec_leads = spec.get("leads") or []
+        if spec_leads:
+            leads: list[str] = []
+            for lead in spec_leads:
+                try:
+                    leads.append(self.agents.resolve(lead).agent_id)
+                except Exception as exc:  # noqa: BLE001
+                    raise TeamError(f"unknown lead {lead!r}") from exc
+            try:
+                self.teams.set_leads(team.team_id, leads)
+                self._persist()
+            except Exception as exc:  # noqa: BLE001
+                raise TeamError(f"team leads: {exc}") from exc
         return {
             "team": self.team_info(team.team_id),
             "team_created": created_team,
@@ -116,6 +131,62 @@ class ServicesTeams:
         result = self.teams.remove_member(team, agent)
         self._persist()
         return result
+
+    def set_team_leads(self, team: str, agents: list[str] | tuple[str, ...]) -> Team:
+        result = self.teams.set_leads(team, agents)
+        self._persist()
+        return result
+
+    def _conversation_leads(self) -> dict[str, set[str]]:
+        """``team_id -> {agent_id}`` of agents leading a chat with that crew.
+
+        A conversation's own agent is treated as a lead of its crew even if the
+        Team's explicit ``leads`` does not list it (the chat is the reason the
+        crew exists). Uses the same stored link chat_bridge relies on.
+        """
+        from .. import chat as conversations
+
+        out: dict[str, set[str]] = {}
+        for conv in conversations.list_all():
+            team_id = conv.get("team")
+            agent_id = conv.get("agent_id")
+            if team_id and agent_id:
+                out.setdefault(str(team_id), set()).add(str(agent_id))
+        return out
+
+    def _is_team_lead(self, agent_id: str, team: Team, conv_leads: dict[str, set[str]]) -> bool:
+        return agent_id in team.leads or agent_id in conv_leads.get(team.team_id, set())
+
+    def _authorize_lead(self, sender: Harness, target: Harness) -> None:
+        """A lead may act on a member of its team, but not on a peer lead nor itself.
+
+        Authority comes only from the sender's identity (already authenticated
+        from its token), never from a field the caller chooses.
+        """
+        if sender.agent_id == target.agent_id:
+            raise MessagingError("an agent cannot control itself this way")
+        conv_leads = self._conversation_leads()
+        tname = target.name or target.agent_id
+        for team in self.teams.list():
+            if target.agent_id not in team.agent_ids:
+                continue
+            if not self._is_team_lead(sender.agent_id, team, conv_leads):
+                continue
+            if self._is_team_lead(target.agent_id, team, conv_leads):
+                raise MessagingError(
+                    f"not allowed: {tname} is also a lead of team {team.name!r}"
+                )
+            return
+        raise MessagingError(
+            f"not a lead of a team that contains {tname}"
+        )
+
+    def _lead_team_ids(self, agent_id: str) -> set[str]:
+        conv_leads = self._conversation_leads()
+        return {
+            team.team_id for team in self.teams.list()
+            if agent_id in team.agent_ids and self._is_team_lead(agent_id, team, conv_leads)
+        }
 
     def _verify_remote_dir(self, host: str, path: str) -> None:
         """Confirm over SSH that ``path`` is an accessible directory on ``host``."""

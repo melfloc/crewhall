@@ -70,6 +70,7 @@ class StateStore:
                     "workspace": team.workspace,
                     "workspace_mode": getattr(team, "workspace_mode", None),
                     "host": getattr(team, "host", None),
+                    "leads": list(getattr(team, "leads", ()) or ()),
                 }
             )
         agents = []

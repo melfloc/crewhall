@@ -123,6 +123,13 @@ async function teamAction(act, teamId){
       if(!chosen) return;
       for(const id of chosen){ await op("team_remove_member", {target:teamId, agent:id}); }
       toast(`${chosen.length} member(s) removed`, "ok");
+    } else if(act==="set-leads"){
+      const mem = (team.members||[]);
+      if(!mem.length){ toast("The team has no members", "info"); return; }
+      const chosen = await leadDlg(team);
+      if(chosen === undefined) return;
+      await op("team_set_leads", {target:teamId, agents:chosen});
+      toast(chosen.length ? `Leads updated (${chosen.length})` : "Leads cleared", "ok");
     } else if(act==="set-ws"){
       const hosts = await hostChoices();
       // The host of a team can only change while it has no members.
@@ -148,6 +155,19 @@ async function teamAction(act, teamId){
   } catch(e){ flash(e.message); }
 }
 
+async function leadDlg(team){
+  const members = team.members||[], current = new Set(team.leads||[]);
+  return openDlg(close => {
+    const boxes = members.map(m => el("input", {type:"checkbox", value:m.agent_id, checked:current.has(m.agent_id)}));
+    const list = el("div", {className:"pick"}, ...members.map((m, i) => el("label", {className:"check"}, boxes[i],
+      el("span", {style:"flex:1;min-width:0"}, el("div", {style:"font-weight:600"}, m.name||m.agent_id),
+        el("div", {className:"muted", style:"font-size:12px"}, m.kind)))));
+    return el("form", {onsubmit:e=>{ e.preventDefault(); close(boxes.filter(b=>b.checked).map(b=>b.value)); }},
+      el("h3", {}, `Leads of ${team.name}`),
+      el("p", {className:"sub"}, "Leads may interrupt, signal and restart the team's members. Select none to clear."),
+      list, dlgActions(close, "Save"));
+  });
+}
 async function hostChoices(){
   try { return (await op("host_list")).hosts || []; } catch(e){ return S.state?.hosts || []; }
 }
