@@ -223,3 +223,15 @@ async function pickDlg({title, sub, items, ok = "Apply"}){
   });
 }
 
+
+/* Keep the app sized to the *visible* viewport so a mobile keyboard never hides
+ * the composer. On desktop this equals the window height; 100dvh alone does not
+ * shrink when the on-screen keyboard opens. */
+(function(){
+  const vv = window.visualViewport;
+  if(!vv) return;
+  const apply = () => document.documentElement.style.setProperty("--vvh", vv.height + "px");
+  vv.addEventListener("resize", apply);
+  vv.addEventListener("scroll", apply);
+  apply();
+})();

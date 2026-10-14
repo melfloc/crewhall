@@ -114,7 +114,11 @@ class _Browser(HardTimeoutMixin, unittest.TestCase):
         self.addCleanup(self.pw.stop)
         browser = self.pw.chromium.launch(executable_path=CHROMIUM, args=["--no-sandbox"])
         self.addCleanup(browser.close)
-        self.page = browser.new_page(viewport=self.viewport)
+        self.page = browser.new_page(
+            viewport=self.viewport,
+            has_touch=getattr(self, "has_touch", False),
+            is_mobile=getattr(self, "is_mobile", False),
+            device_scale_factor=getattr(self, "device_scale_factor", 1))
         # Hermetic Service Worker: record the register() call instead of hitting
         # the network (a real /sw.js fetch would hang on the mocked origin).
         if self.onboarded:
@@ -332,6 +336,9 @@ class _Browser(HardTimeoutMixin, unittest.TestCase):
         self.page.mouse.move(bb["x"] + bb["width"] / 2, bb["y"] + bb["height"] / 2)
         self.page.mouse.wheel(0, dy)
         self.page.wait_for_timeout(150)
+
+    def _page_overflow(self):
+        return self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
 
 
 class ConversationView(_Browser):
@@ -595,6 +602,19 @@ class MobileLayout(_Browser):
             "() => getComputedStyle(document.getElementById('na-name')).fontSize")
         self.assertEqual(size, "16px")
 
+    def test_agent_views_and_mission_control_do_not_overflow(self):
+        self.page.click("#menuBtn")
+        self.page.locator("#nav .agent-row").first.click()
+        self.page.wait_for_selector("#hist")
+        self.assertLessEqual(self._page_overflow(), 2)
+        self.page.click("#tab-live")
+        self.page.wait_for_timeout(150)
+        self.assertLessEqual(self._page_overflow(), 2)
+        self.page.evaluate("openMission()")
+        self.page.wait_for_selector("#missionDlg[open]")
+        self.page.wait_for_timeout(150)
+        self.assertLessEqual(self._page_overflow(), 2)
+
 
 class SidebarReorder(_Browser):
     agents = [WORKING, READY]
@@ -650,6 +670,10 @@ class Dialogs(_Browser):
         self.assertEqual(self.page.locator("#na-kind option").count(), 2)
         self.page.fill("#na-name", "reviewer")
         self.page.locator("#na-ok").click()
+        for _ in range(20):                       # let the route handler run (pump events)
+            if "agent_create" in self.calls:
+                break
+            self.page.wait_for_timeout(50)
         self.assertIn("agent_create", self.calls)
         payload = next(p for p in self.payloads if p.get("op") == "agent_create")
         self.assertEqual(payload.get("name"), "reviewer")
@@ -2138,6 +2162,140 @@ class ChatCrewEmpty(_Browser):
         self.page.evaluate("chatSelect('c-1'); chatSetArtifacts(true)")
         self.page.wait_for_selector("#chat-crew .chat-empty")
         self.assertIn("crew activity", self.page.inner_text("#chat-crew"))
+
+
+CHAT_MOBILE_CONV = {**CHAT_CONV, "outputs": [
+    {"relpath": "out/report.md", "name": "report.md", "size": 12, "office": False}], "inputs": []}
+
+
+class _MobileChatMixin:
+    """Mobile Chat mode checks (a plain mixin so it is not collected alone)."""
+
+    has_touch = True
+    is_mobile = True
+    device_scale_factor = 3
+    auto_select = False
+    wait_for_messages = False
+    conversations = [CHAT_MOBILE_CONV]
+
+    def _enter_chat(self):
+        self.page.evaluate("setInterface('chat')")
+        self.page.wait_for_selector("#chat:not(.init-hidden)")
+        self.page.wait_for_selector("#chat-list .chat-row")
+
+    def _open_first_chat(self):
+        self._enter_chat()
+        if self.page.locator(".chat-side-toggle").is_visible():
+            self.page.locator(".chat-side-toggle").tap()
+        self.page.locator("#chat-list .chat-row").first.tap()
+        self.page.wait_for_selector("#chat-feed")
+
+    def _overflow(self):
+        return self.page.evaluate(
+            "document.scrollingElement.scrollWidth - window.innerWidth")
+
+    def test_no_horizontal_overflow_even_with_long_content(self):
+        self._open_first_chat()
+        self.assertLessEqual(self._overflow(), 2)
+        self.page.evaluate("""()=>{const f=document.getElementById('chat-feed');
+            const d=document.createElement('div'); d.className='msg assistant';
+            d.innerHTML='<div class="body"><p>'+('X'.repeat(400))+'</p>'
+              +'<table><tr>'+('<td>cell</td>'.repeat(40))+'</tr></table>'
+              +'<pre>'+('code line\\n'.repeat(30))+'</pre></div>';
+            f.appendChild(d);}""")
+        self.assertLessEqual(self._overflow(), 2)
+
+    def test_inputs_are_16px_and_composer_is_visible(self):
+        self._enter_chat()
+        for sel in ("#chat-input", "#chat-q"):
+            size = self.page.eval_on_selector(sel, "e => getComputedStyle(e).fontSize")
+            self.assertEqual(size, "16px", sel)
+        box = self.page.locator(".chat-composer").bounding_box()
+        vh = self.page.evaluate("window.innerHeight")
+        self.assertLessEqual(box["y"] + box["height"], vh + 1)
+
+    def test_main_touch_targets_are_at_least_40px(self):
+        self._enter_chat()
+        for sel in ("#chatSend", "#chatTools"):
+            h = self.page.eval_on_selector(sel, "e => e.getBoundingClientRect().height")
+            self.assertGreaterEqual(h, 40, sel)
+
+    def test_artifacts_panel_is_a_sheet_that_opens_and_closes(self):
+        self._open_first_chat()
+        self.page.evaluate("chatSetArtifacts(true)")
+        self.page.wait_for_selector("#chat-artifacts:not(.hidden)")
+        width = self.page.eval_on_selector("#chat-artifacts", "e => e.getBoundingClientRect().width")
+        vw = self.page.evaluate("window.innerWidth")
+        self.assertLessEqual(width, vw + 1)
+        self.assertLessEqual(self._overflow(), 2)
+        self.page.locator("#chatArtClose").tap()
+        self.page.wait_for_function(
+            "document.getElementById('chat-artifacts').classList.contains('hidden')")
+
+
+class _MobileChatDrawerMixin(_MobileChatMixin):
+    """Where the conversation list collapses to a drawer (< 760px)."""
+
+    def test_conversation_list_is_a_drawer_that_opens_and_closes(self):
+        self._enter_chat()
+        self.assertGreaterEqual(
+            self.page.eval_on_selector(".chat-side-toggle", "e => e.getBoundingClientRect().height"), 40)
+        right = self.page.eval_on_selector(".chat-side", "e => e.getBoundingClientRect().right")
+        self.assertLessEqual(right, 2)                                   # hidden off-canvas
+        self.page.locator(".chat-side-toggle").tap()
+        self.page.wait_for_function(
+            "document.querySelector('.chat-side').getBoundingClientRect().left >= -1")
+        self.page.locator("#chat-list .chat-row").first.tap()            # selecting closes it
+        self.page.wait_for_function(
+            "!document.getElementById('chat').classList.contains('chat-drawer')")
+
+
+class MobileChat360(_MobileChatDrawerMixin, _ChatBase):
+    viewport = {"width": 360, "height": 740}
+
+
+class MobileChat390(_MobileChatDrawerMixin, _ChatBase):
+    viewport = {"width": 390, "height": 844}
+
+    def _reply(self, body):
+        if body.get("op") == "conversation_create":
+            return {"ok": True, "conversation": {
+                "id": "c-new", "title": body.get("title") or "Chat", "agent_id": "sess_new",
+                "outputs": [], "inputs": []}}
+        if body.get("op") == "conversation_info" and body.get("id") == "c-new":
+            return {"ok": True, "conversation": {
+                "id": "c-new", "title": "Tap chat", "agent_id": "sess_new",
+                "outputs": [{"relpath": "out/a.md", "name": "a.md", "size": 5, "office": False}],
+                "inputs": [],
+                "agent": {"agent_id": "sess_new", "name": "n", "kind": "opencode", "state": "ready"}}}
+        return super()._reply(body)
+
+    def test_create_send_open_artifact_and_back_all_with_taps(self):
+        self._enter_chat()
+        self.page.locator(".chat-side-toggle").tap()
+        self.page.locator("#chatNew").tap()
+        self.page.wait_for_selector("#dlg[open] #pf-title")
+        self.page.locator("#dlg .btn.primary").tap()                     # Create
+        self.page.wait_for_function(
+            "typeof CHAT !== 'undefined' && CHAT.info && CHAT.info.id === 'c-new'")
+        self.page.locator("#chat-input").tap()
+        self.page.locator("#chat-input").fill("hola")
+        self.page.locator("#chatSend").tap()
+        self.page.wait_for_timeout(1200)
+        self.assertIn("agent_write", self.calls)
+        self.assertIn("agent_key", self.calls)
+        self.page.locator("#chatTools").tap()
+        self.page.locator(".menu button", has_text="Show artifacts").tap()
+        self.page.wait_for_selector("#chat-artifacts:not(.hidden)")
+        self.page.locator("#chatArtClose").tap()
+        self.page.wait_for_function(
+            "document.getElementById('chat-artifacts').classList.contains('hidden')")
+        self.assertLessEqual(self._overflow(), 2)
+        self.assertEqual(self.errors, [])
+
+
+class MobileChat768(_MobileChatMixin, _ChatBase):
+    viewport = {"width": 768, "height": 1024}
 
 
 if __name__ == "__main__":

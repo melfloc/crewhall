@@ -47,6 +47,9 @@ function chatOn(){
   chatBody().add("chat-on");
   $("chat").classList.remove("init-hidden");
   chatApplyLayout();
+  // On a narrow screen the artifact panel is a full-width sheet: start closed
+  // so it does not cover the conversation (the user opens it from Tools).
+  if(CHAT.layout !== "document" && matchMedia("(max-width:760px)").matches) chatSetArtifacts(false);
   chatRenderHead();
   chatLoadList();
   chatLoadOffice();
@@ -59,6 +62,20 @@ function chatOff(){
   chatStopPoll();
   chatCloseOffice();
 }
+/* On a narrow screen the conversation list is a drawer (see app.css). */
+function chatCloseDrawer(){
+  $("chat").classList.remove("chat-drawer");
+  const s = $("chat-scrim"); if(s) s.classList.add("init-hidden");
+}
+function chatSideToggle(){
+  return el("button", {className:"btn icon ghost sm chat-side-toggle", type:"button",
+    "aria-label":"Conversations", title:"Conversations",
+    onclick:()=>{
+      const on = $("chat").classList.toggle("chat-drawer");
+      const s = $("chat-scrim"); if(s) s.classList.toggle("init-hidden", !on);
+    }}, ic("msg","sm"));
+}
+if($("chat-scrim")) $("chat-scrim").onclick = chatCloseDrawer;
 
 /* ---------- in-chat layout: "Chat" (conversation first) or "Document" ---------- */
 function chatApplyLayout(){
@@ -166,6 +183,7 @@ async function chatSetCrew(team){
 async function chatSelect(id){
   CHAT.active = id; CHAT.msgs = []; CHAT.sig = "";
   chatRenderList();
+  chatCloseDrawer();
   try {
     const r = await op("conversation_info", {id});
     CHAT.info = r.conversation;
@@ -194,7 +212,7 @@ function chatRenderHead(){
   if(!CHAT.info){
     head.replaceChildren(el("div", {className:"chat-head-main"},
       el("div", {className:"chat-head-txt"}, el("div", {className:"chat-head-title"}, "Select a chat")),
-      el("div", {className:"chat-head-actions"}, chatLayoutToggle())));
+      el("div", {className:"chat-head-actions"}, chatSideToggle(), chatLayoutToggle())));
     $("chat-input").disabled = true; $("chatSend").disabled = true;
     return;
   }
@@ -220,7 +238,7 @@ function chatRenderHead(){
           a && a.kind ? el("span", {className:"chip mono"}, a.kind) : null,
           CHAT.info.team ? el("span", {className:"chip crew"}, ic("users","sm"), "crew") : null,
           a && a.activity && a.activity.model ? el("span", {className:"chip mono"}, a.activity.model) : null)),
-      el("div", {className:"chat-head-actions"}, chatLayoutToggle(), ...acts)));
+      el("div", {className:"chat-head-actions"}, chatSideToggle(), chatLayoutToggle(), ...acts)));
   const working = a && st === "working";
   // Exited/error chats are still sendable: sending revives the agent.
   const canSend = a && ["ready", "waiting_input", "exited", "error"].includes(st);
