@@ -107,7 +107,13 @@ class Check:
         body = ("Run this exact bash command now, in one call, and nothing else "
                 "(it stays running): sleep 600 & sleep 600 & wait")
         for _ in range(3):                      # the model is stochastic; give it a few tries
-            wait(lambda: self.w1.state().usable, 90)
+            # Resend only once the previous copy was delivered and handled: a copy
+            # still queued would start new shells after the kill and keep the
+            # worker busy for the next steps.
+            wait(lambda: self.w1.state().usable
+                 and not self.c.messaging.queue_info(self.w1.agent_id)["count"], 120)
+            if self._shell_pids(self.w1.agent_id):
+                break
             self.c.send_message_as("lead", self.token(self.lead), "worker-1", body)
             if wait(lambda: self._shell_pids(self.w1.agent_id), 90):
                 break

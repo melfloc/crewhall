@@ -167,16 +167,18 @@ class ServicesTeams:
             raise MessagingError("an agent cannot control itself this way")
         conv_leads = self._conversation_leads()
         tname = target.name or target.agent_id
+        peer_lead_of: str | None = None
         for team in self.teams.list():
             if target.agent_id not in team.agent_ids:
                 continue
             if not self._is_team_lead(sender.agent_id, team, conv_leads):
                 continue
             if self._is_team_lead(target.agent_id, team, conv_leads):
-                raise MessagingError(
-                    f"not allowed: {tname} is also a lead of team {team.name!r}"
-                )
+                peer_lead_of = team.name  # keep looking: another team may allow it
+                continue
             return
+        if peer_lead_of is not None:
+            raise MessagingError(f"not allowed: {tname} is also a lead of team {peer_lead_of!r}")
         raise MessagingError(
             f"not a lead of a team that contains {tname}"
         )

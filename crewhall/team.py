@@ -221,7 +221,7 @@ class TeamRegistry:
                 )
             remaining = tuple(a for a in team.agent_ids if a != agent_id)
             # Removing a member also removes it from the leads.
-            return self._replace(team, remaining, tuple(l for l in team.leads if l != agent_id))
+            return self._replace(team, remaining, tuple(lead for lead in team.leads if lead != agent_id))
 
     def set_leads(
         self, target_team: str, agents: list[str] | tuple[str, ...]
@@ -237,7 +237,7 @@ class TeamRegistry:
         leads: tuple[str, ...] | None = None,
     ) -> Team:
         if leads is None:
-            leads = tuple(l for l in team.leads if l in agent_ids)
+            leads = tuple(lead for lead in team.leads if lead in agent_ids)
         updated = Team(
             team_id=team.team_id,
             name=team.name,
@@ -246,7 +246,7 @@ class TeamRegistry:
             workspace=team.workspace,
             workspace_mode=team.workspace_mode,
             host=team.host,
-            leads=tuple(l for l in leads if l in agent_ids),
+            leads=tuple(lead for lead in leads if lead in agent_ids),
         )
         self._teams[team.team_id] = updated
         return updated

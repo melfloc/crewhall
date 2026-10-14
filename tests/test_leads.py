@@ -46,7 +46,7 @@ class LeadsModel(LeadsBase):
             self.controller.set_team_leads(team.team_id, ["outsider"])
 
     def test_remove_member_drops_lead(self) -> None:
-        a = self._agent("a")
+        self._agent("a")
         b = self._agent("b")
         team = self.controller.create_team("crew", ["a", "b"], leads=["a", "b"])
         updated = self.controller.remove_team_member(team.team_id, "a")
@@ -136,6 +136,14 @@ class LeadAuthorization(LeadsBase):
         self.controller.create_team("crew", ["lead", "peer"], leads=["lead", "peer"])
         with self.assertRaises(MessagingError):
             self.controller._authorize_lead(lead, peer)
+
+    def test_peer_lead_in_one_team_does_not_hide_authority_in_another(self) -> None:
+        lead = self._agent("lead")
+        worker = self._agent("worker")
+        # Both lead "council"; only "lead" leads "build", where worker is a member.
+        self.controller.create_team("council", ["lead", "worker"], leads=["lead", "worker"])
+        self.controller.create_team("build", ["lead", "worker"], leads=["lead"])
+        self.controller._authorize_lead(lead, worker)  # no raise
 
     def test_lead_cannot_act_on_itself(self) -> None:
         lead = self._agent("lead")

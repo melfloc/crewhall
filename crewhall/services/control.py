@@ -10,6 +10,7 @@ from __future__ import annotations
 # ruff: noqa: F401
 # mypy: disable-error-code="attr-defined"
 import collections
+import contextlib
 import os
 import signal
 import threading
@@ -66,7 +67,7 @@ class ServicesControl:
             for shell in listing.get("shells", []):
                 results.append(self.signal_process(
                     harness.agent_id, int(shell["pid"]), signal_name, by=by))
-        else:
+        elif pid is not None:
             results.append(self.signal_process(
                 harness.agent_id, int(pid), signal_name, by=by))
         if by != "user":
@@ -84,7 +85,9 @@ class ServicesControl:
         agent_id = harness.agent_id
         if by != "user" and by == agent_id:
             raise MessagingError("an agent cannot restart itself")
-        self._check_restart_brake(agent_id)
+        if by != "user":
+            # Anti-loop brake for leads; the human operator is never throttled.
+            self._check_restart_brake(agent_id)
         started = time.time()
         with self._lock_for_agent(agent_id):
             tree = self._capture_tree(harness)
@@ -133,7 +136,6 @@ class ServicesControl:
         except Exception:  # noqa: BLE001 - report the final state even on a timeout
             log.exception("forced restart: %s did not become ready", agent_id)
             state = revived.state().value
-        self._record_restart(agent_id)
         note = f"restarted by {by}: {reason or 'no reason given'}"
         try:
             self.messaging.send_system(agent_id, f"[system] {note}", origin="control")
@@ -185,10 +187,8 @@ class ServicesControl:
             time.sleep(0.1)
         killed = [p for p in tree if _alive(p)]
         for pid in reversed(killed):
-            try:
+            with contextlib.suppress(OSError):
                 os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
         for _ in range(20):
             if not any(_alive(p) for p in tree):
                 break
@@ -205,19 +205,18 @@ class ServicesControl:
     def _check_restart_brake(self, agent_id: str) -> None:
         limit = int(settings.get("agents.restart_max"))
         window = float(settings.get("agents.restart_window_minutes")) * 60.0
-        times = self._restart_times.setdefault(agent_id, collections.deque())
-        now = time.time()
-        while times and now - times[0] > window:
-            times.popleft()
-        if len(times) >= limit:
-            raise MessagingError(
-                f"restart brake: {agent_id} was restarted {len(times)} times in the "
-                f"last {settings.get('agents.restart_window_minutes')} min; "
-                f"wait before trying again"
-            )
-
-    def _record_restart(self, agent_id: str) -> None:
-        self._restart_times.setdefault(agent_id, collections.deque()).append(time.time())
+        with self._locks_guard:  # check and reserve atomically (concurrent leads)
+            times = self._restart_times.setdefault(agent_id, collections.deque())
+            now = time.time()
+            while times and now - times[0] > window:
+                times.popleft()
+            if len(times) >= limit:
+                raise MessagingError(
+                    f"restart brake: {agent_id} was restarted {len(times)} times in the "
+                    f"last {settings.get('agents.restart_window_minutes')} min; "
+                    f"wait before trying again"
+                )
+            times.append(now)
 
     # -- shared notices ---------------------------------------------------
 

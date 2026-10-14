@@ -113,7 +113,6 @@ class ServicesStatus:
             return {"available": False, "reason": reason, "shells": [], "others": []}
         shells = []
         for entry in listing.get("shells", []):
-            output = entry.get("output") or {}
             age = entry.get("last_output_ago")
             shells.append({
                 "pid": entry.get("pid"),

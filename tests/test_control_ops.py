@@ -51,11 +51,21 @@ class Containment(ControlBase):
     def test_restart_brake_after_limit(self) -> None:
         agent_id = "worker"
         for _ in range(3):
-            self.controller._check_restart_brake(agent_id)
-            self.controller._record_restart(agent_id)
+            self.controller._check_restart_brake(agent_id)  # reserves a slot
         with self.assertRaises(MessagingError) as ctx:
             self.controller._check_restart_brake(agent_id)
         self.assertIn("brake", str(ctx.exception))
+
+    def test_human_restart_is_never_braked(self) -> None:
+        from unittest import mock
+
+        a = self._agent("a")
+        with mock.patch.object(self.controller, "_check_restart_brake",
+                               side_effect=AssertionError("braked")), \
+                mock.patch.object(self.controller, "_capture_tree",
+                                  side_effect=RuntimeError("past the brake")):
+            with self.assertRaisesRegex(RuntimeError, "past the brake"):
+                self.controller.force_restart_agent(a.agent_id, by="user")
 
     def test_agent_cannot_restart_itself(self) -> None:
         a = self._agent("a")
