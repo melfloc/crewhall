@@ -7,6 +7,40 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- **Leads por equipo.** Una `Team` puede marcar algunos de sus miembros como
+  *leads* (`leads` en el estado, `leads = [...]` en `team.toml`,
+  `crewhall team set-leads <equipo> [<agente> …]`), y quitarlo de miembro lo
+  quita también de los leads. Una sola función decide la autoridad: un lead
+  manda sobre los miembros de su equipo, pero nunca sobre otro lead ni sobre sí
+  mismo; el agente de una conversación con crew cuenta como lead de esa crew.
+- **`crewhall agent status <agente>`** (también como op de agente y herramienta
+  MCP `teammate_status`): estado y desde cuándo, actividad actual, interacciones
+  pendientes, si el input tiene un borrador humano (sin su texto), procesos en
+  segundo plano (pid, comando recortado, edad, si siguen produciendo salida),
+  sub-agentes activos, mensajes encolados y la clave: `deliverable_now` y
+  `blocked_by` (por qué un mensaje se encolaría ahora). Desde un agente solo los
+  leads pueden pedir la salida de procesos (`--output`).
+- **Contención entre agentes (solo leads).** `crewhall agent interrupt <agente>`
+  corta el turno en curso; `crewhall agent signal <agente> --pid N [--signal
+  TERM|INT|KILL]` o `--all-shells` señala sus procesos en segundo plano;
+  `crewhall agent restart <agente> [--fresh] [--reason TEXT]` reinicia de verdad
+  (mata el árbol de procesos, relanza con la misma identidad y reanuda la
+  conversación —Claude/OpenCode/Codex— salvo `--fresh`), con un freno de 3
+  reinicios por agente en 10 minutos y un aviso de sistema al reiniciado. Cada
+  acción deja registro en el log del agente, el audit y el escritorio. MCP:
+  `interrupt_teammate`, `stop_teammate_process`, `restart_teammate`.
+- **Web UI (Conversation).** El panel del agente abre siempre en el último
+  mensaje y se queda al final mientras crece o llega contenido nuevo, pero solo
+  un gesto real del usuario (rueda, touch, teclado, barra) lo desengancha; al
+  subir se queda exactamente donde estaba y aparece "Jump to latest", y bajar a
+  mano retoma el seguimiento. Cargar mensajes antiguos ya no mueve la lectura.
+  El mismo comportamiento se usa en el chat y en multiview.
+- **Web UI móvil (modo Chat).** En pantallas estrechas la lista de
+  conversaciones es un cajón y los artefactos una hoja a todo el ancho; el
+  composer respeta el teclado virtual (`visualViewport`/`dvh`) y los safe-area
+  insets, los inputs son de 16px (sin zoom en iOS), las acciones principales
+  tienen objetivos táctiles de 40px y el contenido largo (código, tablas)
+  hace scroll interno sin romper el ancho.
 - `crewhall watch smoke`: el smoke con agentes reales viene dentro del paquete,
   así que su timer funciona también en una instalación gestionada (el soak sigue
   siendo solo del checkout). `scripts/smoke.py` queda como envoltorio.
