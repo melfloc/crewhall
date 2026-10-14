@@ -29,9 +29,10 @@ crewhall terminal new|ls|send|key|capture|close|attach   # web terminals
 crewhall office setup|status|stop|restart|list|open|read|insert|command|close|
           users|chat|say|comments|comment|save           # OnlyOffice
 crewhall host list|add|remove|test
-crewhall agent identity|list|create|send|capture|state|wait|stop|new-session
+crewhall agent identity|list|create|send|capture|state|status|wait|stop|
+          new-session|interrupt|signal|restart
 crewhall message send|request|reply|requests
-crewhall team create|up|set-workspace|list|info|remove|add-member|remove-member
+crewhall team create|up|set-workspace|list|info|remove|add-member|remove-member|set-leads
 crewhall daemon|demo|web|token|terminal-token|frontends|service
 crewhall update|selftest|doctor|clean|bundle|adapter|ui
 ```
@@ -47,6 +48,12 @@ Operations are grouped by the credential they need:
   with an `agent`, `agent_identity`, `team_members`, `agent_new_session`,
   `team_new_session`, `agent_hook`, `agent_permission_request`,
   `conversation_publish`): token-authenticated; callable by agents.
+- **Dual ops** (`agent_status`, `agent_interrupt`, `agent_signal`, `agent_restart`):
+  with `sender`+`token` they act as that agent and enforce the team/lead boundary
+  (`agent_status` needs a shared team; the other three need `_authorize_lead`);
+  without them they require the control token, so the human CLI/Web UI uses the
+  same op. Process output in `agent_status` is only returned with `output=true`
+  and only for a lead (or the control plane).
 - **Agent co-editing ops** (`office_collab_*` except `office_collab_list`, sent with
   the agent's `sender` + `token`, as `crewhall office` does inside an agent): allowed
   only for the chat the agent leads or whose crew it belongs to.
@@ -58,8 +65,9 @@ An `office_collab_*` op answers `{"disabled": true}` when OnlyOffice is off.
 
 ## MCP tools (for agents)
 
-The stdio MCP server exposes: `whoami`, `list_teammates`, `send_message`,
-`request`, `reply`, `handoff`, `new_session`, `publish_artifact`.
+The stdio MCP server exposes: `whoami`, `list_teammates`, `teammate_status`,
+`send_message`, `request`, `reply`, `handoff`, `new_session`, `publish_artifact`,
+`interrupt_teammate`, `stop_teammate_process`, `restart_teammate`.
 
 ## Criticality and the road to 1.0
 

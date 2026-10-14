@@ -74,6 +74,18 @@ care about:
 - **Agents**: a new capability is **off by default** (MCP, worktrees). The
   daemon is authoritative for agent identity and Team membership; a message or
   request is never trusted from a `--from`.
+- **Team leads**: within a Team, a member may be marked a *lead*. A lead can
+  interrogate a member (`agent status`), interrupt its current turn
+  (`agent interrupt`), signal its background processes (`agent signal`) and
+  force-restart it (`agent restart`). The authority is derived from the caller's
+  token and the stored membership, never from a field the caller chooses, and it
+  is checked by a single function (`_authorize_lead`). A lead **cannot** act on a
+  peer lead of the same Team, on itself, or on an agent outside its Team; the
+  human control plane is unaffected. So a compromised member can, at most,
+  disturb the agents of a Team it genuinely leads — the same blast radius it
+  already has by messaging them — and cannot escalate to the control plane,
+  other Teams or its own lead. A restarted agent is told who restarted it and
+  why, the action is logged on the agent, audited, and announced on the desktop.
 - **Secrets**: access tokens and provider credentials are never written to logs,
   bundles, the audit log, activity, fixtures or error messages; sensitive values
   are shown masked in the UI.
