@@ -40,6 +40,7 @@ ALLOWED_OPS = {
     "clean_plan", "clean_apply", "update_status",
     "bundle_export", "bundle_list", "bundle_import", "bundle_delete", "fs_complete", "uploads_info",
     "settings_get", "settings_set", "settings_reset", "provider_check",
+    "provider_notices", "notice_ack",
     "frontend_status", "frontend_set", "reset_plan", "reset_apply",
     "agent_archive_list", "agent_archive_get",
     "request_list", "request_cancel",

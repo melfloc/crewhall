@@ -251,12 +251,17 @@ class OpsSystem(OpsBase):
         if "hosts" in (request.get("changes") or {}):
             self._need_confirm(request, "changing hosts")
         try:
-            return settings.patch(
+            result = settings.patch(
                 request.get("changes") or {},
                 confirm=request.get("confirm") == "CONFIRM",
             )
         except settings.SettingsError as exc:
             raise ValueError(str(exc)) from exc
+        try:  # a provider command change can flip a CLI in/out of range
+            self.controller.check_provider_versions()
+        except Exception:  # noqa: BLE001 - a version check must not fail the save
+            log.debug("provider version check after settings_set failed", exc_info=True)
+        return result
 
     def _op_settings_reset(self, request: dict[str, Any]) -> dict[str, Any]:
         return settings.reset(request.get("prefix") or None)
@@ -265,6 +270,17 @@ class OpsSystem(OpsBase):
         kinds = [request["kind"]] if request.get("kind") else settings._kinds()
         return {"providers": [settings.check_provider(k, request.get("command") if len(kinds) == 1 else None)
                               for k in kinds]}
+
+    def _op_provider_notices(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Notices crewhall raised on its own (e.g. an automatic CLI switch)."""
+        from .. import notices
+
+        return {"notices": notices.list_all()}
+
+    def _op_notice_ack(self, request: dict[str, Any]) -> dict[str, Any]:
+        from .. import notices
+
+        return {"notices": notices.ack(request.get("id"))}
 
     def _op_reset_plan(self, request: dict[str, Any]) -> dict[str, Any]:
         from .. import reset
