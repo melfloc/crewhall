@@ -94,8 +94,13 @@ class DoctorChecks(unittest.TestCase):
             self.assertEqual(doctor.check_systemd()["status"], "ok")
 
     def test_check_agent_version_ranges_out_of_range(self) -> None:
-        with mock.patch.object(doctor.shutil, "which", return_value="/usr/bin/claude"), \
-                mock.patch.object(doctor, "_version_of", return_value="9.9.9"):
+        from crewhall.harness import versions
+
+        report = versions.VersionReport(
+            "claude", ("claude",), "9.9.9", (9, 9, 9), False, "2.1.284", "outside the range")
+        with mock.patch("crewhall.settings.provider_effective_command",
+                        return_value=(["claude"], report, False)), \
+                mock.patch("crewhall.settings.get", return_value=False):
             results = doctor.check_agent_version_ranges()
         self.assertTrue(any(r["status"] == "warn" for r in results))
 

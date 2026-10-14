@@ -100,6 +100,7 @@ function providerCard(p, status){
   const enabled = el("input", {type:"checkbox", id:id("enabled"), checked:p.enabled});
   const mcp = el("input", {type:"checkbox", id:id("mcp"), checked:!!p.mcp, disabled:!p.mcp_supported});
   const command = el("input", {className:"input mono", id:id("command"), value:p.command, placeholder:`built-in: ${p.kind}`, spellcheck:false, autocomplete:"off"});
+  const fallback = el("input", {className:"input mono", id:id("fallback"), value:p.fallback_command, placeholder:"optional: a supported binary to use instead", spellcheck:false, autocomplete:"off"});
   const model = el("input", {className:"input mono", id:id("model"), value:p.default_model, placeholder:"provider default", spellcheck:false, autocomplete:"off"});
   const args = el("input", {className:"input mono", id:id("args"), value:p.default_args, placeholder:"e.g. --verbose", spellcheck:false, autocomplete:"off"});
   const models = el("textarea", {className:"input mono", id:id("models"), rows:3, spellcheck:false,
@@ -107,20 +108,29 @@ function providerCard(p, status){
   const env = el("textarea", {className:"input mono", id:id("env"), rows:3, spellcheck:false, placeholder:"NAME=value, one per line",
     value:Object.entries(p.env||{}).map(([k, v]) => `${k}=${v}`).join("\n")});
   const stat = el("div", {className:"prov-status", id:id("status")});
-  const paint = (s) => { stat.className = "prov-status " + (s && s.ok ? "ok" : "bad");
-    stat.replaceChildren(s ? (s.ok ? ic("check", "sm") : ic("alert", "sm")) : "",
-      s ? (s.ok ? ` ${s.version || "installed"} · ${s.path}` : ` ${s.error || "not found"}`) : ""); };
+  const paint = (s) => {
+    const warn = !!s && s.ok && s.supported === false;
+    stat.className = "prov-status " + (s && s.ok && !warn ? "ok" : "bad");
+    let detail = "";
+    if(s && s.ok){
+      detail = ` ${s.version || "installed"} · ${s.path}`;
+      if(warn) detail += " · outside the validated range";
+      else if(s.fallback_used) detail += " (fallback)";
+    } else if(s){ detail = ` ${s.error || "not found"}`; }
+    stat.replaceChildren(s ? (s.ok && !warn ? ic("check", "sm") : ic("alert", "sm")) : "", detail); };
   if(status) paint(status);
   const test = el("button", {className:"btn sm", type:"button", onclick:async()=>{
     try { const r = await op("provider_check", {kind:p.kind, command:command.value.trim() || null}); paint(r.providers[0]); }
     catch(e){ flash(e.message); } }}, "Test");
   const save = el("button", {className:"btn primary", type:"button", onclick:async()=>{
     const changes = {[`providers.${p.kind}.enabled`]:enabled.checked, [`providers.${p.kind}.command`]:command.value,
+      [`providers.${p.kind}.fallback_command`]:fallback.value,
       [`providers.${p.kind}.default_model`]:model.value, [`providers.${p.kind}.default_args`]:args.value,
       [`providers.${p.kind}.env`]:env.value, [`providers.${p.kind}.mcp`]:mcp.checked,
       [`providers.${p.kind}.models`]:models.value};
     const envText = Object.entries(p.env||{}).map(([k, v]) => `${k}=${v}`).join("\n");
-    const sensitive = command.value.trim() !== (p.command||"") || env.value.trim() !== envText.trim();
+    const sensitive = command.value.trim() !== (p.command||"") || fallback.value.trim() !== (p.fallback_command||"")
+      || env.value.trim() !== envText.trim();
     let confirm = false;
     if(sensitive){
       if(!await confirmTyped({title:`Change the ${p.kind} command or environment?`,
@@ -143,6 +153,9 @@ function providerCard(p, status){
     el("div", {className:"onb-row"},
       el("div", {className:"field"}, el("label", {htmlFor:id("command")}, "Command / binary"), el("div", {className:"row"}, command, test),
         el("div", {className:"hint"}, "Path or command to launch instead of the one in PATH (another install, a wrapper script).")),
+      el("div", {className:"field"}, el("label", {htmlFor:id("fallback")}, "Fallback binary"),
+        fallback,
+        el("div", {className:"hint"}, "Used automatically when the command above is outside the version range this adapter was verified against. Point it at a supported install to survive a CLI upgrade.")),
       el("div", {className:"field"}, el("label", {htmlFor:id("model")}, "Default model"), model,
         el("div", {className:"hint"}, "Passed as --model unless the agent sets its own."))),
     el("div", {className:"field"}, el("label", {htmlFor:id("args")}, "Default arguments"), args),

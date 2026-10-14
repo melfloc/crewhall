@@ -166,6 +166,8 @@ class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesS
         # Extra CLI arguments per agent (e.g. ``--agent reviewer``), kept so a
         # restored/restarted agent is relaunched with the same command line.
         self._agent_args: dict[str, list[str]] = {}
+        # Version gate: per-agent CLI version report (kind/version/supported…).
+        self._agent_versions: dict[str, dict[str, Any] | None] = {}
         # Configured SSH host per agent (None = local), kept for restart/restore.
         self._agent_hosts: dict[str, str | None] = {}
         # Last adoption probe per host: (reachable, wall-clock time).

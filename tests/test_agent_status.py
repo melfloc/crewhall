@@ -63,6 +63,20 @@ class AgentStatus(StatusBase):
         self.assertIn("permission_pending", st["blocked_by"])
         self.assertEqual(len(st["interactions"]), 1)
 
+    def test_unsupported_cli_version_blocks(self) -> None:
+        a = self._agent("a")
+        a.version_blocked = True
+        self.controller._agent_versions[a.agent_id] = {
+            "kind": "opencode", "version": "2.0.0", "supported": False,
+            "reason": "outside the validated range (last verified 1.18.34)",
+            "blocked": True,
+        }
+        st = self.controller.agent_status(a.agent_id)
+        self.assertIn("unsupported_cli_version", st["blocked_by"])
+        self.assertFalse(st["deliverable_now"])
+        self.assertEqual(st["cli"]["version"], "2.0.0")
+        self.assertIn("reason", st["cli"])
+
 
 class StatusAuthorization(StatusBase):
     def setUp(self) -> None:

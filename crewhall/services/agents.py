@@ -9,9 +9,10 @@ import threading
 import time
 import uuid
 from typing import Any
-from .. import activity as act, brand, hooks, paths, processes as procs, settings
+from .. import activity as act, brand, hooks, notices, paths, processes as procs, settings
 from ..backends import get_backend
-from ..harness import AgentInfo, Harness, HarnessError, get_harness
+from ..harness import AgentInfo, Harness, HarnessError, get_harness, versions
+from ..harness.versions import UnsupportedVersionError
 from ..messaging import MessagingError
 from ..opencode_link import OpenCodeLink, free_port
 from ..session import InteractiveSession
@@ -122,6 +123,122 @@ class ServicesAgents:
             return None
         return str(uuid.uuid4())
 
+    def _resolve_provider_command(
+        self, kind: str, host: str | None
+    ) -> tuple[list[str], Any, bool]:
+        """The command to launch, with version auto-selection applied.
+
+        A remote agent runs the remote machine's own CLI (bare name, remote
+        PATH): a local override path, a local fallback or a local version probe
+        means nothing there, so the built-in command is returned unpinned.
+        """
+        if host:
+            return get_harness(kind).command(), None, False
+        return settings.provider_effective_command(kind)
+
+    def _enforce_version(self, kind: str, report: Any) -> None:
+        """Block launch when the CLI version is outside the validated range."""
+        if report is None or not report.blocked:
+            return
+        if settings.get("agents.allow_unvalidated_versions"):
+            log.warning("provider %s: %s (allowed by agents.allow_unvalidated_versions)",
+                        kind, report.reason)
+            return
+        raise UnsupportedVersionError(report)
+
+    def _attach_version(self, harness: Harness, kind: str, host: str | None) -> None:
+        """Record the resolved version on the agent (for the UI and the gate)."""
+        try:
+            _command, report, used_fallback = self._resolve_provider_command(kind, host)
+            primary = None if host else versions.evaluate(kind, settings.provider_primary_command(kind))
+        except Exception:  # noqa: BLE001 - a version probe must never block a launch
+            log.debug("version probe failed for %s", kind, exc_info=True)
+            return
+        harness.version_report = report
+        harness.version_blocked = bool(
+            report is not None and report.blocked
+            and not settings.get("agents.allow_unvalidated_versions")
+        )
+        self._agent_versions[harness.agent_id] = report.to_dict() if report else None
+        if used_fallback:
+            log.warning("provider %s: primary CLI out of range; using compatible %s",
+                        kind, " ".join(report.command))
+        if primary is not None:
+            self._record_version_notice(kind, primary, report, used_fallback)
+
+    def _record_version_notice(self, kind: str, primary: Any, chosen: Any, switched: bool) -> None:
+        """Explain an automatic version switch (or block) in a user-facing notice."""
+        if primary is None or primary.supported is not False:
+            return
+        if switched and chosen is not None:
+            notice = notices.add(
+                key=f"switch:{kind}:{primary.text}->{chosen.text}",
+                kind=kind, level="warn",
+                title=f"{kind} updated to {primary.text or 'a new version'} — switched automatically",
+                body=(
+                    f"Your {kind} CLI is now {primary.text or 'unknown'}, outside the range this "
+                    f"adapter was verified against (last verified {primary.captured}). crewhall "
+                    f"detected it and automatically switched to a compatible install at "
+                    f"{chosen.command[0]} ({chosen.text or 'unknown'}). The validated adapter keeps "
+                    f"working; the {kind} adapter for the previous major version is now legacy until "
+                    "crewhall is updated for the new one."
+                ),
+            )
+        else:
+            notice = notices.add(
+                key=f"blocked:{kind}:{primary.text}",
+                kind=kind, level="err",
+                title=f"{kind} CLI {primary.text or 'unknown'} is not supported",
+                body=(
+                    f"Your {kind} CLI is outside the range this adapter was verified against "
+                    f"(last verified {primary.captured}) and no compatible install was found "
+                    "automatically. crewhall will not launch or drive it: install a supported "
+                    "version, pin one in Settings → Providers, or set "
+                    "agents.allow_unvalidated_versions to override."
+                ),
+            )
+        if notice is None:
+            return
+        try:
+            from .. import watch
+
+            watch.notify(notice["title"], notice["body"])
+        except Exception:  # noqa: BLE001 - a desktop notification is best effort
+            log.debug("desktop notification failed", exc_info=True)
+
+    def check_provider_versions(self) -> list[dict[str, Any]]:
+        """Resolve every enabled provider; record a notice on a version change.
+
+        Cheap (version probes are cached). Called at daemon start, after a
+        settings change and on every agent launch, so a CLI update is detected
+        and explained without the user having to run anything.
+        """
+        out: list[dict[str, Any]] = []
+        for kind in settings._kinds():
+            if not settings.provider_enabled(kind):
+                continue
+            try:
+                primary = versions.evaluate(kind, settings.provider_primary_command(kind))
+                argv, report, switched = settings.provider_effective_command(kind)
+            except Exception:  # noqa: BLE001 - a broken provider must not hide the rest
+                log.debug("version check failed for %s", kind, exc_info=True)
+                continue
+            self._record_version_notice(kind, primary, report, switched)
+            out.append({
+                "kind": kind, "primary": primary.to_dict(), "effective": report.to_dict(),
+                "switched": switched, "command": argv,
+            })
+        return out
+
+    def _assert_operable(self, harness: Harness) -> None:
+        """Refuse to drive an agent whose CLI version is unsupported (version gate)."""
+        if not getattr(harness, "version_blocked", False):
+            return
+        report = getattr(harness, "version_report", None)
+        if report is not None:
+            raise UnsupportedVersionError(report)
+        raise HarnessError(harness.agent_id, "its CLI version is not supported")
+
     def _launch_command(
         self,
         kind: str,
@@ -131,11 +248,18 @@ class ServicesAgents:
         mcp_args: list[str] | None = None,
         host: str | None = None,
         resume: str | None = None,
+        enforce: bool = True,
     ) -> list[str]:
         cls = get_harness(kind)
         # A remote agent runs the remote machine's own CLI (bare name, remote
         # PATH): a local override path or local settings file means nothing there.
-        command = cls.command() if host else (settings.provider_command(kind) or cls.command())
+        command, report, _used = self._resolve_provider_command(kind, host)
+        # ``enforce`` is False for a relaunch/restore of an *existing* agent:
+        # restarting must always work (it is what moves the agent onto the
+        # compatible binary), so a still-blocked command is launched and the
+        # agent is simply marked blocked instead of refusing to start.
+        if enforce:
+            self._enforce_version(kind, report)
         if resume and not host:
             # Continue an existing conversation instead of starting a new one.
             if kind == "claude":
@@ -395,6 +519,7 @@ class ServicesAgents:
         harness = harness_cls(session, name=name)
         harness.conversation_id = conversation_id
         self._attach_link(harness, link)
+        self._attach_version(harness, kind, host)
         self.agents.add(harness)
         if conversation and not host:
             # A chat runs in a crewhall-owned isolated workspace, so accept the
@@ -463,6 +588,9 @@ class ServicesAgents:
         self._maybe_sync_interactions(harness)
         summary = harness.info().to_dict()
         summary["args"] = list(self._agent_args.get(harness.agent_id, []))
+        # Version gate: the CLI version the agent runs and whether it is inside
+        # the range its adapter was verified against (and thus drivable).
+        summary["cli"] = self._agent_versions.get(harness.agent_id)
         # True when a full conversation can be read for this agent (it may
         # still be empty before the first message).
         summary["history"] = bool(harness.supports_history)

@@ -20,6 +20,7 @@ class ServicesMessaging:
         Waits up to ``timeout`` for the agent to be idle, then refuses
         (HarnessError): nothing is queued.
         """
+        self._assert_operable(harness)
         commands = harness.new_session_commands
         if not commands:
             raise HarnessError(harness.agent_id, f"{harness.kind} agents have no new-session command")

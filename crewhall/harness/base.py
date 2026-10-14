@@ -197,6 +197,12 @@ class Harness(ABC):
     conversation_since: float = 0.0
     # Set by the controller for agents that expose a local server (OpenCode).
     link: Any = None
+    # Version gate, filled by the controller at launch (see harness.versions):
+    # ``version_report`` is a VersionReport and ``version_blocked`` is True when
+    # the CLI is outside the range the adapter was verified against and the
+    # operator has not allowed unvalidated versions.
+    version_report: Any = None
+    version_blocked: bool = False
 
     def history(self, limit: int = 200, before: int | None = None) -> dict[str, Any]:
         """Full conversation history, or ``available: False`` if not supported."""

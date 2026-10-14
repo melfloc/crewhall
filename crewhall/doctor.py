@@ -226,26 +226,38 @@ def check_agent_version_ranges() -> list[Check]:
 
     Adapters key on phrases from the TUI; an upstream release can move them. We
     cannot test against every version, so we flag the ones we have not verified.
+    The command checked is the *effective* one (a configured provider command,
+    with the configured fallback already auto-selected).
     """
-    from .harness import versions as harness_versions
+    from . import settings
 
     out: list[Check] = []
+    allowed = bool(settings.get("agents.allow_unvalidated_versions"))
     for kind in ("claude", "codex", "opencode"):
-        path = shutil.which(kind)
-        if not path:
+        try:
+            argv, report, used_fallback = settings.provider_effective_command(kind)
+        except Exception as exc:  # noqa: BLE001 - a bad provider must not hide the rest
+            out.append(_res(f"cli:{kind} version", "warn", f"cannot resolve command: {exc}"))
             continue
-        text = _version_of([kind, "--version"])
-        rng = harness_versions.validated_range(kind)
-        if rng is None:
+        if not argv:
             continue
-        supported = harness_versions.is_supported(kind, text)
-        captured = rng.get("captured", "?")
-        if supported is False:
-            out.append(_res(
-                f"cli:{kind} version", "warn", f"{text or 'unknown'} outside validated range",
-                f"Last verified against {captured}. Re-check the adapter and ADAPTERS.md."))
-        elif supported is True:
-            out.append(_res(f"cli:{kind} version", "ok", text or captured))
+        detail = report.text or "unknown"
+        if report.supported is False:
+            if allowed:
+                out.append(_res(f"cli:{kind} version", "warn",
+                                f"{detail} outside validated range",
+                                "allowed by agents.allow_unvalidated_versions"))
+            else:
+                hint = (f"Using fallback {argv[0]!r} but it is also out of range."
+                        if used_fallback
+                        else f"Last verified against {report.captured}. "
+                             "Configure a supported binary or a fallback_command, "
+                             "then re-check the adapter and ADAPTERS.md.")
+                out.append(_res(f"cli:{kind} version", "warn",
+                                f"{detail} outside validated range", hint))
+        elif report.supported is True:
+            suffix = f" (fallback {argv[0]})" if used_fallback else ""
+            out.append(_res(f"cli:{kind} version", "ok", f"{detail}{suffix}"))
     return out
 
 

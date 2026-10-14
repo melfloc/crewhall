@@ -45,15 +45,25 @@ class FixturesStayInRange(unittest.TestCase):
 
 
 class DoctorWarnsOutOfRange(unittest.TestCase):
+    def _report(self, supported: bool, text: str) -> versions.VersionReport:
+        return versions.VersionReport(
+            "claude", ("claude",), text, versions.parse_version(text), supported,
+            "2.1.284", "outside the validated range",
+        )
+
     def test_out_of_range_cli_is_a_warning(self):
-        with mock.patch("crewhall.doctor.shutil.which", return_value="/usr/bin/claude"), \
-                mock.patch("crewhall.doctor._version_of", return_value="2.0.0"):
+        report = self._report(False, "2.0.0")
+        with mock.patch("crewhall.settings.provider_effective_command",
+                        return_value=(["claude"], report, False)), \
+                mock.patch("crewhall.settings.get", return_value=False):
             checks = doctor.check_agent_version_ranges()
         self.assertTrue(any(c["status"] == "warn" for c in checks), checks)
 
     def test_supported_cli_is_ok(self):
-        with mock.patch("crewhall.doctor.shutil.which", return_value="/usr/bin/claude"), \
-                mock.patch("crewhall.doctor._version_of", return_value="2.1.284"):
+        report = self._report(True, "2.1.284")
+        with mock.patch("crewhall.settings.provider_effective_command",
+                        return_value=(["claude"], report, False)), \
+                mock.patch("crewhall.settings.get", return_value=False):
             checks = doctor.check_agent_version_ranges()
         self.assertTrue(any(c["status"] == "ok" for c in checks), checks)
 

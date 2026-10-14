@@ -47,6 +47,7 @@ class ServicesControl:
 
     def interrupt_agent(self, target: str, by: str = "user") -> dict[str, Any]:
         harness = self.agents.resolve(target)
+        self._assert_operable(harness)
         ok = harness.interrupt()
         self._log_action(harness, "interrupt", by)
         if by != "user":
@@ -61,6 +62,8 @@ class ServicesControl:
         if pid is None and not all_shells:
             raise ProcessError("a --pid or --all-shells is required")
         harness = self.agents.resolve(target)
+        # Containment is never gated: killing a stuck process must work even on
+        # an agent whose CLI version crewhall will not drive.
         results: list[dict[str, Any]] = []
         if all_shells:
             listing = self.list_processes(harness.agent_id)
@@ -82,6 +85,8 @@ class ServicesControl:
         by: str = "user", timeout: float = 30.0,
     ) -> dict[str, Any]:
         harness = self.agents.resolve(target)
+        # Restart is never gated: it is exactly what relaunches the agent on the
+        # compatible binary (the version report is recalculated afterwards).
         agent_id = harness.agent_id
         if by != "user" and by == agent_id:
             raise MessagingError("an agent cannot restart itself")
@@ -110,7 +115,7 @@ class ServicesControl:
             new_spec = SessionSpec(
                 command=self._launch_command(
                     kind, args, new_conv, link.port if link else None, host=host,
-                    resume=resume_id,
+                    resume=resume_id, enforce=False,
                 ),
                 cwd=spec.cwd,
                 env=env,
@@ -126,6 +131,7 @@ class ServicesControl:
             revived = get_harness(kind)(session, name=harness.name)
             revived.conversation_id = new_conv
             self._attach_link(revived, link)
+            self._attach_version(revived, kind, host)
             self.agents.add(revived)
             self._persist()
             if not host:

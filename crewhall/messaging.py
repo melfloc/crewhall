@@ -286,6 +286,16 @@ class Messaging:
     ) -> Delivery:
         """Shared delivery path for ``send`` (agent) and ``send_system``."""
         recipient_harness = self._resolve(recipient, "recipient")
+        # Version gate: never type into a TUI whose CLI is outside the range the
+        # adapter was verified against (the screen signals may have moved).
+        if getattr(recipient_harness, "version_blocked", False):
+            from .harness import versions as harness_versions
+
+            report = getattr(recipient_harness, "version_report", None)
+            raise MessagingError(
+                harness_versions.blocked_reason(report)
+                or f"{recipient_harness.kind} CLI version is not supported"
+            )
         if sender_harness is not None and sender_harness.agent_id == recipient_harness.agent_id:
             raise MessagingError(
                 f"cannot send a message from an agent to itself "

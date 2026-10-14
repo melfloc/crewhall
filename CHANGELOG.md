@@ -5,6 +5,56 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [Unreleased]
+
+**Puerta de versión de las CLI de agente (gate) y pin de binario.** Un cambio de
+versión de un agente puede mover las frases de su TUI (o su API/CLI) en las que el
+adaptador se apoya. Ahora crewhall no solo lo avisa: **se niega a lanzar o manejar**
+una CLI fuera del rango validado, hasta revisar el adaptador.
+
+- **Gate en lanzar y operar.** `crewhall/harness/versions.py` resuelve el comando
+  efectivo de cada provider y lo sondea (`<bin> --version`). Crear, reiniciar o
+  restaurar un agente con una versión fuera del rango falla con
+  `UnsupportedVersionError`; mensajería, `interrupt`, `signal` y `restart` se niegan
+  a tocar un agente ya marcado como no soportado (el reporte se guarda por agente y
+  se expone en `agent_summary["cli"]`/`crewhall agent status`).
+- **Switch automático, sin intervención.** Si el binario primario queda fuera del
+  rango, crewhall busca solo otra instalación compatible y la usa: el
+  `providers.<kind>.fallback_command` configurado, y si no, las instalaciones que
+  encuentra en disco (mise/asdf: `<root>/*/kind` y `<root>/*/bin/kind`, además de
+  `~/.local/bin`, `~/.opencode/bin` y `~/.local/share/crewhall/bin`), eligiendo la
+  de versión más alta que esté dentro del rango. `CREWHALL_DISCOVERY_PATH` permite
+  fijar/limitar los directorios. Se controla con `agents.auto_select_compatible`
+  (on por defecto). Con el switch, el adaptador validado sigue funcionando tras un
+  upgrade de la CLI; el adaptador de la versión anterior queda como *legacy*.
+- **Aviso con modal.** El switch (o el bloqueo si no hay nada compatible) se
+  registra como *notice* (`crewhall/notices.py`, en `state/notices.json`) y se
+  notifica: modal en la Web UI (`notices.js`, op `provider_notices`/`notice_ack`)
+  + notificación de escritorio. El texto explica que crewhall lo detectó **y**
+  cambió de binario solo, sin que el usuario toque nada. El chequeo corre al
+  arrancar el daemon, al cambiar Settings y en cada lanzamiento de agente.
+- **Solo el binario del provider.** Si `providers.<kind>.command` apunta a un wrapper
+  u otra herramienta (basename ≠ `kind`), se reporta la versión pero no se bloquea.
+- **Override.** `agents.allow_unvalidated_versions` (Settings → Agents, off por
+  defecto) degrada el bloqueo a aviso para pruebas puntuales.
+- **OpenCode v2.** El rango validado de `opencode` es `>=1.0.0, <2.0.0`, así que
+  actualizar a la v2 **bloquea** los agentes OpenCode hasta migrar el adaptador
+  (nueva API `/api/...`, respuestas con `{data}`/cursor, *forms* en vez de
+  `question`, `abort`→`interrupt`, y la CLI v2 ya no acepta `--port` +
+  `OPENCODE_SERVER_PASSWORD`). Diferencias completas y plan de migración en
+  `ADAPTERS.md` §8. Mientras tanto, fija un binario 1.x vía
+  `providers.opencode.command`/`fallback_command`.
+- **`crewhall doctor`** reporta el estado de cada CLI con el comando ya resuelto
+  (primario o fallback) y avisa si el override está activo.
+- Pruebas de regresión nuevas (`tests/test_version_gate.py`): parsing/selection,
+  auto-descubrimiento y switch sin fallback, bloqueo al lanzar y al operar, y el
+  store de notices.
+- **Script** `scripts/opencode_v2_switch_test.py`: prueba el ciclo completo en local
+  en 3 fases (antes de actualizar = v1 funciona; después = v2 con un v1 instalado
+  → switch automático + modal; después sin v1 → bloqueo). `--real` reporta el veredicto
+  de la máquina para correr antes/después del upgrade real.
+
+
 ## [0.82.0] — 2026-10-13
 
 **Leads y contención de agentes.** Los equipos ya tienen *leads* que consultan el

@@ -34,7 +34,8 @@ class ServicesStatus:
         interactions = summary.get("interactions") or []
         host = self._agent_hosts.get(harness.agent_id)
         draft = self._human_draft(harness)
-        blocked = self._blocked_by(state, interactions, draft)
+        version_blocked = bool(getattr(harness, "version_blocked", False))
+        blocked = self._blocked_by(state, interactions, draft, version_blocked)
         since = self._state_since(harness, state)
         out: dict[str, Any] = {
             "agent_id": harness.agent_id,
@@ -58,6 +59,8 @@ class ServicesStatus:
                 for i in interactions
             ],
             "human_draft": draft,  # boolean only: never the draft's text
+            "version_blocked": version_blocked,
+            "cli": summary.get("cli"),
             "processes": self._status_processes(harness, host, include_output),
             "subagents": sorted(self._opencode_children.get(harness.agent_id, set())),
             "queue": self.messaging.queue_info(harness.agent_id),
@@ -73,8 +76,14 @@ class ServicesStatus:
             return False
 
     @staticmethod
-    def _blocked_by(state: str, interactions: list[dict[str, Any]], draft: bool) -> list[str]:
+    def _blocked_by(state: str, interactions: list[dict[str, Any]], draft: bool,
+                    version_blocked: bool = False) -> list[str]:
         reasons: list[str] = []
+        if version_blocked:
+            # Hard block: the CLI is outside the range its adapter was verified
+            # against, so crewhall refuses to type into it (killing/restarting it
+            # is still allowed). The version and the reason ride along in "cli".
+            reasons.append("unsupported_cli_version")
         if state == "starting":
             reasons.append("starting")
         elif state in ("exited", "error"):

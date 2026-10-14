@@ -20,7 +20,6 @@ import re
 import shlex
 import shutil
 import stat
-import subprocess
 import threading
 import time
 from typing import Any
@@ -61,8 +60,8 @@ def schema() -> list[dict[str, Any]]:
 
 
 def provider_defaults(kind: str) -> dict[str, Any]:
-    return {"enabled": True, "command": "", "default_args": "", "default_model": "", "env": {},
-            "mcp": False, "models": []}
+    return {"enabled": True, "command": "", "fallback_command": "", "default_args": "",
+            "default_model": "", "env": {}, "mcp": False, "models": []}
 
 
 _LOCK = threading.RLock()
@@ -161,22 +160,22 @@ def _provider_value(field: str, value: Any, kind: str) -> Any:
         if len(value) > 50 or any(len(v) > 200 or "\0" in v or "\n" in v for v in value):
             raise SettingsError(f"{key}: up to 50 model names")
         return value
-    if field in ("command", "default_args", "default_model"):
+    if field in ("command", "fallback_command", "default_args", "default_model"):
         if not isinstance(value, str) or len(value) > 1024 or "\0" in value or "\n" in value:
             raise SettingsError(f"{key}: a single line of text expected")
         value = value.strip()
-        if field != "command":
-            try:
-                shlex.split(value)
-            except ValueError as exc:
-                raise SettingsError(f"{key}: {exc}") from exc
-        else:
+        if field in ("command", "fallback_command"):
             try:
                 parts = shlex.split(value)
             except ValueError as exc:
                 raise SettingsError(f"{key}: {exc}") from exc
             if value and not parts:
                 raise SettingsError(f"{key}: empty command")
+        else:
+            try:
+                shlex.split(value)
+            except ValueError as exc:
+                raise SettingsError(f"{key}: {exc}") from exc
         return value
     raise SettingsError(f"unknown provider setting {key!r}")
 
@@ -408,6 +407,41 @@ def provider_command(kind: str) -> list[str] | None:
     return shlex.split(cmd) if cmd else None
 
 
+def provider_fallback_command(kind: str) -> list[str] | None:
+    """The alternate binary used when the primary one is out of its validated range."""
+    cmd = provider(kind).get("fallback_command") or ""
+    return shlex.split(cmd) if cmd else None
+
+
+def provider_primary_command(kind: str) -> list[str]:
+    """The configured (or built-in) command, before any version auto-selection."""
+    from .harness import get_harness
+
+    return provider_command(kind) or get_harness(kind).command()
+
+
+def provider_effective_command(kind: str) -> tuple[list[str], Any, bool]:
+    """The command crewhall will actually run, applying version auto-selection.
+
+    Returns ``(argv, report, used_fallback)``. Candidates, in priority order:
+    the primary binary, the configured ``fallback_command`` (if any), and then
+    other installs found on disk (mise/asdf/…). When the primary is outside the
+    validated range, the best in-range candidate is used automatically, so an
+    upstream CLI upgrade never leaves crewhall waiting for a manual fix. With
+    ``agents.auto_select_compatible`` off, only the configured fallback is tried.
+    """
+    from .harness import versions
+
+    primary = provider_primary_command(kind)
+    candidates: list[list[str]] = [primary]
+    fallback = provider_fallback_command(kind)
+    if fallback:
+        candidates.append(fallback)
+    if get("agents.auto_select_compatible"):
+        candidates.extend(versions.discover_candidates(kind, exclude=[primary[0]]))
+    return versions.select_command(kind, candidates)
+
+
 def provider_args(kind: str, given: list[str] | None = None) -> list[str]:
     """Default args/model ahead of the agent's own; an explicit ``--model`` wins."""
     cfg = provider(kind)
@@ -431,13 +465,13 @@ def provider_models(kind: str) -> list[str]:
 _STANDARD_BIN_PREFIXES = ("/usr/", "/opt/", "/bin/", "/sbin/", "/snap/", "/nix/")
 
 
-def validate_provider_command(kind: str, command: str) -> None:
+def validate_provider_command(kind: str, command: str, field: str = "command") -> None:
     """Reject a provider command that could not be run safely (raises SettingsError)."""
     argv = shlex.split(command) if command else []
     if not argv:
         return
     first = argv[0]
-    key = f"providers.{kind}.command"
+    key = f"providers.{kind}.{field}"
     if "/" in first:
         path = os.path.expanduser(first)
         if not os.path.isabs(path):
@@ -568,7 +602,9 @@ def patch(changes: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
     touched = set()
     for key in changes:
         parts = str(key).split(".")
-        if len(parts) == 3 and parts[0] == "providers" and parts[2] in ("command", "env"):
+        if len(parts) == 3 and parts[0] == "providers" and parts[2] in (
+            "command", "fallback_command", "env"
+        ):
             touched.add(parts[2])
     if touched and not confirm:
         raise SettingsError(
@@ -598,8 +634,8 @@ def patch(changes: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
                     old = provider(kind)["env"]
                     value = {k: (old.get(k, "") if v == MASK else v) for k, v in value.items()}
                 clean = _provider_value(field, value, kind)
-                if field == "command":
-                    validate_provider_command(kind, clean)
+                if field in ("command", "fallback_command"):
+                    validate_provider_command(kind, clean, field=field)
                 data.setdefault("providers", {}).setdefault(kind, {})[field] = clean
                 continue
             item = _find(str(key))
@@ -641,10 +677,15 @@ _VERSION_CACHE: dict[tuple[str, ...], tuple[float, dict[str, Any]]] = {}
 
 def check_provider(kind: str, command: str | None = None) -> dict[str, Any]:
     """Is the binary there, and what version does it report? (never raises)"""
-    from .harness import get_harness
+    from .harness import versions
 
     try:
-        argv = shlex.split(command) if command else (provider_command(kind) or get_harness(kind).command())
+        if command:
+            argv = shlex.split(command)
+            used_fallback = False
+            report = versions.evaluate(kind, argv)
+        else:
+            argv, report, used_fallback = provider_effective_command(kind)
     except ValueError as exc:
         return {"kind": kind, "ok": False, "error": str(exc)}
     if not argv:
@@ -654,18 +695,13 @@ def check_provider(kind: str, command: str | None = None) -> dict[str, Any]:
     if hit and time.monotonic() - hit[0] < 30:
         return hit[1]
     found = shutil.which(argv[0])
-    out: dict[str, Any] = {"kind": kind, "command": argv, "path": found, "ok": bool(found)}
+    out: dict[str, Any] = {
+        "kind": kind, "command": argv, "path": found, "ok": bool(found),
+        "version": report.text, "supported": report.supported, "blocked": report.blocked,
+        "reason": report.reason, "captured": report.captured,
+        "fallback_used": used_fallback,
+    }
     if not found:
         out["error"] = f"{argv[0]!r} not found in PATH"
-    else:
-        try:
-            r = subprocess.run([*argv, "--version"], capture_output=True, text=True, timeout=5,
-                               stdin=subprocess.DEVNULL)
-            text = (r.stdout or r.stderr).strip().splitlines()
-            out["version"] = text[0][:120] if text else None
-            if r.returncode != 0:
-                out.update(ok=False, error=f"--version exited with {r.returncode}")
-        except (OSError, subprocess.SubprocessError) as exc:
-            out.update(ok=False, error=str(exc))
     _VERSION_CACHE[key] = (time.monotonic(), out)
     return out

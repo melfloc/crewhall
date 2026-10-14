@@ -132,7 +132,7 @@ class ServicesPersistence:
             self._overlay_persisted(session, agent)
         else:
             spec = SessionSpec(
-                command=self._launch_command(agent["kind"], extra_args, host=host),
+                command=self._launch_command(agent["kind"], extra_args, host=host, enforce=False),
                 cwd=agent.get("cwd") or (None if host else os.getcwd()),
                 env=None,
                 cols=int(agent.get("cols", 120)),
@@ -150,6 +150,7 @@ class ServicesPersistence:
         # Keep the last conversation readable for a stopped agent (Claude reads
         # it from its on-disk file; a revived agent gets a new id).
         harness.conversation_id = agent.get("conversation_id")
+        self._attach_version(harness, agent["kind"], host)
         self.agents.add(harness)
         self._base_env[agent_id] = dict(agent.get("env") or {})
         self._agent_tokens.setdefault(agent_id, secrets.token_hex(16))
@@ -287,7 +288,7 @@ class ServicesPersistence:
             new_spec = SessionSpec(
                 command=self._launch_command(
                     kind, self._agent_args.get(agent_id, []), conversation_id,
-                    link.port if link else None, host=host,
+                    link.port if link else None, host=host, enforce=False,
                 ),
                 cwd=spec.cwd,
                 env=env,
@@ -304,6 +305,7 @@ class ServicesPersistence:
             revived = get_harness(kind)(session, name=harness.name)
             revived.conversation_id = conversation_id
             self._attach_link(revived, link)
+            self._attach_version(revived, kind, host)
             self._persist()
             self.agents.add(revived)
             if not host:

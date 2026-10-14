@@ -256,6 +256,9 @@ def _print_status(st: dict) -> None:
         print(f"    queued messages: {q['count']} (oldest {q.get('oldest_age')}s)")
     else:
         print("    queued messages: 0")
+    cli = st.get("cli") or {}
+    if cli.get("blocked"):
+        print(f"    cli: {cli.get('version') or 'unknown'} unsupported — {cli.get('reason')}")
     blocked = st.get("blocked_by") or []
     print(f"    deliverable_now: {st.get('deliverable_now')}"
           + (f"  blocked_by={blocked}" if blocked else ""))

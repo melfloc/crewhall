@@ -39,6 +39,18 @@ def _static_schema() -> list[dict[str, Any]]:
         s("agents.hooks", "agents", "bool", True, "Lifecycle hooks",
           "Lets agents report state and permission requests. Applies to agents created afterwards.",
           env="CREWHALL_HOOKS", restart=True),
+        s("agents.auto_select_compatible", "agents", "bool", True,
+          "Auto-select a compatible CLI",
+          "On: if a provider's binary is outside the range its adapter was verified against, "
+          "crewhall automatically falls back to another installed version (mise/asdf, a pinned "
+          "fallback_command, ~/.local/bin…) and notifies you. Off: it only uses fallback_command.",
+          restart=True),
+        s("agents.allow_unvalidated_versions", "agents", "bool", False,
+          "Allow unverified CLI versions",
+          "Off: crewhall refuses to launch or drive an agent whose CLI version is outside the "
+          "range the adapter was verified against (see `crewhall doctor`). Configure a supported "
+          "binary or a fallback_command per provider instead of turning this on.",
+          restart=True),
         s("agents.conversations", "agents", "bool", True, "Read conversations",
           "Enables the Conversation tab (Claude transcripts / OpenCode server).",
           env="CREWHALL_CONVERSATIONS", restart=True),

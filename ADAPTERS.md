@@ -163,8 +163,8 @@ class ExampleHarness(Harness):
 
 Cada adaptador prioriza **señales estructuradas** sobre el scraping; la pantalla es
 el respaldo. Esta tabla dice qué fuente gana y qué versión se verificó por última vez
-(`crewhall doctor` avisa si la CLI instalada queda fuera del rango, ver
-`crewhall/harness/versions.py`).
+(`crewhall doctor` avisa —y el gate **bloquea**— si la CLI instalada queda fuera del
+rango, ver `crewhall/harness/versions.py` y la subsección siguiente).
 
 | Kind | Fuente primaria | Respaldo | Versión validada |
 |---|---|---|---|
@@ -176,6 +176,64 @@ Las fixtures de `tests/fixtures/screens/<kind>/` son capturas reales por versió
 kit de contrato (§9) las valida contra `_detect`. `tests/test_adapter_versions.py`
 comprueba además que la versión capturada en cada fixture siga dentro del rango
 validado.
+
+### Puerta de versión (gate) y pin de binario
+
+Una versión fuera del rango no solo se avisa: **bloquea**. `crewhall/harness/versions.py`
+resuelve el comando efectivo de cada provider y lo sondea (`<bin> --version`):
+
+- **Lanzar**: `_launch_command` llama a `_enforce_version`; crear (o reiniciar/restaurar)
+  un agente con una CLI fuera del rango lanza `UnsupportedVersionError`.
+- **Operar**: el reporte se guarda por agente y `_deliver`/`interrupt`/`signal`/`restart`
+  se niegan a tocar un agente con `version_blocked` (así una actualización por debajo
+  no deja a crewhall tecleando en una TUI cuyas señales cambiaron).
+- **Switch automático**: si el binario primario está fuera del rango, crewhall elige
+  solo otra instalación compatible, sin pedir nada al usuario. Candidatos en orden: el
+  `providers.<kind>.fallback_command` configurado, y luego las instalaciones que
+  descubre en disco (`discover_candidates`: mise/asdf `<root>/*/kind` y
+  `<root>/*/bin/kind`, `~/.local/bin`, `~/.opencode/bin`, `~/.local/share/crewhall/bin`;
+  `CREWHALL_DISCOVERY_PATH` lo limita). Gana la versión más alta dentro del rango. Se
+  desactiva con `agents.auto_select_compatible=false`. Nunca elige un candidato fuera
+  de rango, así que uno malo no empeora las cosas; el adaptador validado sigue
+  funcionando tras el upgrade y el de la versión anterior queda *legacy*.
+- **Aviso (modal)**: el switch (o el bloqueo) se guarda como *notice* y se notifica:
+  modal en la Web UI + notificación de escritorio, indicando que crewhall lo detectó y
+  aplicó el cambio automáticamente. Ver `crewhall/notices.py` y `web/static/js/notices.js`.
+- **Prueba local**: `scripts/opencode_v2_switch_test.py` corre las 3 fases (v1 / v2 con
+  v1 disponible / v2 sin nada compatible) en un sandbox, y `--real` reporta el estado
+  real de la máquina antes y después del upgrade.
+- **Solo aplica al binario del provider**: si `command` apunta a un wrapper u otra
+  herramienta (basename ≠ `kind`), el sondeo se reporta pero **no** bloquea; la versión
+  de un comando ajeno no dice nada de la TUI que crewhall va a manejar.
+- **Override**: `agents.allow_unvalidated_versions=true` (Settings → Agents) degrada el
+  bloqueo a aviso. Úsalo solo de forma temporal tras revisar el adaptador.
+- `crewhall doctor` informa el estado de cada CLI con el comando efectivo ya resuelto
+  (primario o fallback) y avisa del override activo.
+
+### OpenCode v2 — cambios que rompen el adaptador (pendiente)
+
+OpenCode 2 es un cambio de ruptura profundo; el rango validado de `opencode`
+(`>=1.0.0, <2.0.0`) hace que el gate lo **bloquee** hasta migrar el adaptador.
+Diferencias a cubrir al portar (verificado contra `https://opencode.ai/v2/openapi.json`):
+
+| crewhall (v1) | OpenCode v2 |
+|---|---|
+| `GET /session` (lista) | `GET /api/session` — cursor-paginado, responde `{data, cursor}`, filtra por `directory`/`parentID` |
+| `GET /session/{id}` | `GET /api/session/{sessionID}` → `{data: Session.Info}` |
+| `GET /session/{id}/message` | `GET /api/session/{sessionID}/message` — cursor, *projected messages* (`Session.Message.*`) |
+| `POST /session/{id}/abort` | `POST /api/session/{sessionID}/interrupt` |
+| `GET /permission` (global) | `GET /api/permission/request` o por sesión `GET /api/session/{sessionID}/permission` |
+| `POST /permission/{id}/reply` | `POST /api/session/{sessionID}/permission/{requestID}/reply`, `{reply: once\|always\|reject, message?}` |
+| `GET /question` + `reply`/`reject` | *forms*: `GET /api/form`, `POST /api/session/{sessionID}/form/{formID}/reply` |
+| `GET /provider` | `GET /api/provider` → `{data: Provider.Info[]}` |
+| `GET /event` (SSE) | `GET /api/event` (tipos de evento codificados; por verificar) |
+| CLI `opencode --port` + `OPENCODE_SERVER_PASSWORD` | **eliminado**: v2 usa un servicio de fondo compartido (`--standalone` / `--server <url>`) |
+| campo de config `server` | ignorado en v2; `provider/agent/command/mcp` → `providers/agents/commands/mcp.servers` |
+| id de sesión `^ses_[A-Za-z0-9]+$` | patrón `^ses` (revisar `_SESSION` y `_CONVERSATION_ID`) |
+
+Mientras no se migre `opencode_link.py` y `harness/opencode.py`, la opción soportada es
+fijar un binario 1.x como `providers.opencode.command` (o `fallback_command`) para no
+perder el adaptador al actualizar la CLI del sistema.
 
 ### Texto fantasma (placeholder/sugerencia) y borradores humanos
 

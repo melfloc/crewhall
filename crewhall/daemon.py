@@ -226,6 +226,11 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
         self.controller.workers.spawn("collab-watcher", self._collab_watcher)
         # Append a health sample (memory, threads, queue, failures, versions) every 10 min.
         self.controller.workers.spawn("health-journal", self._health_journal)
+        # Resolve provider CLI versions once at start: if a CLI moved outside its
+        # adapter's validated range, switch to a compatible binary automatically
+        # and record a notice the Web UI shows in a modal.
+        self.controller.workers.spawn(
+            "provider-versions", self.controller.check_provider_versions, restart=False)
         try:
             from . import chat as conversations
 
