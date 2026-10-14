@@ -49,14 +49,19 @@ una CLI fuera del rango validado, hasta revisar el adaptador.
 - Pruebas de regresión nuevas (`tests/test_version_gate.py`): parsing/selection,
   auto-descubrimiento y switch sin fallback, bloqueo al lanzar y al operar, y el
   store de notices.
-- **OpenCode v2 — base de la migración.** `OpenCodeLink` detecta el contrato del
-  servidor (`/api/info`) y soporta rutas/formas v2: historial con `{data}`, `discover`
-  por `directory`, `abort`→`interrupt`, permisos por sesión y *forms* en vez de
-  `question`. Cubierto con un servidor HTTP v2 falso en `tests/test_opencode_link.py`.
-  **Pendiente** (por eso `VALIDATED["opencode"]` sigue en `<2.0.0` y v2 se bloquea):
-  el lanzamiento v2 (`serve --port` + `--server`, o `--standalone`), el mapeo de
-  eventos v2 (`{type,data}`) y el catálogo `/api/model`. Detalles y evidencia real en
-  `ADAPTERS.md` §8.
+- **OpenCode v2 soportado (v2 primario, v1 legacy).** Un solo `kind` `opencode` que
+  detecta el contrato del servidor (`/api/info`) y habla v1 y v2. Lanzamiento v2:
+  crewhall arranca un `opencode serve --port N` por agente (contraseña por entorno,
+  nunca argv), espera `/api/info` y conecta la TUI con `--server` (v2 no acepta
+  `--port`; `--standalone` no permite conocer la contraseña). Ciclo de vida completo
+  (crear/restart/force_restart/restore tras reinicio del daemon/kill), sin dejar el
+  `serve` huérfano al matar el agente; el puerto/contraseña se persisten para
+  reconectar al adoptar una TUI superviviente. Eventos v2 (`session.execution.
+  started/succeeded`, `session.created`, `form.*`), procesos bajo el `serve`,
+  modelos `/api/model`, permisos `once|always|reject`, y `COMPLETION_RE` con `ms`.
+  Se omiten `--model`/`--agent` en v2 (la TUI los rechaza y sale).
+  `VALIDATED["opencode"]` pasa a `>=1.0.0, <3.0.0` (capturas 1.18.34 / 2.0.28) tras
+  pasar `smoke` 6/6 y `control_check` 5/5 **con v2 aislado y con v1.19.0**.
 - **Script** `scripts/opencode_v2_switch_test.py`: prueba el ciclo completo en local
   en 3 fases (antes de actualizar = v1 funciona; después = v2 con un v1 instalado
   → switch automático + modal; después sin v1 → bloqueo). `--real` reporta el veredicto

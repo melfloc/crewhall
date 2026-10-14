@@ -169,7 +169,7 @@ rango, ver `crewhall/harness/versions.py` y la subsección siguiente).
 | Kind | Fuente primaria | Respaldo | Versión validada |
 |---|---|---|---|
 | `claude` | hooks (`SessionStart`/`UserPromptSubmit`/`Stop`/`PermissionRequest`) + transcript JSONL | pantalla | 2.1.284 |
-| `opencode` | servidor local HTTP + eventos SSE (`session.status`, `permission.asked`…) | pantalla | 1.18.34 |
+| `opencode` | servidor local HTTP + eventos SSE (`session.execution.*` en v2, `session.status` en v1) | pantalla | 1.18.34 / 2.0.28 |
 | `codex` | rollout JSONL (`task_started` / `task_complete`) | pantalla | 0.158.0 |
 
 Las fixtures de `tests/fixtures/screens/<kind>/` son capturas reales por versión; el
@@ -231,22 +231,39 @@ Diferencias a cubrir al portar (verificado contra `https://opencode.ai/v2/openap
 | campo de config `server` | ignorado en v2; `provider/agent/command/mcp` → `providers/agents/commands/mcp.servers` |
 | id de sesión `^ses_[A-Za-z0-9]+$` | patrón `^ses` (revisar `_SESSION` y `_CONVERSATION_ID`) |
 
-**Estado (parcial, 0.83.0-dev).** `OpenCodeLink` ya habla los dos contratos: detecta
-el servidor sondeando `/api/info` (`detect_api`) y usa rutas/formas v2 para
-historial (`/api/session/{id}/message` → `{data}`), `discover` (query `directory`/
-`parentID=null`, `location.directory`), `abort`→`interrupt`, permisos por sesión
-(`/api/session/{sid}/permission/{rid}/reply`) y *forms* (`/api/form` +
-`/api/session/{sid}/form/{fid}/reply`, `DELETE` para rechazar). El mapeo v2 está
-cubierto por `tests/test_opencode_link.py` (servidor HTTP falso v2). **Pendiente**:
-el *lanzamiento* (v2 no acepta `--port`; hay que arrancar `opencode serve --port N`
-+ `opencode --server http://127.0.0.1:N`, o `--standalone` con descubrimiento de
-puerto), el mapeo de **eventos** v2 (`{type,data}` y nombres nuevos; el controlador
-aún espera `{type,properties}` de v1), el catálogo de modelos (`/api/model` en vez de
-`/api/provider`) y la respuesta de permiso con valores `once|always|reject`. Por eso
-`VALIDATED["opencode"]` sigue en `>=1.0.0, <2.0.0`: **v2 se bloquea** hasta que pase
-smoke + control_check reales. Mientras tanto, la opción soportada es fijar un binario
-1.x como `providers.opencode.command` (o `fallback_command`) para no perder el
-adaptador al actualizar la CLI del sistema.
+**Estado: implementado (v2 primario, v1 legacy).** Un solo `kind` `opencode`; el
+contrato del servidor se detecta en caliente (`OpenCodeLink.detect_api` sondea
+`/api/info`) y `VALIDATED["opencode"]` es `>=1.0.0, <3.0.0` con capturas `1.18.34` y
+`2.0.28`. Ambos pasan `crewhall watch smoke --require` (6/6) y
+`scripts/control_check.py` (5/5).
+
+- **Lanzamiento.** v2 no acepta `--port` en la TUI ni `OPENCODE_SERVER_PASSWORD`
+  en `--standalone` (probado: `--standalone` genera una contraseña que no imprime).
+  Por eso crewhall arranca un `opencode serve --port N --hostname 127.0.0.1` **por
+  agente**, en el cwd del agente (para que su *location* coincida), con la contraseña
+  en el entorno (nunca en argv), espera `/api/info` y lanza la TUI con
+  `--server http://127.0.0.1:N` (la TUI también recibe la contraseña por entorno, o
+  sale al no poder autenticar). v1 sigue con `--port N` dentro de la TUI. El proceso
+  `serve` se rastrea por agente y se mata en `remove_agent`, `restart`/`force_restart`
+  (se reutiliza) y `shutdown`; no queda huérfano al matar el agente.
+- **Reinicio del daemon (A1).** El puerto/contraseña/api se persisten por agente; al
+  adoptar la TUI tmux superviviente, crewhall relanza `serve` en el **mismo** puerto
+  y la TUI reconecta.
+- **Eventos v2** (`{id, type, location, data}`): `session.created` (adoptar),
+  `session.execution.started` → `prompt_submit` y `session.execution.
+  succeeded|failed|interrupted` → `stop`; `permission.asked|replied|rejected` y
+  `form.created|replied|cancelled`. v1 sigue con `session.status`/`session.idle`.
+- **Procesos.** En v2 las herramientas corren en el proceso `serve`, no en la TUI:
+  el escaneo de procesos y el reconocimiento de descendientes usan el pid del
+  `serve` (v1 usa la TUI).
+- **Modelos** (`/api/model` en v2) y **permisos** `once|always|reject` (iguales en
+  ambos).
+- **Pantalla.** La TUI v2 es casi idéntica; la línea de fin de turno usa `ms` en
+  turnos rápidos, así que `COMPLETION_RE` acepta `m?s`; fixtures `*-v2.txt` con sus
+  tests de `_detect`.
+- **Flags v1-only.** La TUI v2 **rechaza** `--model`/`--agent` (y cualquier flag
+  desconocido) y sale; crewhall los omite en lanzamientos v2 (el modelo se elige con
+  el selector o vía API).
 
 **Datos reales de v2 (aislado, 2.0.28).** `opencode serve --port N` imprime
 `server password <pw>` si no se le da `OPENCODE_SERVER_PASSWORD` (y **respeta** esa
