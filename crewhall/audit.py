@@ -32,7 +32,7 @@ AUDITED = {
     "team_remove_member", "team_remove",
     "request_create", "request_reply", "request_cancel", "worktree_discard",
     "interaction_respond", "agent_process_signal", "agent_new_session", "team_new_session",
-    "agent_set_model", "agent_restart",
+    "agent_set_model", "agent_restart", "agent_interrupt", "agent_signal",
     "settings_set", "settings_reset", "provider_check", "frontend_set",
     "reset_plan", "reset_apply", "clean_plan", "clean_apply",
     "bundle_export", "bundle_import", "bundle_delete", "fs_complete",

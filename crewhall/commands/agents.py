@@ -279,6 +279,78 @@ def _print_status(st: dict) -> None:
     print(f"    active sub-agents: {len(subs)}" + (f" {subs}" if subs else ""))
 
 
+def _agent_auth_params() -> dict:
+    sender = brand.env("AGENT_ID")
+    if not sender:
+        return {}
+    return {"sender": sender, "token": brand.env("TOKEN")}
+
+
+def cmd_agent_interrupt(args: argparse.Namespace) -> int:
+    """Stop a teammate's current turn (lead-only from an agent; control plane otherwise)."""
+    try:
+        resp = common._client(args).call(
+            "agent_interrupt", target=args.target, **_agent_auth_params())
+    except RpcError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(resp, indent=2))
+    else:
+        name = resp.get("name") or resp.get("agent_id")
+        print(f"{'interrupted' if resp.get('interrupted') else 'no current turn'}: {name}")
+    return 0
+
+
+def cmd_agent_signal(args: argparse.Namespace) -> int:
+    """Signal a teammate's background process (--pid) or every shell (--all-shells)."""
+    if args.pid is None and not args.all_shells:
+        print("error: a --pid or --all-shells is required", file=sys.stderr)
+        return 2
+    params: dict[str, Any] = {
+        "target": args.target, "signal": args.signal,
+        "pid": args.pid, "all_shells": args.all_shells,
+    }
+    params.update(_agent_auth_params())
+    try:
+        resp = common._client(args).call("agent_signal", **params)
+    except RpcError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(resp, indent=2))
+    else:
+        print(f"signalled {resp['count']} process(es) with {args.signal.upper()}")
+    return 0
+
+
+def cmd_agent_restart(args: argparse.Namespace) -> int:
+    """Force-restart a teammate (lead-only from an agent), resuming by default."""
+    params: dict[str, Any] = {
+        "target": args.target, "fresh": args.fresh, "reason": args.reason, "forced": True,
+    }
+    params.update(_agent_auth_params())
+    try:
+        resp = common._client(args).call("agent_restart", **params)
+    except RpcError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(resp, indent=2))
+        return 0
+    if "agent" in resp and "state" not in resp:
+        _print_agent(resp["agent"])
+        return 0
+    mode = "resumed" if resp.get("resumed") else "fresh"
+    term = resp.get("terminated") or {}
+    print(f"restarted {resp.get('name')}: state={resp.get('state')} ({mode}) "
+          f"in {resp.get('duration')}s; terminated="
+          f"{len(term.get('signalled', []))} signalled, {len(term.get('remaining', []))} remaining")
+    if resp.get("reason"):
+        print(f"    reason: {resp['reason']}")
+    return 0
+
+
 def cmd_agent_status(args: argparse.Namespace) -> int:
     """Status of a teammate: works from an agent (team-scoped) or the human CLI."""
     sender = brand.env("AGENT_ID")

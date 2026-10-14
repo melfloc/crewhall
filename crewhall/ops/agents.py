@@ -93,8 +93,33 @@ class OpsAgents(OpsBase):
         return {"agent": self.controller.agent_summary(harness)}
 
     def _op_agent_interrupt(self, request: dict[str, Any]) -> dict[str, Any]:
-        harness = self.controller.get_agent(request["target"])
-        return {"interrupted": harness.interrupt()}
+        """Stop the current turn (any teammate from an agent; control plane too)."""
+        sender = request.get("sender")
+        by = "user"
+        if sender:
+            sender_h = self.controller.agents.resolve(sender)
+            self.controller._check_token(sender_h.agent_id, request.get("token"))
+            target_h = self.controller.agents.resolve(request["target"])
+            self.controller._authorize_lead(sender_h, target_h)
+            by = sender_h.agent_id
+        return self.controller.interrupt_agent(request["target"], by=by)
+
+    def _op_agent_signal(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Signal a teammate's background process(es); leads only when from an agent."""
+        sender = request.get("sender")
+        by = "user"
+        if sender:
+            sender_h = self.controller.agents.resolve(sender)
+            self.controller._check_token(sender_h.agent_id, request.get("token"))
+            target_h = self.controller.agents.resolve(request["target"])
+            self.controller._authorize_lead(sender_h, target_h)
+            by = sender_h.agent_id
+        pid = request.get("pid")
+        return self.controller.signal_agent(
+            request["target"], str(request.get("signal", "TERM")),
+            pid=int(pid) if pid is not None else None,
+            all_shells=bool(request.get("all_shells")), by=by,
+        )
 
     def _op_agent_models(self, request: dict[str, Any]) -> dict[str, Any]:
         return {"models": self.controller.agent_models(request["target"])}
@@ -210,12 +235,36 @@ class OpsAgents(OpsBase):
         return {"reached": state is target or state == target, "agent": info}
 
     def _op_agent_restart(self, request: dict[str, Any]) -> dict[str, Any]:
-        harness = self.controller.restart_agent(request["target"])
-        try:
-            harness.start(timeout=float(request.get("timeout", 20.0)))
-        except Exception:  # noqa: BLE001 - return the summary even if readiness times out
-            log.exception("agent restart: readiness wait failed")
-        return {"agent": self.controller.agent_summary(harness)}
+        """Restart an agent.
+
+        From an agent (``sender``+``token``): a *forced* restart, only for a lead
+        over a member, resuming the conversation unless ``fresh``. From the
+        control plane it is the legacy revive unless ``forced`` is set (then it
+        resumes/fresh-restarts for the human too).
+        """
+        sender = request.get("sender")
+        if sender:
+            sender_h = self.controller.agents.resolve(sender)
+            self.controller._check_token(sender_h.agent_id, request.get("token"))
+            target_h = self.controller.agents.resolve(request["target"])
+            self.controller._authorize_lead(sender_h, target_h)
+            return self.controller.force_restart_agent(
+                request["target"], fresh=bool(request.get("fresh")),
+                reason=request.get("reason"), by=sender_h.agent_id,
+                timeout=float(request.get("timeout", 30.0)),
+            )
+        if not request.get("forced"):
+            harness = self.controller.restart_agent(request["target"])
+            try:
+                harness.start(timeout=float(request.get("timeout", 20.0)))
+            except Exception:  # noqa: BLE001 - return the summary even if readiness times out
+                log.exception("agent restart: readiness wait failed")
+            return {"agent": self.controller.agent_summary(harness)}
+        return self.controller.force_restart_agent(
+            request["target"], fresh=bool(request.get("fresh")),
+            reason=request.get("reason"), by="user",
+            timeout=float(request.get("timeout", 30.0)),
+        )
 
     def _op_agent_stop(self, request: dict[str, Any]) -> dict[str, Any]:
         info = self.controller.remove_agent(

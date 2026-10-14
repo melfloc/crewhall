@@ -26,6 +26,7 @@ class TeamModel(unittest.TestCase):
                 "workspace": None,
                 "workspace_mode": None,
                 "host": None,
+                "leads": [],
             },
         )
 

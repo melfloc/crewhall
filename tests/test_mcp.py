@@ -34,7 +34,8 @@ class Protocol(_Identity):
         response = server.handle(server.Session(), {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in response["result"]["tools"]}
         self.assertEqual(names, {"whoami", "list_teammates", "teammate_status", "send_message",
-                                  "new_session",
+                                  "new_session", "interrupt_teammate", "stop_teammate_process",
+                                  "restart_teammate",
                                   "request", "reply", "handoff", "publish_artifact"})
         # No tool can read screens/files/state of others or run commands.
         for tool in response["result"]["tools"]:

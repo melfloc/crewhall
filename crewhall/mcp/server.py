@@ -100,6 +100,42 @@ TOOLS = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "interrupt_teammate",
+        "description": ("Stop a teammate's current turn (last resort; you must lead the "
+                        "team the teammate belongs to)."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"to": {"type": "string"}},
+            "required": ["to"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "stop_teammate_process",
+        "description": ("Signal a teammate's background process(es) (last resort; lead "
+                        "only). Give pid, or all_shells to signal every shell."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"to": {"type": "string"}, "pid": {"type": "integer"},
+                           "all_shells": {"type": "boolean"},
+                           "signal": {"type": "string", "enum": ["TERM", "INT", "KILL"]}},
+            "required": ["to"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "restart_teammate",
+        "description": ("Force-restart a teammate (last resort; lead only). Resumes its "
+                        "conversation unless fresh is true."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"to": {"type": "string"}, "fresh": {"type": "boolean"},
+                           "reason": {"type": "string"}},
+            "required": ["to"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -241,7 +277,40 @@ def call_tool(session: Session, name: str, arguments: Any) -> dict[str, Any]:
                               id=conversation.strip(), source=path.strip(),
                               name=args.get("name"))
         return _text(result)
+    if name == "interrupt_teammate":
+        to = _require_to(args)
+        result = session.call("agent_interrupt", sender=agent_id, token=token,
+                              target=to)
+        return _text({"to": to, "interrupted": result.get("interrupted")})
+    if name == "stop_teammate_process":
+        to = _require_to(args)
+        pid = args.get("pid")
+        if pid is not None and not isinstance(pid, int):
+            raise McpError(-32602, "pid must be an integer")
+        if pid is None and not args.get("all_shells"):
+            raise McpError(-32602, "pid or all_shells is required")
+        result = session.call("agent_signal", sender=agent_id, token=token, target=to,
+                              pid=pid, all_shells=bool(args.get("all_shells")),
+                              signal=str(args.get("signal") or "TERM"))
+        return _text({"to": to, "count": result.get("count"),
+                      "all_shells": result.get("all_shells")})
+    if name == "restart_teammate":
+        to = _require_to(args)
+        reason = args.get("reason")
+        if reason is not None and (not isinstance(reason, str) or len(reason) > MAX_MESSAGE):
+            raise McpError(-32602, "reason is too long")
+        result = session.call("agent_restart", sender=agent_id, token=token, target=to,
+                              fresh=bool(args.get("fresh")), reason=reason, forced=True)
+        return _text({"to": to, "state": result.get("state"),
+                      "resumed": result.get("resumed"), "fresh": result.get("fresh")})
     raise McpError(-32601, f"unknown tool {name!r}")
+
+
+def _require_to(args: dict[str, Any]) -> str:
+    to = args.get("to")
+    if not isinstance(to, str) or not to.strip() or len(to) > MAX_TO:
+        raise McpError(-32602, "to must be a teammate name or id")
+    return to.strip()
 
 
 def handle(session: Session, request: Any) -> dict[str, Any] | None:

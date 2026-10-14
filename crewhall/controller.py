@@ -146,6 +146,7 @@ from .services.agents import ServicesAgents  # noqa: E402
 from .services.messaging import ServicesMessaging  # noqa: E402
 from .services.processes import ServicesProcesses  # noqa: E402
 from .services.status import ServicesStatus  # noqa: E402
+from .services.control import ServicesControl  # noqa: E402
 from .services.terminals import ServicesTerminals  # noqa: E402
 from .services.chat_bridge import ServicesChatBridge  # noqa: E402
 from .services.persistence import ServicesPersistence  # noqa: E402
@@ -153,7 +154,7 @@ from .services.teams import ServicesTeams  # noqa: E402
 from .services.worktrees import ServicesWorktrees  # noqa: E402
 
 
-class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesStatus, ServicesTerminals, ServicesWorktrees, ServicesTeams, ServicesChatBridge, ServicesPersistence):
+class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesStatus, ServicesControl, ServicesTerminals, ServicesWorktrees, ServicesTeams, ServicesChatBridge, ServicesPersistence):
 
     def __init__(self, adopt: bool = True, persist: bool = False) -> None:
         self.registry = Registry()
@@ -200,6 +201,8 @@ class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesS
         self._locks_guard = threading.Lock()
         # Per-agent recent send timestamps (anti-loop rate limit, D2).
         self._send_times: dict[str, collections.deque[float]] = {}
+        # Recent forced restarts per agent (the brake in ServicesControl).
+        self._restart_times: dict[str, collections.deque[float]] = {}
         self._store = StateStore() if persist else None
         self._pending_store = PendingQueueStore() if persist else None
         self._token_store = AgentTokenStore() if persist else None

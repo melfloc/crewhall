@@ -58,6 +58,9 @@ AGENT_OPS = frozenset({
     "team_new_session",
     "agent_new_session",
     "agent_status",
+    "agent_interrupt",
+    "agent_signal",
+    "agent_restart",
     "agent_hook",
     "agent_permission_request",
     "request_create",
@@ -68,8 +71,8 @@ AGENT_OPS = frozenset({
 
 # Agent ops that are *also* valid control-plane ops: with a ``sender``+``token``
 # they act as the token-authenticated agent; without them they require the
-# control token (the human's CLI). Same special-casing as ``request_cancel``.
-_AGENT_AUTH_OPS = frozenset({"agent_status"})
+# control token (the human's CLI/Web UI). Same special-casing as ``request_cancel``.
+_AGENT_AUTH_OPS = frozenset({"agent_status", "agent_interrupt", "agent_signal", "agent_restart"})
 
 log = logging.getLogger("crewhall.daemon")
 

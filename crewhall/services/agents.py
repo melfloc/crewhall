@@ -130,11 +130,22 @@ class ServicesAgents:
         port: int | None = None,
         mcp_args: list[str] | None = None,
         host: str | None = None,
+        resume: str | None = None,
     ) -> list[str]:
         cls = get_harness(kind)
         # A remote agent runs the remote machine's own CLI (bare name, remote
         # PATH): a local override path or local settings file means nothing there.
         command = cls.command() if host else (settings.provider_command(kind) or cls.command())
+        if resume and not host:
+            # Continue an existing conversation instead of starting a new one.
+            if kind == "claude":
+                base = [*command, *cls.launch_args(self._hooks_settings_path(None), None, port)]
+                return [*base, "--resume", resume, *(mcp_args or []), *extra_args]
+            if kind == "opencode":
+                base = [*command, *cls.launch_args(self._hooks_settings_path(None), None, port)]
+                return [*base, "--session", resume, *(mcp_args or []), *extra_args]
+            if kind == "codex":
+                return [*command, "resume", resume, *(mcp_args or []), *extra_args]
         return [
             *command,
             *cls.launch_args(self._hooks_settings_path(host), conversation_id, port),
