@@ -57,6 +57,7 @@ AGENT_OPS = frozenset({
     "team_members",
     "team_new_session",
     "agent_new_session",
+    "agent_status",
     "agent_hook",
     "agent_permission_request",
     "request_create",
@@ -64,6 +65,11 @@ AGENT_OPS = frozenset({
     "request_cancel",
     "conversation_publish",
 })
+
+# Agent ops that are *also* valid control-plane ops: with a ``sender``+``token``
+# they act as the token-authenticated agent; without them they require the
+# control token (the human's CLI). Same special-casing as ``request_cancel``.
+_AGENT_AUTH_OPS = frozenset({"agent_status"})
 
 log = logging.getLogger("crewhall.daemon")
 
@@ -427,6 +433,8 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             return None  # unknown op is reported by the dispatcher
         allowed_for_agent = op in AGENT_OPS and not (
             op == "request_cancel" and not request.get("agent")
+        ) and not (
+            op in _AGENT_AUTH_OPS and not (request.get("sender") and request.get("token"))
         )
         if allowed_for_agent:
             return None

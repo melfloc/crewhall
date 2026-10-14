@@ -145,6 +145,7 @@ def _ssh_hint(cfg: dict[str, Any], detail: str) -> str:
 from .services.agents import ServicesAgents  # noqa: E402
 from .services.messaging import ServicesMessaging  # noqa: E402
 from .services.processes import ServicesProcesses  # noqa: E402
+from .services.status import ServicesStatus  # noqa: E402
 from .services.terminals import ServicesTerminals  # noqa: E402
 from .services.chat_bridge import ServicesChatBridge  # noqa: E402
 from .services.persistence import ServicesPersistence  # noqa: E402
@@ -152,7 +153,7 @@ from .services.teams import ServicesTeams  # noqa: E402
 from .services.worktrees import ServicesWorktrees  # noqa: E402
 
 
-class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesTerminals, ServicesWorktrees, ServicesTeams, ServicesChatBridge, ServicesPersistence):
+class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesStatus, ServicesTerminals, ServicesWorktrees, ServicesTeams, ServicesChatBridge, ServicesPersistence):
 
     def __init__(self, adopt: bool = True, persist: bool = False) -> None:
         self.registry = Registry()

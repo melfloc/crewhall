@@ -235,6 +235,69 @@ def cmd_agent_state(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_status(st: dict) -> None:
+    since = st.get("state_age")
+    since_txt = f" (for {since:g}s)" if since is not None else ""
+    host = st.get("host") or "-"
+    print(f"● {st['name']}  {st['agent_id']}  kind={st['kind']}  "
+          f"state={st['state']}{since_txt}  alive={st['alive']}  "
+          f"backend={st['backend']}  host={host}")
+    act = st.get("activity") or {}
+    detail = f" · {act['detail']}" if act.get("detail") else ""
+    print(f"    activity: {act.get('label') or act.get('kind') or '?'}{detail}"
+          + (f"  model={act['model']}" if act.get("model") else ""))
+    inter = st.get("interactions") or []
+    print(f"    interactions pending: {len(inter)}"
+          + (f" ({', '.join(i.get('kind','?') for i in inter)})" if inter else ""))
+    print(f"    human draft in input: {'yes' if st.get('human_draft') else 'no'}"
+          + ("  (text not shown)" if st.get("human_draft") else ""))
+    q = st.get("queue") or {}
+    if q.get("count"):
+        print(f"    queued messages: {q['count']} (oldest {q.get('oldest_age')}s)")
+    else:
+        print("    queued messages: 0")
+    blocked = st.get("blocked_by") or []
+    print(f"    deliverable_now: {st.get('deliverable_now')}"
+          + (f"  blocked_by={blocked}" if blocked else ""))
+    procs = st.get("processes") or {}
+    if not procs.get("available"):
+        print(f"    processes: unavailable ({procs.get('reason')})")
+    else:
+        shells = procs.get("shells") or []
+        others = procs.get("others") or []
+        print(f"    processes: {len(shells)} shell(s), {len(others)} other(s)")
+        for shell in shells:
+            out = "producing output" if shell.get("producing_output") else "idle"
+            print(f"      shell pid={shell['pid']} age={shell.get('age')}s "
+                  f"[{out}] {shell.get('command')}")
+        for other in others:
+            print(f"      pid={other['pid']} age={other.get('age')}s {other.get('command')}")
+        for entry in procs.get("output") or []:
+            print(f"      --- output pid={entry.get('pid')} ---")
+            print(entry.get("output", ""))
+    subs = st.get("subagents") or []
+    print(f"    active sub-agents: {len(subs)}" + (f" {subs}" if subs else ""))
+
+
+def cmd_agent_status(args: argparse.Namespace) -> int:
+    """Status of a teammate: works from an agent (team-scoped) or the human CLI."""
+    sender = brand.env("AGENT_ID")
+    params: dict[str, Any] = {"target": args.target, "output": args.output}
+    if sender:
+        params["sender"] = sender
+        params["token"] = brand.env("TOKEN")
+    try:
+        resp = common._client(args).call("agent_status", **params)
+    except RpcError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(resp["status"], indent=2))
+    else:
+        _print_status(resp["status"])
+    return 0
+
+
 def cmd_agent_wait(args: argparse.Namespace) -> int:
     resp = common._client(args).call(
         "agent_wait", target=args.target, state=args.state, timeout=args.timeout

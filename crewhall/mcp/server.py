@@ -29,6 +29,20 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
+        "name": "teammate_status",
+        "description": ("Rich status of a teammate: what it is doing, pending "
+                        "interactions, queued messages and why a message would be "
+                        "queued right now (deliverable_now / blocked_by)."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"to": {"type": "string"},
+                           "output": {"type": "boolean",
+                                      "description": "include background shell output (leads only)"}},
+            "required": ["to"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "send_message",
         "description": "Send a message to a teammate (must share a team with you).",
         "inputSchema": {
@@ -158,6 +172,13 @@ def call_tool(session: Session, name: str, arguments: Any) -> dict[str, Any]:
         _no_args(args)
         info = session.call("agent_identity", target=agent_id, token=token)
         return _text(info.get("teammates", []))
+    if name == "teammate_status":
+        to = args.get("to")
+        if not isinstance(to, str) or not to.strip() or len(to) > MAX_TO:
+            raise McpError(-32602, "to must be a teammate name or id")
+        result = session.call("agent_status", sender=agent_id, token=token,
+                              target=to.strip(), output=bool(args.get("output")))
+        return _text(result.get("status", result))
     if name == "send_message":
         to = args.get("to")
         message = args.get("message")

@@ -382,6 +382,19 @@ class Messaging:
         with self._lock:
             return {agent_id: len(q) for agent_id, q in self._queues.items() if q}
 
+    def queue_info(self, agent_id: str) -> dict[str, Any]:
+        """How many messages are waiting for ``agent_id`` and how old the oldest is."""
+        with self._lock:
+            items = list(self._queues.get(agent_id) or [])
+        if not items:
+            return {"count": 0, "oldest_age": None, "oldest_since": None}
+        oldest = min(d.message.timestamp for d in items)
+        return {
+            "count": len(items),
+            "oldest_age": round(max(0.0, time.time() - oldest), 1),
+            "oldest_since": oldest,
+        }
+
     def _enqueue(
         self,
         recipient: Harness,

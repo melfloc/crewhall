@@ -19,7 +19,7 @@ from .commands.agents import (
     _hook_payload,
     cmd_agent_capture, cmd_agent_create, cmd_agent_hook, cmd_agent_identity,
     cmd_agent_list, cmd_agent_message, cmd_agent_messages, cmd_agent_new_session,
-    cmd_agent_send, cmd_agent_state, cmd_agent_stop, cmd_agent_wait,
+    cmd_agent_send, cmd_agent_state, cmd_agent_status, cmd_agent_stop, cmd_agent_wait,
 )
 from .commands.common import (
     _agent_identity_env, _client, _default_shell, _human_bytes, _human_time, _log_matches,
@@ -356,6 +356,14 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("target")
     a.add_argument("--json", action="store_true")
     a.set_defaults(func=cmd_agent_state)
+
+    a = asub.add_parser("status", help="rich status of a teammate (state, activity, "
+                        "queue, processes, why a message would queue)")
+    a.add_argument("target", help="agent name or id (a teammate, when run from an agent)")
+    a.add_argument("--json", action="store_true")
+    a.add_argument("--output", action="store_true",
+                   help="also include background shell output (leads only from an agent)")
+    a.set_defaults(func=cmd_agent_status)
 
     a = asub.add_parser("wait", help="wait for a semantic state")
     a.add_argument("target")

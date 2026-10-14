@@ -33,7 +33,8 @@ class Protocol(_Identity):
     def test_tools_list_is_minimal(self):
         response = server.handle(server.Session(), {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in response["result"]["tools"]}
-        self.assertEqual(names, {"whoami", "list_teammates", "send_message", "new_session",
+        self.assertEqual(names, {"whoami", "list_teammates", "teammate_status", "send_message",
+                                  "new_session",
                                   "request", "reply", "handoff", "publish_artifact"})
         # No tool can read screens/files/state of others or run commands.
         for tool in response["result"]["tools"]:

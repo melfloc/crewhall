@@ -188,6 +188,15 @@ class ServicesTeams:
             if agent_id in team.agent_ids and self._is_team_lead(agent_id, team, conv_leads)
         }
 
+    def _lead_of(self, sender: Harness, target: Harness) -> bool:
+        """Whether ``sender`` is a lead of some team that contains ``target``."""
+        conv_leads = self._conversation_leads()
+        return any(
+            target.agent_id in team.agent_ids
+            and self._is_team_lead(sender.agent_id, team, conv_leads)
+            for team in self.teams.list()
+        )
+
     def _verify_remote_dir(self, host: str, path: str) -> None:
         """Confirm over SSH that ``path`` is an accessible directory on ``host``."""
 

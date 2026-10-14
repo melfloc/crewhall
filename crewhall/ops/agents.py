@@ -156,6 +156,26 @@ class OpsAgents(OpsBase):
             by=str(request.get("by") or "user")[:40],
         )
 
+    def _op_agent_status(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Rich status of a teammate.
+
+        Called by an agent (``sender``+``token``: team boundary enforced; process
+        output only for leads) or by the control plane (human CLI: any agent).
+        """
+        sender = request.get("sender")
+        target = request["target"]
+        include_output = bool(request.get("output"))
+        if sender:
+            from ..messaging import MessagingError
+
+            sender_h = self.controller.agents.resolve(sender)
+            self.controller._check_token(sender_h.agent_id, request.get("token"))
+            target_h = self.controller.agents.resolve(target)
+            self.controller._authorize_team(sender_h, target_h)
+            if include_output and not self.controller._lead_of(sender_h, target_h):
+                raise MessagingError("only a lead may see a teammate's process output")
+        return {"status": self.controller.agent_status(target, include_output=include_output)}
+
     def _op_agent_identity(self, request: dict[str, Any]) -> dict[str, Any]:
         return self.controller.agent_identity(request["target"], request.get("token"))
 
