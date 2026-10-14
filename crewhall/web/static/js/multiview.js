@@ -218,9 +218,8 @@ function mvCell(id, full){
       ondragend: mvDragEnd},
     head, body, asks, composer);
   st.refs = {head, body, asks, composer};
-  body.addEventListener("scroll", ()=>{
-    st.follow = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
-  });
+  if(st._follow){ st._follow.destroy(); }
+  st._follow = followBottom(body, {onChange:(f)=>{ st.follow = f; }});
   mvUpdateHead(id);
   mvUpdateAsks(id);
   if(st.view === "live") mvRenderLive(id, true); else mvRefreshHistory(id, true);
@@ -347,7 +346,7 @@ function mvPaintBody(id, nodes){
   const body = st.refs.body;
   body.className = mvBodyClass(st.view);
   body.replaceChildren(...nodes);
-  if(st.follow) body.scrollTop = body.scrollHeight;
+  if(st._follow) st._follow.refresh();
 }
 
 async function mvRefreshHistory(id, force){
@@ -392,7 +391,7 @@ function mvRenderLive(id, force){
   const body = st.refs.body;
   body.className = mvBodyClass("live");
   body.replaceChildren(frag);
-  if(st.follow) body.scrollTop = body.scrollHeight;
+  if(st._follow) st._follow.refresh();
 }
 
 function mvSetView(id, view){

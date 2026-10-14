@@ -297,12 +297,19 @@ async function chatLoadHistory(force){
   chatRenderFeed();
 }
 
+function chatFollow(){
+  if(!CHAT._follow) CHAT._follow = followBottom($("chat-feed"), {threshold:80,
+    onChange:(f)=>{ CHAT.follow = f; }});
+  return CHAT._follow;
+}
+
 function chatRenderFeed(){
   const feed = $("chat-feed");
   const info = CHAT.info;
   if(!info){ feed.replaceChildren(el("div", {className:"chat-empty"}, "Pick a conversation.")); return; }
   const msgs = CHAT.msgs;
-  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+  const f = chatFollow();
+  const following = f.isFollowing();
   if(!msgs.length){
     feed.replaceChildren(el("div", {className:"chat-hero"},
       el("div", {className:"art"}, ic("msg","lg")),
@@ -313,7 +320,7 @@ function chatRenderFeed(){
   const frag = document.createDocumentFragment();
   msgs.forEach(m => frag.append(histNode(m)));
   feed.replaceChildren(frag);
-  if(CHAT.follow || atBottom){ feed.scrollTop = feed.scrollHeight; CHAT.follow = true; }
+  if(following) f.toBottom();
 }
 
 async function chatSend(){
@@ -324,7 +331,7 @@ async function chatSend(){
   box.value = ""; chatGrow(); $("chatSend").classList.add("loading");
   CHAT.attach = []; chatRenderTray();
   CHAT.msgs.push({role:"user", text:full, blocks:[{type:"text", text:full}], at:new Date().toISOString()});
-  CHAT.follow = true; chatRenderFeed();
+  chatFollow().setFollow(true); chatRenderFeed(); chatFollow().toBottom();
   try {
     if(!await chatEnsureAgent()) throw new Error("the agent is not ready");
     await op("agent_write", {target:CHAT.info.agent_id, text:full});
@@ -689,10 +696,6 @@ $("chat-input").addEventListener("input", chatGrow);
 $("chat-input").addEventListener("keydown", (e) => {
   if(e.isComposing) return;
   if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); chatSend(); }
-});
-$("chat-feed").addEventListener("scroll", () => {
-  const f = $("chat-feed");
-  CHAT.follow = f.scrollHeight - f.scrollTop - f.clientHeight < 80;
 });
 $("chat-feed").addEventListener("contextmenu", (e) => {
   if(!CHAT.info || !CHAT.info.agent_id) return;

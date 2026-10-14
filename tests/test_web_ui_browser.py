@@ -326,12 +326,19 @@ class _Browser(HardTimeoutMixin, unittest.TestCase):
     def _menu_item(self, label):
         return self.page.locator(".menu button", has_text=label).first
 
+    def _wheel(self, dy):
+        """A real user wheel over the conversation box (decides follow/no-follow)."""
+        bb = self.page.locator("#hist").bounding_box()
+        self.page.mouse.move(bb["x"] + bb["width"] / 2, bb["y"] + bb["height"] / 2)
+        self.page.mouse.wheel(0, dy)
+        self.page.wait_for_timeout(150)
+
 
 class ConversationView(_Browser):
     def test_page_loads_every_module_from_static_without_errors(self):
         srcs = self.page.eval_on_selector_all("script[src]", "els => els.map(e => e.getAttribute('src'))")
         self.assertEqual(srcs, [
-            "/static/js/core.js",
+            "/static/js/core.js", "/static/js/scroll_follow.js",
             "/static/vendor/qrcode/qrcode.js", "/static/vendor/qrcode/qrcode_UTF8.js",
             "/static/js/transport.js", "/static/js/terminals.js",
             "/static/js/terminal_view.js", "/static/js/sidebar.js",
@@ -361,11 +368,16 @@ class ConversationView(_Browser):
         self.assertIn("start of conversation", self.page.inner_text("#hist-top"))
 
     def test_follows_latest_only_when_user_is_at_the_bottom(self):
-        self.page.evaluate("document.getElementById('hist').scrollTop=400")
+        self._wheel(-1500)                                       # real user scroll up
+        self.assertFalse(self._at_bottom())
+        self.page.wait_for_function("document.getElementById('jump').classList.contains('show')")
+        pos = self.page.evaluate("document.getElementById('hist').scrollTop")
         self.total = 451
         self.page.wait_for_function("document.getElementById('hist-note').textContent.startsWith('451')", timeout=6000)
         self.assertFalse(self._at_bottom())  # reading up: not dragged down
-        self.page.evaluate("(()=>{const b=document.getElementById('hist');b.scrollTop=b.scrollHeight})()")
+        self.assertEqual(self.page.evaluate("document.getElementById('hist').scrollTop"), pos)
+        self.page.click("#jump")
+        self.page.wait_for_timeout(150)
         self.total = 452
         self.page.wait_for_function("document.getElementById('hist-note').textContent.startsWith('452')", timeout=6000)
         self.assertTrue(self._at_bottom())
@@ -383,6 +395,94 @@ class ConversationView(_Browser):
         self.page.keyboard.press("Control+c")
         self.page.wait_for_timeout(300)
         self.assertEqual(self.calls.count("agent_interrupt"), 1)  # selection: normal copy
+
+
+class ConversationScroll(_Browser):
+    """The Conversation panel always ends up at the last message, and only a real
+    user gesture detaches it from the bottom (see js/scroll_follow.js)."""
+
+    initial_total = 300
+    agents = [AGENT, READY]
+
+    def test_a_open_and_panel_return_show_the_last_message(self):
+        self.assertTrue(self._at_bottom())
+        self.page.click("#tab-live")
+        self.page.click("#tab-hist")
+        self.page.wait_for_timeout(200)
+        self.assertTrue(self._at_bottom())
+        # switching agent and coming back shows the last message again
+        self.page.locator("#nav").get_by_text("beta", exact=True).first.click()
+        self.page.wait_for_timeout(200)
+        self.page.locator("#nav").get_by_text("a", exact=True).first.click()
+        self.page.wait_for_selector("#hist-list .msg")
+        self.page.wait_for_timeout(200)
+        self.assertTrue(self._at_bottom())
+        # content that finishes painting after the frame still pins to the bottom
+        self.page.evaluate("""()=>{const l=document.getElementById('hist-list');
+            const d=document.createElement('div'); d.className='msg assistant';
+            d.style.height='1200px'; l.appendChild(d);}""")
+        self.page.wait_for_timeout(250)
+        self.assertTrue(self._at_bottom())
+
+    def test_b_growth_and_new_messages_keep_following(self):
+        self.assertTrue(self._at_bottom())
+        self.total = 301
+        self.page.wait_for_function(
+            "document.getElementById('hist-note').textContent.startsWith('301')", timeout=6000)
+        self.assertTrue(self._at_bottom())
+        # a message that grows in place (streaming / node replacement)
+        self.page.evaluate("""()=>{const m=document.querySelector('#hist-list .msg:last-child .body');
+            const d=document.createElement('div'); d.style.height='1400px'; m.appendChild(d);}""")
+        self.page.wait_for_timeout(250)
+        self.assertTrue(self._at_bottom())
+
+    def test_c_scroll_up_holds_position_then_jump_resumes(self):
+        self._wheel(-2500)
+        self.assertFalse(self._at_bottom())
+        self.assertTrue(self.page.locator("#jump").evaluate("e=>e.classList.contains('show')"))
+        pos = self.page.evaluate("document.getElementById('hist').scrollTop")
+        self.total = 301
+        self.page.wait_for_function(
+            "document.getElementById('hist-note').textContent.startsWith('301')", timeout=6000)
+        self.assertFalse(self._at_bottom())
+        self.assertEqual(self.page.evaluate("document.getElementById('hist').scrollTop"), pos)
+        self.page.click("#jump")
+        self.page.wait_for_timeout(150)
+        self.assertTrue(self._at_bottom())
+        self.total = 302
+        self.page.wait_for_function(
+            "document.getElementById('hist-note').textContent.startsWith('302')", timeout=6000)
+        self.assertTrue(self._at_bottom())
+        # scrolling back to the bottom by hand resumes following too
+        self._wheel(-1500)
+        self.assertFalse(self._at_bottom())
+        self._wheel(100000)
+        self.assertTrue(self._at_bottom())
+        self.total = 303
+        self.page.wait_for_function(
+            "document.getElementById('hist-note').textContent.startsWith('303')", timeout=6000)
+        self.assertTrue(self._at_bottom())
+
+    def test_d_loading_older_messages_does_not_move_the_reading_position(self):
+        self._wheel(-2000)                                       # user scrolls up: follow off
+        ref = self.page.evaluate("""()=>{const b=document.getElementById('hist');
+            const r = b.getBoundingClientRect();
+            const msgs = [...document.querySelectorAll('#hist-list .msg')];
+            const e = msgs.find(m => m.getBoundingClientRect().bottom > r.top + 2);
+            window.__refText = e.querySelector('.body').textContent.slice(0, 24);
+            return Math.round(e.getBoundingClientRect().top - r.top);}""")
+        before = self._count()
+        self.page.evaluate("loadOlder()")
+        self.page.wait_for_function(
+            f"document.querySelectorAll('#hist-list .msg').length>{before}", timeout=6000)
+        after = self.page.evaluate("""()=>{const b=document.getElementById('hist');
+            const r = b.getBoundingClientRect();
+            const m = [...document.querySelectorAll('#hist-list .msg')]
+              .find(x => x.querySelector('.body').textContent.slice(0, 24) === window.__refText);
+            return Math.round(m.getBoundingClientRect().top - r.top);}""")
+        # The same message stays at the top of the viewport (within one line:
+        # a banner/line-height settle may shift it by a few px).
+        self.assertLessEqual(abs(after - ref), 24)
 
 
 class NewEmptyAgent(_Browser):

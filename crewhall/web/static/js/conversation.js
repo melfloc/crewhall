@@ -176,13 +176,24 @@ function afterSend(text){
   const node = histNode({role:"user", text, blocks:[{type:"text", text}], at:new Date().toISOString()});
   node.classList.add("pending");
   $("hist-list").append(node); h.pending = {node, total:h.total};
-  h.follow = true; $("hist").scrollTop = $("hist").scrollHeight; paintStatus(h);
+  h.follow = true; histFollow().toBottom(); paintStatus(h);
   [400, 1000, 2000, 3500, 6000].forEach(ms => setTimeout(()=>{
     if(S.selected===id && S.view==="hist") fetchLatest(); }, ms));
 }
 function ensureHist(id){
   return S.hist[id] || (S.hist[id] = {nodes:new Map(), sigs:new Map(), order:[], min:null, total:0,
                                       follow:true, loading:false});
+}
+/* One "keep at the bottom while following" controller for the conversation view
+ * (the box is shared: only one agent's history is shown at a time). Following is
+ * driven by user intent only; see scroll_follow.js. */
+function histFollow(){
+  if(!S.histFollow){
+    S.histFollow = followBottom($("hist"), {content:$("hist-list"), onChange:(f)=>{
+      const h = S.hist[S.selected]; if(h) h.follow = f; updateJump();
+    }});
+  }
+  return S.histFollow;
 }
 const msgSig = m => (m.at||"") + ":" + m.text.length + ":" + (m.blocks ? m.blocks.length : 0);
 const nearBottom = box => box.scrollHeight - box.scrollTop - box.clientHeight < 60;
@@ -227,15 +238,18 @@ function openHistory(){
   const h = ensureHist(id), list = $("hist-list");
   $("hist-status").dataset.mode = "";
   list.replaceChildren(...h.order.map(i => h.nodes.get(i)), ...(h.pending ? [h.pending.node] : []));
-  h.follow = true; paintStatus(h);
-  const box = $("hist");
+  h.follow = true;
+  const f = histFollow(); f.setFollow(true); f.toBottom();
+  paintStatus(h);
   if(location.hash && document.querySelector(location.hash)) document.querySelector(location.hash).scrollIntoView({block:"center"});
-  else box.scrollTop = box.scrollHeight;
+  else f.toBottom();
+  // Code, markdown and details may finish painting after this frame: pin again.
+  requestAnimationFrame(() => f.visible());
   fetchLatest();
 }
 async function fetchLatest(){
   const id = S.selected; if(!id) return;
-  const h = ensureHist(id), box = $("hist");
+  const h = ensureHist(id);
   try {
     const r = await op("agent_history", {target:id, limit:200});
     if(S.selected!==id || S.view!=="hist") return;
@@ -249,7 +263,7 @@ async function fetchLatest(){
       if(h.min === null || r.start < h.min) h.min = r.start;
       h.total = r.total;
       if(h.pending && h.total > h.pending.total){ h.pending.node.remove(); h.pending = null; changed = true; }
-      if(changed && h.follow) box.scrollTop = box.scrollHeight;
+      if(changed) histFollow().refresh();
     }
     paintStatus(h);
   } catch(e){}
@@ -259,14 +273,25 @@ async function loadOlder(){
   const h = ensureHist(id), box = $("hist");
   if(h.loading || h.min === null || h.min <= 0) return;
   h.loading = true; paintStatus(h);
+  let anchor = null, anchorTop = 0;
   try {
     const r = await op("agent_history", {target:id, limit:200, before:h.min});
     if(S.selected!==id || S.view!=="hist" || !r.available || r.conversation_id !== h.conv) return;
-    const prevH = box.scrollHeight, prevTop = box.scrollTop;
+    const list = $("hist-list");
+    // Anchor on the message that was at the top: keep its viewport position by
+    // shifting the scroll by exactly what the prepended content grew above it.
+    anchor = list.firstElementChild;
+    anchorTop = anchor ? anchor.offsetTop : 0;
     r.messages.forEach((m,i)=>upsert(h, r.start+i, m));
     h.min = r.start;
-    box.scrollTop = prevTop + (box.scrollHeight - prevH);       // keep the reading position
-  } catch(e){} finally { h.loading = false; paintStatus(h); }
+  } catch(e){} finally {
+    h.loading = false; paintStatus(h);
+    if(anchor){
+      // Shift by exactly what the prepended content grew above the anchor once
+      // the final layout (including the top banner) has settled.
+      box.scrollTop += anchor.offsetTop - anchorTop;
+    }
+  }
 }
 function updateJump(){
   const h = S.hist[S.selected];
@@ -318,14 +343,12 @@ document.addEventListener("keydown", (e) => {
 addEventListener("hashchange", () => { const t = document.querySelector(location.hash); if(t) t.scrollIntoView({block:"center"}); });
 
 $("jump").onclick = ()=>{
-  if(S.view==="hist"){ const h = ensureHist(S.selected); h.follow = true; $("hist").scrollTop = $("hist").scrollHeight; }
+  if(S.view==="hist"){ const h = ensureHist(S.selected); h.follow = true; histFollow().toBottom(); }
   else { S.follow = true; setFollowUi(); renderTerm(); }
   updateJump();
 };
 $("hist").addEventListener("scroll", ()=>{
-  const box = $("hist"), h = S.hist[S.selected]; if(!h) return;
-  h.follow = nearBottom(box);                                  // scrolled up -> stop following
-  updateJump();
+  const box = $("hist"); if(!S.selected) return;
   if(box.scrollTop < 120) loadOlder();                         // reached the top -> earlier messages
 });
 setInterval(()=>{ if(S.view==="hist" && S.selected && !document.hidden) fetchLatest(); }, 1500);
