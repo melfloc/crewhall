@@ -5,7 +5,12 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
-## [Unreleased]
+## [0.82.0] — 2026-10-13
+
+**Leads y contención de agentes.** Los equipos ya tienen *leads* que consultan el
+estado de sus miembros (`crewhall agent status`, op de agente y MCP
+`teammate_status`) y los contienen de verdad (`interrupt`, `signal`, `restart` con
+reanudación de la conversación y freno anti-bucle), con la Web UI móvil pulida.
 
 - **Leads por equipo.** Una `Team` puede marcar algunos de sus miembros como
   *leads* (`leads` en el estado, `leads = [...]` en `team.toml`,
