@@ -332,6 +332,15 @@ class ServicesAgents:
         # The TUI needs a moment to open its port, so connection errors are
         # simply retried until the agent stops.
         while not should_stop():
+            if not getattr(link, "_api_detected", False):
+                # Ask the running server whether it speaks v1 or v2; keep trying
+                # until it answers (the port may not be open yet).
+                try:
+                    link.api = OpenCodeLink.detect_api(link.port, link.password)
+                    link._api_detected = True
+                except Exception:  # noqa: BLE001 - not up yet
+                    stop.wait(1.0)
+                    continue
             try:
                 for event in link.events(should_stop):
                     self._on_opencode_event(harness, event)

@@ -231,9 +231,31 @@ Diferencias a cubrir al portar (verificado contra `https://opencode.ai/v2/openap
 | campo de config `server` | ignorado en v2; `provider/agent/command/mcp` → `providers/agents/commands/mcp.servers` |
 | id de sesión `^ses_[A-Za-z0-9]+$` | patrón `^ses` (revisar `_SESSION` y `_CONVERSATION_ID`) |
 
-Mientras no se migre `opencode_link.py` y `harness/opencode.py`, la opción soportada es
-fijar un binario 1.x como `providers.opencode.command` (o `fallback_command`) para no
-perder el adaptador al actualizar la CLI del sistema.
+**Estado (parcial, 0.83.0-dev).** `OpenCodeLink` ya habla los dos contratos: detecta
+el servidor sondeando `/api/info` (`detect_api`) y usa rutas/formas v2 para
+historial (`/api/session/{id}/message` → `{data}`), `discover` (query `directory`/
+`parentID=null`, `location.directory`), `abort`→`interrupt`, permisos por sesión
+(`/api/session/{sid}/permission/{rid}/reply`) y *forms* (`/api/form` +
+`/api/session/{sid}/form/{fid}/reply`, `DELETE` para rechazar). El mapeo v2 está
+cubierto por `tests/test_opencode_link.py` (servidor HTTP falso v2). **Pendiente**:
+el *lanzamiento* (v2 no acepta `--port`; hay que arrancar `opencode serve --port N`
++ `opencode --server http://127.0.0.1:N`, o `--standalone` con descubrimiento de
+puerto), el mapeo de **eventos** v2 (`{type,data}` y nombres nuevos; el controlador
+aún espera `{type,properties}` de v1), el catálogo de modelos (`/api/model` en vez de
+`/api/provider`) y la respuesta de permiso con valores `once|always|reject`. Por eso
+`VALIDATED["opencode"]` sigue en `>=1.0.0, <2.0.0`: **v2 se bloquea** hasta que pase
+smoke + control_check reales. Mientras tanto, la opción soportada es fijar un binario
+1.x como `providers.opencode.command` (o `fallback_command`) para no perder el
+adaptador al actualizar la CLI del sistema.
+
+**Datos reales de v2 (aislado, 2.0.28).** `opencode serve --port N` imprime
+`server password <pw>` si no se le da `OPENCODE_SERVER_PASSWORD` (y **respeta** esa
+variable de entorno), y usa auth Basic `opencode:<pw>` como v1. `--standalone`
+arranca un servidor privado en un puerto **aleatorio**. La pantalla de la TUI es
+casi idéntica a v1 (`Ask anything…`, `┃`/`╹▀▀▀`, `ctrl+p commands`, `esc interrupt`,
+`Build · <model>`); la diferencia de scraping es que la línea de fin de turno usa
+`ms` para turnos rápidos (`Build · Cat Jam Free · 654ms · 40.5 tok/s`) y el pie de
+turno muestra `7.4K (3%)` (sin `· $cost` en modelos gratuitos).
 
 ### Texto fantasma (placeholder/sugerencia) y borradores humanos
 

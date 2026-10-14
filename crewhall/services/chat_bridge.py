@@ -114,13 +114,14 @@ class ServicesChatBridge:
         if item.ref.get("source") != "opencode" or link is None:
             raise ix.InteractionError("this agent cannot be answered from here")
         rid = item.ref["request_id"]
+        sid = harness.conversation_id
         try:
             if item.kind == "permission":
-                link.reply_permission(rid, clean["reply"], clean.get("message"))
+                link.reply_permission(rid, clean["reply"], clean.get("message"), session_id=sid)
             elif clean.get("reject"):
-                link.reject_question(rid)
+                link.reject_question(rid, session_id=sid)
             else:
-                link.reply_question(rid, clean["answers"])
+                link.reply_question(rid, clean["answers"], session_id=sid)
         except OSError as exc:
             # Gone on the agent's side (answered in the TUI, agent restarted…).
             self._sync_opencode_interactions(harness, link)

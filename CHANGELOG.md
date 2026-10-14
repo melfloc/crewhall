@@ -49,6 +49,14 @@ una CLI fuera del rango validado, hasta revisar el adaptador.
 - Pruebas de regresión nuevas (`tests/test_version_gate.py`): parsing/selection,
   auto-descubrimiento y switch sin fallback, bloqueo al lanzar y al operar, y el
   store de notices.
+- **OpenCode v2 — base de la migración.** `OpenCodeLink` detecta el contrato del
+  servidor (`/api/info`) y soporta rutas/formas v2: historial con `{data}`, `discover`
+  por `directory`, `abort`→`interrupt`, permisos por sesión y *forms* en vez de
+  `question`. Cubierto con un servidor HTTP v2 falso en `tests/test_opencode_link.py`.
+  **Pendiente** (por eso `VALIDATED["opencode"]` sigue en `<2.0.0` y v2 se bloquea):
+  el lanzamiento v2 (`serve --port` + `--server`, o `--standalone`), el mapeo de
+  eventos v2 (`{type,data}`) y el catálogo `/api/model`. Detalles y evidencia real en
+  `ADAPTERS.md` §8.
 - **Script** `scripts/opencode_v2_switch_test.py`: prueba el ciclo completo en local
   en 3 fases (antes de actualizar = v1 funciona; después = v2 con un v1 instalado
   → switch automático + modal; después sin v1 → bloqueo). `--real` reporta el veredicto

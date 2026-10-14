@@ -9,7 +9,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from crewhall import Controller, OpenCodeHarness
 from crewhall.harness import AgentState
-from crewhall.opencode_link import OpenCodeLink, free_port, map_messages
+from crewhall.opencode_link import (
+    OpenCodeLink,
+    free_port,
+    map_messages,
+    map_v2_messages,
+)
 
 from .support import FakeSession
 
@@ -229,3 +234,132 @@ class NewSession(unittest.TestCase):
         self.c._on_opencode_event(self.h, busy)
         self.assertEqual(self.h.conversation_id, "ses_old2")
         self.h.link.get_json.assert_called_once_with("/session/ses_old2")
+
+
+# v2 (OpenCode 2.x): routes under /api, cursor-paged, forms instead of questions.
+V2_MESSAGES = [
+    {"id": "m1", "type": "user", "text": "hola", "time": {"created": 1792002665388}},
+    {"id": "m2", "type": "assistant", "time": {"created": 1792002666046},
+     "content": [
+         {"type": "reasoning", "text": "pensando"},
+         {"type": "text", "text": "## Hecho\n- uno"},
+         {"type": "tool", "tool": "bash", "state": {"input": {"command": "ls"}, "output": "a\nb"}},
+     ]},
+    {"id": "m3", "type": "idle", "outcome": "succeeded"},
+]
+V2_SESSIONS = {
+    "data": [
+        {"id": "ses_late", "location": {"directory": "/tmp"}, "time": {"created": 5000}},
+        {"id": "ses_first", "location": {"directory": "/tmp"}, "time": {"created": 3000}},
+    ],
+    "cursor": {"previous": None, "next": None},
+}
+
+
+class FakeOpenCodeV2(BaseHTTPRequestHandler):
+    seen: list[tuple[str, str]] = []
+
+    def log_message(self, *a):
+        pass
+
+    def _authed(self):
+        want = "Basic " + base64.b64encode(f"opencode:{PASSWORD}".encode()).decode()
+        if self.headers.get("Authorization") != want:
+            self.send_response(401)
+            self.end_headers()
+            return False
+        return True
+
+    def _json(self, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):  # noqa: N802
+        if not self._authed():
+            return
+        path = self.path.split("?")[0]
+        if path == "/api/info":
+            self._json({"version": "2.0.28", "pid": 1})
+        elif path == f"/api/session/{SID}/message":
+            self._json({"data": V2_MESSAGES, "cursor": {}})
+        elif path == "/api/session":
+            self._json(V2_SESSIONS)
+        elif path == "/api/permission/request":
+            self._json({"data": [{"id": "per_1", "sessionID": SID}]})
+        elif path == "/api/form":
+            self._json({"data": [{"id": "que_1", "sessionID": SID}]})
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):  # noqa: N802
+        if not self._authed():
+            return
+        FakeOpenCodeV2.seen.append(("POST", self.path))
+        self.send_response(204)
+        self.end_headers()
+
+    def do_DELETE(self):  # noqa: N802
+        if not self._authed():
+            return
+        FakeOpenCodeV2.seen.append(("DELETE", self.path))
+        self.send_response(204)
+        self.end_headers()
+
+
+class OpenCodeLinkV2Test(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeOpenCodeV2)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.port = cls.server.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        FakeOpenCodeV2.seen = []
+        self.link = OpenCodeLink(self.port, PASSWORD, api="v2")
+
+    def test_detect_api_probes_api_info(self):
+        self.assertEqual(OpenCodeLink.detect_api(self.port, PASSWORD), "v2")
+
+    def test_map_v2_messages_builds_structured_blocks(self):
+        entries = map_v2_messages(V2_MESSAGES)
+        self.assertEqual([e["role"] for e in entries], ["user", "assistant"])
+        kinds = [b["type"] for b in entries[1]["blocks"]]
+        self.assertEqual(kinds, ["text", "tool_use", "tool_result"])
+        self.assertTrue(entries[0]["at"].startswith("2026-"))
+
+    def test_history_reads_the_api_prefixed_route(self):
+        data = self.link.history(SID)
+        self.assertTrue(data["available"])
+        self.assertEqual(data["total"], 2)
+        self.assertEqual(data["messages"][1]["blocks"][0]["text"], "## Hecho\n- uno")
+
+    def test_discover_filters_by_location_directory(self):
+        sid = self.link.discover("/tmp", since_ms=2000, exclude=set())
+        self.assertEqual(sid, "ses_first")
+
+    def test_abort_posts_interrupt(self):
+        self.link.abort(SID)
+        self.assertIn(("POST", f"/api/session/{SID}/interrupt"), FakeOpenCodeV2.seen)
+
+    def test_permission_reply_is_per_session(self):
+        self.link.reply_permission("per_1", "once", session_id=SID)
+        self.assertIn(("POST", f"/api/session/{SID}/permission/per_1/reply"), FakeOpenCodeV2.seen)
+
+    def test_question_reply_and_reject_use_forms(self):
+        self.link.reply_question("que_1", [["a"]], session_id=SID)
+        self.link.reject_question("que_1", session_id=SID)
+        self.assertIn(("POST", f"/api/session/{SID}/form/que_1/reply"), FakeOpenCodeV2.seen)
+        self.assertIn(("DELETE", f"/api/session/{SID}/form/que_1"), FakeOpenCodeV2.seen)
+
+    def test_pending_lists_read_the_data_wrapper(self):
+        self.assertEqual(self.link.pending_permissions()[0]["id"], "per_1")
+        self.assertEqual(self.link.pending_questions()[0]["id"], "que_1")
