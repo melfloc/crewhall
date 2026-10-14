@@ -50,7 +50,7 @@ def _static_schema() -> list[dict[str, Any]]:
           "Off: crewhall refuses to launch or drive an agent whose CLI version is outside the "
           "range the adapter was verified against (see `crewhall doctor`). Configure a supported "
           "binary or a fallback_command per provider instead of turning this on.",
-          restart=True),
+          env="CREWHALL_ALLOW_UNVALIDATED_VERSIONS", restart=True),
         s("agents.conversations", "agents", "bool", True, "Read conversations",
           "Enables the Conversation tab (Claude transcripts / OpenCode server).",
           env="CREWHALL_CONVERSATIONS", restart=True),

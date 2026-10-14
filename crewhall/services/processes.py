@@ -111,6 +111,11 @@ class ServicesProcesses:
             raise HarnessError(
                 harness.agent_id, "process inspection is not available for remote agents (n/d)"
             )
+        # OpenCode v2 runs the agent's tools inside its `serve` process (the TUI
+        # is only a client), so the shells live under the server, not the TUI.
+        server = self._opencode_servers.get(harness.agent_id)
+        if server is not None and server.poll() is None:
+            return int(server.pid)
         pid = harness.session.pid
         if not pid or not harness.session.status.alive:
             raise HarnessError(harness.agent_id, "the agent is not running")

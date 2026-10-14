@@ -89,6 +89,7 @@ class ClaudeCodeHarness(Harness):
         hooks_settings: str | None,
         conversation_id: str | None = None,
         port: int | None = None,
+        server_url: str | None = None,
     ) -> list[str]:
         args = ["--settings", hooks_settings] if hooks_settings else []
         if conversation_id:

@@ -3,8 +3,11 @@ from __future__ import annotations
 
 # ruff: noqa: F401
 # mypy: disable-error-code="attr-defined"
+import contextlib
 import os
 import secrets
+import signal
+import subprocess
 import threading
 import time
 import uuid
@@ -239,6 +242,23 @@ class ServicesAgents:
             raise UnsupportedVersionError(report)
         raise HarnessError(harness.agent_id, "its CLI version is not supported")
 
+    @staticmethod
+    def _drop_flags(args: list[str], flags: tuple[str, ...]) -> list[str]:
+        """Remove ``--flag value`` / ``--flag=value`` / ``-f value`` pairs."""
+        out: list[str] = []
+        skip = False
+        for arg in args:
+            if skip:
+                skip = False
+                continue
+            if arg in flags:
+                skip = True
+                continue
+            if any(arg.startswith(f + "=") for f in flags):
+                continue
+            out.append(arg)
+        return out
+
     def _launch_command(
         self,
         kind: str,
@@ -249,8 +269,13 @@ class ServicesAgents:
         host: str | None = None,
         resume: str | None = None,
         enforce: bool = True,
+        server_url: str | None = None,
     ) -> list[str]:
         cls = get_harness(kind)
+        if server_url and kind == "opencode":
+            # v2's TUI rejects --model/--agent (and any unknown flag) and exits;
+            # the model is chosen with the picker or set through the API instead.
+            extra_args = self._drop_flags(extra_args, ("--model", "-m", "--agent"))
         # A remote agent runs the remote machine's own CLI (bare name, remote
         # PATH): a local override path or local settings file means nothing there.
         command, report, _used = self._resolve_provider_command(kind, host)
@@ -266,24 +291,165 @@ class ServicesAgents:
                 base = [*command, *cls.launch_args(self._hooks_settings_path(None), None, port)]
                 return [*base, "--resume", resume, *(mcp_args or []), *extra_args]
             if kind == "opencode":
-                base = [*command, *cls.launch_args(self._hooks_settings_path(None), None, port)]
+                base = [*command, *cls.launch_args(self._hooks_settings_path(None), None, port,
+                                                   server_url=server_url)]
                 return [*base, "--session", resume, *(mcp_args or []), *extra_args]
             if kind == "codex":
                 return [*command, "resume", resume, *(mcp_args or []), *extra_args]
         return [
             *command,
-            *cls.launch_args(self._hooks_settings_path(host), conversation_id, port),
+            *cls.launch_args(self._hooks_settings_path(host), conversation_id, port,
+                             server_url=server_url),
             *(mcp_args or []),
             *extra_args,
         ]
 
+    def _opencode_api(self, kind: str) -> str:
+        """Which server contract the resolved OpenCode CLI speaks (v1 or v2)."""
+        try:
+            _command, report, _used = self._resolve_provider_command(kind, None)
+        except Exception:  # noqa: BLE001 - an unknown CLI falls back to v1
+            return "v1"
+        if report is not None and report.version and report.version[0] >= 2:
+            return "v2"
+        return "v1"
+
     def _new_opencode_link(self, kind: str, extra_args: list[str]) -> OpenCodeLink | None:
-        """Port + password for the agent's own server, unless the user set a port."""
+        """v1: port + password for the TUI's own server, unless the user set a port."""
         if not self.track_conversations or not get_harness(kind).uses_local_server:
             return None
-        if any(a == "--port" or a.startswith("--port=") for a in extra_args):
+        if self._user_manages_opencode_server(extra_args):
+            return None
+        if self._opencode_api(kind) == "v2":
+            # v2 has no `--port`: the link is created together with a `serve`
+            # process (see ``_open_opencode_link``).
             return None
         return OpenCodeLink(free_port(), secrets.token_urlsafe(24))
+
+    @staticmethod
+    def _user_manages_opencode_server(extra_args: list[str]) -> bool:
+        return any(a in ("--port", "--server") or a.startswith(("--port=", "--server="))
+                   for a in extra_args)
+
+    def _start_opencode_server(self, kind: str, cwd: str, port: int, password: str) -> Any:
+        """Start an OpenCode v2 ``serve`` for one agent; return the Popen (or None).
+
+        The password travels in the environment (never argv), exactly like v1.
+        """
+        command, _report, _used = self._resolve_provider_command(kind, None)
+        argv = [*command, "serve", "--port", str(port), "--hostname", "127.0.0.1"]
+        env = dict(os.environ)
+        env["OPENCODE_SERVER_PASSWORD"] = password
+        self._ensure_usable_tmpdir(env)
+        try:
+            proc = subprocess.Popen(  # noqa: S603 - argv is a fixed, validated command
+                argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            log.warning("could not start the OpenCode server for %s: %s", kind, exc)
+            return None
+        link = OpenCodeLink(port, password, api="v2")
+        deadline = time.monotonic() + 20.0
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                log.warning("the OpenCode server for %s exited early (code %s)",
+                            kind, proc.returncode)
+                return None
+            try:
+                link.get_json("/api/info", timeout=1.0)
+                return proc
+            except Exception:  # noqa: BLE001 - not listening yet
+                time.sleep(0.25)
+        log.warning("the OpenCode server for %s did not become ready", kind)
+        self._kill_opencode_server(proc)
+        return None
+
+    @staticmethod
+    def _kill_opencode_server(proc: Any) -> None:
+        """Terminate a serve process and its group; never leave it orphaned."""
+        if proc is None:
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            with contextlib.suppress(OSError):
+                proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.kill()
+
+    def _open_opencode_link(
+        self, kind: str, extra_args: list[str], cwd: str,
+    ) -> tuple[OpenCodeLink | None, Any]:
+        """Create the link (and, for v2, start the private server).
+
+        Returns ``(link, server_process)``. For v1 the server lives inside the
+        TUI (``--port``); for v2 crewhall runs ``serve --port`` and the TUI
+        connects with ``--server`` (the password is shared through the env).
+        """
+        if not self.track_conversations or not get_harness(kind).uses_local_server:
+            return None, None
+        if self._user_manages_opencode_server(extra_args):
+            return None, None
+        if self._opencode_api(kind) == "v2":
+            password = secrets.token_urlsafe(24)
+            port = free_port()
+            proc = self._start_opencode_server(kind, cwd, port, password)
+            if proc is None:
+                return None, None  # degrade to screen-only state, honestly
+            return OpenCodeLink(port, password, api="v2"), proc
+        return OpenCodeLink(free_port(), secrets.token_urlsafe(24)), None
+
+    def _reattach_opencode_link(self, harness: Harness, info: dict[str, Any], cwd: str) -> None:
+        """Rebuild the link for an adopted agent after a daemon restart.
+
+        v2: restart a ``serve`` on the same port/password (the surviving TUI
+        reconnects to it). v1: the TUI still owns its server on that port.
+        """
+        if harness.kind != "opencode" or not self.track_conversations:
+            return
+        api = str(info.get("api") or "v1")
+        try:
+            port, password = int(info["port"]), str(info["password"])
+        except (KeyError, TypeError, ValueError):
+            return
+        link = OpenCodeLink(port, password, api=api)
+        if api == "v2":
+            proc = self._start_opencode_server(harness.kind, cwd, port, password)
+            if proc is None:
+                return  # could not rebind: stay screen-only, honestly
+            self._opencode_servers[harness.agent_id] = proc
+        self._opencode_links[harness.agent_id] = {
+            "port": port, "password": password, "api": api,
+        }
+        self._attach_link(harness, link)
+
+    def _reopen_opencode_link(
+        self, agent_id: str, kind: str, extra_args: list[str], cwd: str,
+    ) -> tuple[OpenCodeLink | None, Any]:
+        """Link for a relaunched agent: reuse its v2 server, or start a fresh one."""
+        if not self.track_conversations or not get_harness(kind).uses_local_server:
+            return None, None
+        if self._user_manages_opencode_server(extra_args):
+            return None, None
+        if self._opencode_api(kind) == "v2":
+            proc = self._opencode_servers.get(agent_id)
+            info = self._opencode_links.get(agent_id)
+            if proc is not None and proc.poll() is None and info:
+                return OpenCodeLink(int(info["port"]), str(info["password"]), api="v2"), proc
+            password = secrets.token_urlsafe(24)
+            port = free_port()
+            proc = self._start_opencode_server(kind, cwd, port, password)
+            if proc is None:
+                return None, None
+            return OpenCodeLink(port, password, api="v2"), proc
+        return OpenCodeLink(free_port(), secrets.token_urlsafe(24)), None
 
     def _mcp_for(self, kind: str, harness_cls: type[Harness]) -> tuple[list[str], str | None]:
         """MCP launch args + (optional) temp config file, when enabled."""
@@ -356,6 +522,9 @@ class ServicesAgents:
             stop.wait(1.0)
 
     def _on_opencode_event(self, harness: Harness, event: dict[str, Any]) -> None:
+        link = getattr(harness, "link", None)
+        if getattr(link, "api", "v1") == "v2":
+            return self._on_opencode_event_v2(harness, event)
         kind = event.get("type")
         props = event.get("properties") or {}
         sid = props.get("sessionID")
@@ -387,6 +556,47 @@ class ServicesAgents:
             if last.get("event") != "prompt_submit":
                 self._apply_hook(harness, "prompt_submit")
         elif kind == "session.idle":
+            self._apply_hook(harness, "stop")
+
+    def _on_opencode_event_v2(self, harness: Harness, event: dict[str, Any]) -> None:
+        """OpenCode v2 events: ``{id, type, location, data}``.
+
+        v2 dropped ``session.status``/``session.idle`` for a turn-lifecycle pair:
+        ``session.execution.started`` begins a turn and ``session.execution.
+        succeeded|failed|interrupted`` ends it. Questions became ``form.*`` and
+        ``permission.rejected`` joined ``permission.asked/replied``.
+        """
+        kind = event.get("type")
+        raw = event.get("data")
+        data: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        sid = data.get("sessionID")
+        if kind in ("permission.asked", "permission.replied", "permission.rejected"):
+            self._on_opencode_interaction(harness, kind, data)
+            return
+        if kind in ("form.created", "form.replied", "form.cancelled"):
+            self._on_opencode_interaction(harness, kind, data)
+            return
+        if kind == "server.connected" and harness.link is not None:
+            self._sync_opencode_interactions(harness, harness.link)
+            return
+        if kind == "session.created":
+            sid = sid or data.get("id")
+            if sid and not data.get("parentID"):
+                self._adopt_conversation(harness, sid)
+            elif sid:
+                self._opencode_children.setdefault(harness.agent_id, set()).add(sid)
+            return
+        if sid and sid != harness.conversation_id and kind == "session.execution.started":
+            # Activity in another session (the user switched): follow it.
+            self._follow_opencode_session(harness, sid)
+        if sid and sid in self._opencode_children.get(harness.agent_id, ()):
+            return  # a subagent's turn is not the agent's turn
+        if kind == "session.execution.started":
+            last = self._hook_events.get(harness.agent_id) or {}
+            if last.get("event") != "prompt_submit":
+                self._apply_hook(harness, "prompt_submit")
+        elif kind in ("session.execution.succeeded", "session.execution.failed",
+                      "session.execution.interrupted"):
             self._apply_hook(harness, "stop")
 
     def _backend_for(self, backend_name: str | None, host_name: str | None) -> Any:
@@ -482,7 +692,6 @@ class ServicesAgents:
         # The OpenCode server binds the remote loopback and MCP config is a local
         # file: neither is reachable for a remote agent (state falls back to the
         # screen, honestly).
-        link = None if host else self._new_opencode_link(kind, extra_args)
         mcp_args, mcp_file = ([], None) if host else self._mcp_for(kind, harness_cls)
         if name and any(h.name == name for h in self.agents.all()):
             raise ValueError(f'agent name "{name}" already exists')
@@ -503,6 +712,10 @@ class ServicesAgents:
                 mode = None
         if mode == "worktree" and not conversation_workspace:
             cwd = self._make_worktree(session_id, agent_name, team, cwd, host)
+        # OpenCode link/server: v1 opens the port inside the TUI; v2 needs a
+        # private `serve` in the agent's directory (so its location matches).
+        link, server_proc = (None, None) if host else self._open_opencode_link(
+            kind, extra_args, cwd or os.getcwd())
         agent_env = self._build_agent_env(session_id, agent_name, [], env, host)
         if link:
             agent_env["OPENCODE_SERVER_PASSWORD"] = link.password
@@ -510,6 +723,8 @@ class ServicesAgents:
             command=self._launch_command(
                 kind, extra_args, conversation_id, link.port if link else None, mcp_args,
                 host,
+                server_url=(f"http://127.0.0.1:{link.port}"
+                            if link is not None and link.api == "v2" else None),
             ),
             cwd=cwd,
             env=agent_env,
@@ -546,6 +761,12 @@ class ServicesAgents:
         self._base_env.setdefault(session_id, dict(env or {}))
         self._agent_args[session_id] = extra_args
         self._agent_hosts[session_id] = host
+        if server_proc is not None:
+            self._opencode_servers[session_id] = server_proc
+        if link is not None:
+            self._opencode_links[session_id] = {
+                "port": link.port, "password": link.password, "api": link.api,
+            }
         if not host and not conversation:
             # A chat conversation must not drop a CLAUDE.md/AGENTS.md anywhere:
             # its instructions travel through the environment instead.
@@ -578,6 +799,11 @@ class ServicesAgents:
                     pids.add(int(harness.session.pid))
             except Exception:  # noqa: BLE001 - a broken session must not hide the rest
                 continue
+            # v2 tools descend from the `serve` process: count it as an agent
+            # root too, so a tool process is recognised as agent-originated.
+            server = self._opencode_servers.get(harness.agent_id)
+            if server is not None and server.poll() is None:
+                pids.add(int(server.pid))
         return pids
 
     def agent_tokens(self) -> list[str]:
@@ -714,6 +940,8 @@ class ServicesAgents:
         except Exception:  # noqa: BLE001
             log.debug("ignored exception in a boundary guard", exc_info=True)
         self._agent_args.pop(agent_id, None)
+        self._kill_opencode_server(self._opencode_servers.pop(agent_id, None))
+        self._opencode_links.pop(agent_id, None)
         self._mcp_cleanup(agent_id)
         self._cleanup_worktree(agent_id, force=force)
         self.interactions.forget_agent(agent_id)
@@ -788,6 +1016,11 @@ class ServicesAgents:
         the control plane's own resources are released.
         """
         self.remote_links.stop_all()
+        # The OpenCode v2 `serve` processes belong to the control plane, not to
+        # tmux: always stop them here (a surviving agent is re-attached to a
+        # fresh server on the same port when the daemon comes back, A1).
+        for agent_id in list(self._opencode_servers):
+            self._kill_opencode_server(self._opencode_servers.pop(agent_id, None))
         for harness in self.agents.all():
             if not kill_agents and self.session_survives_restart(harness.session):
                 continue

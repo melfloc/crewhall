@@ -169,9 +169,13 @@ class ServicesChatBridge:
         if sid in self._retired_conversations.get(harness.agent_id, ()):
             return  # the old conversation finishing up after /new
         try:
-            info = harness.link.get_json(f"/session/{sid}")
+            path = (f"/api/session/{sid}" if getattr(harness.link, "api", "v1") == "v2"
+                    else f"/session/{sid}")
+            info = harness.link.get_json(path)
         except Exception:  # noqa: BLE001
             return
+        if isinstance(info, dict) and isinstance(info.get("data"), dict):
+            info = info["data"]  # v2 wraps the session in {data: ...}
         if not isinstance(info, dict):
             return
         if info.get("parentID"):

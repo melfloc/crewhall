@@ -11,8 +11,9 @@ from ..session import InteractiveSession
 WORKING_RE = re.compile(r"esc\s+interrupt", re.IGNORECASE)
 # One ``Build · <model> · 4.3s`` line is appended to the transcript per completed
 # turn, so counting matches tells us how many turns have finished (robust across
-# turns even when the agent is not polled while working).
-COMPLETION_RE = re.compile(r"\u00b7\s*\d+(?:\.\d+)?s\b")
+# turns even when the agent is not polled while working). v2 uses ``ms`` for fast
+# turns (``Build · Cat Jam Free · 654ms · 40.5 tok/s``), so both units count.
+COMPLETION_RE = re.compile(r"\u00b7\s*\d+(?:\.\d+)?m?s\b")
 MOUNT_MARKERS = ("ctrl+p", "build ·", "build -")
 # Session view footer: context tokens, e.g. ``13.1K (1%) · $0.00``. The home
 # screen (no session yet, e.g. right after ``/new``) shows the version instead.
@@ -63,8 +64,12 @@ class OpenCodeHarness(Harness):
         hooks_settings: str | None,
         conversation_id: str | None = None,
         port: int | None = None,
+        server_url: str | None = None,
     ) -> list[str]:
-        # Local server (127.0.0.1, password-protected): exact events + history.
+        # v2: connect to a crewhall-managed `serve` (the TUI no longer opens its
+        # own port). v1: the TUI opens its private server on `port`.
+        if server_url:
+            return ["--server", server_url]
         return ["--port", str(port)] if port else []
 
     def on_hook(self, event: str, at: float | None = None) -> None:
@@ -154,6 +159,19 @@ class OpenCodeHarness(Harness):
         if cache and now - cache[0] < self._MODELS_TTL:
             return cache[1]
         try:
+            if getattr(link, "api", "v1") == "v2":
+                data = link.get_json("/api/model", timeout=3.0)
+                models = data.get("data") if isinstance(data, dict) else None
+                v2_out = [
+                    {"value": str(m.get("name") or m.get("modelID") or m.get("id")),
+                     "label": f"{m.get('name') or m.get('modelID') or m.get('id')} — "
+                              f"{m.get('providerID') or ''}".rstrip(" —")}
+                    for m in (models if isinstance(models, list) else []) if isinstance(m, dict)
+                ]
+                v2_out.sort(key=lambda item: item["label"].lower())
+                result = v2_out[:300]
+                self._models_cache = (now, result)
+                return result
             data = link.get_json("/provider", timeout=3.0)
         except Exception:  # noqa: BLE001 - the server may be busy or older
             return cache[1] if cache else []

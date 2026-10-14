@@ -69,11 +69,17 @@ def map_v2_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     blocks.append({"type": "text", "text": part["text"]})
                 elif ptype == "tool":
                     state = part.get("state") or {}
+                    metadata = state.get("metadata") or {}
                     args = json.dumps(state.get("input", part.get("input", {})),
                                       ensure_ascii=False, indent=2)
-                    blocks.append({"type": "tool_use", "name": part.get("tool", "?"),
+                    blocks.append({"type": "tool_use",
+                                   "name": part.get("name") or part.get("tool", "?"),
                                    "text": args[:2000]})
-                    output = state.get("output", part.get("output"))
+                    output = metadata.get("output") or state.get("output", part.get("output"))
+                    if not output:
+                        output = "\n".join(
+                            c.get("text", "") for c in (state.get("content") or [])
+                            if isinstance(c, dict) and c.get("type") == "text")
                     if output:
                         blocks.append({"type": "tool_result", "text": str(output)[:4000]})
         for block in blocks:
@@ -169,7 +175,10 @@ class OpenCodeLink:
             probe.get_json("/api/info", timeout=2.0)
             return "v2"
         except urllib.error.HTTPError:
-            return "v1"
+            return "v1"  # the server is up but has no /api/info: it is v1
+        except ValueError:
+            return "v1"  # answered with something that is not v2 JSON
+        # A connection error propagates: the caller retries until the TUI is up.
 
     def _open(self, path: str, timeout: float):
         req = urllib.request.Request(
@@ -218,12 +227,17 @@ class OpenCodeLink:
         out: dict[str, dict[str, Any]] = {}
         for part in parts:
             state = part.get("state") or {}
-            if part.get("type") != "tool" or state.get("status") != "running":
+            metadata = state.get("metadata") or {}
+            # v2 keeps the live status in state.metadata.status ("running" while
+            # the shell runs, "completed" once it is backgrounded/finished).
+            running = (state.get("status") == "running"
+                       or metadata.get("status") == "running")
+            if part.get("type") != "tool" or not running:
                 continue
             command = (state.get("input") or {}).get("command")
             if isinstance(command, str):
-                out[command] = {"call": part.get("callID") or part.get("id"),
-                                "output": str((state.get("metadata") or {}).get("output") or "")}
+                out[command] = {"call": part.get("id") or part.get("callID"),
+                                "output": str(metadata.get("output") or "")}
         return out
 
     def abort(self, session_id: str) -> None:

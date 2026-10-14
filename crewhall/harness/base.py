@@ -159,6 +159,7 @@ class Harness(ABC):
         hooks_settings: str | None,
         conversation_id: str | None = None,
         port: int | None = None,
+        server_url: str | None = None,
     ) -> list[str]:
         """Extra argv wiring hooks / a known conversation id into the agent."""
         return []

@@ -154,6 +154,11 @@ class ServicesPersistence:
         self.agents.add(harness)
         self._base_env[agent_id] = dict(agent.get("env") or {})
         self._agent_tokens.setdefault(agent_id, secrets.token_hex(16))
+        link_info = agent.get("opencode")
+        if isinstance(link_info, dict) and link_info:
+            self._opencode_links[agent_id] = link_info
+            if session is not None:  # a live tmux session survived the restart
+                self._reattach_opencode_link(harness, link_info, session.spec.cwd or os.getcwd())
 
     def _session_by_id(self, session_id: str) -> InteractiveSession | None:
         """Exact lookup, never a name/prefix match (ids must be unambiguous)."""
@@ -269,11 +274,11 @@ class ServicesPersistence:
             conversation_id = self._new_conversation_id(
                 kind, self._agent_args.get(agent_id, [])
             )
-            link = (None if self._agent_hosts.get(agent_id)
-                    else self._new_opencode_link(kind, self._agent_args.get(agent_id, [])))
             spec = harness.session.spec
             backend_name = harness.session.backend.name
             host = self._agent_hosts.get(agent_id)
+            link, server_proc = (None, None) if host else self._reopen_opencode_link(
+                agent_id, kind, self._agent_args.get(agent_id, []), spec.cwd)
             try:
                 harness.session.backend.close()
             except Exception:  # noqa: BLE001 - the session is being rebuilt anyway
@@ -285,10 +290,18 @@ class ServicesPersistence:
             env = self._build_agent_env(agent_id, harness.name or agent_id, teams, base_env, host)
             if link:
                 env["OPENCODE_SERVER_PASSWORD"] = link.password
+            if server_proc is not None:
+                self._opencode_servers[agent_id] = server_proc
+            if link is not None:
+                self._opencode_links[agent_id] = {
+                    "port": link.port, "password": link.password, "api": link.api,
+                }
             new_spec = SessionSpec(
                 command=self._launch_command(
                     kind, self._agent_args.get(agent_id, []), conversation_id,
                     link.port if link else None, host=host, enforce=False,
+                    server_url=(f"http://127.0.0.1:{link.port}"
+                                if link is not None and link.api == "v2" else None),
                 ),
                 cwd=spec.cwd,
                 env=env,

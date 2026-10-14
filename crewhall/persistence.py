@@ -88,6 +88,9 @@ class StateStore:
                     "args": list(controller._agent_args.get(harness.agent_id, [])),
                     "host": getattr(controller, "_agent_hosts", {}).get(harness.agent_id),
                     "conversation_id": harness.conversation_id,
+                    # OpenCode server link (port/password/api) so a daemon
+                    # restart can bring the server back on the same port (A1).
+                    "opencode": getattr(controller, "_opencode_links", {}).get(harness.agent_id),
                     # user-provided env only; identity/secret vars are omitted
                     "env": dict(controller._base_env.get(harness.agent_id) or {}),
                 }

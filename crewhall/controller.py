@@ -182,6 +182,11 @@ class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesS
         self._bridges: dict[str, threading.Event] = {}
         # OpenCode subagent sessions per agent: never adopted as the conversation.
         self._opencode_children: dict[str, set[str]] = {}
+        # OpenCode v2: the private `serve` process per agent (killed with it).
+        self._opencode_servers: dict[str, Any] = {}
+        # Persisted OpenCode link per agent: {"port", "password", "api"} so a
+        # daemon restart can bring the server back on the same port (A1).
+        self._opencode_links: dict[str, dict[str, Any]] = {}
         # Conversations an agent left with /clear or /new: never picked again by
         # discovery or by activity, only if the TUI explicitly creates/selects them.
         self._retired_conversations: dict[str, set[str]] = {}

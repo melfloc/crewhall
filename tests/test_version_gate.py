@@ -31,7 +31,7 @@ def _report(supported: bool, text: str) -> versions.VersionReport:
 
 class SelectCommand(unittest.TestCase):
     def test_fallback_used_when_primary_out_of_range(self):
-        mapping = {"/opt/v2/opencode": "2.0.0", "/opt/v1/opencode": "1.18.34"}
+        mapping = {"/opt/v2/opencode": "3.0.0", "/opt/v1/opencode": "1.18.34"}
         with mock.patch.object(versions, "probe_version", _probe(mapping)):
             argv, report, used = versions.select_command(
                 "opencode", [["/opt/v2/opencode"], ["/opt/v1/opencode"]])
@@ -49,7 +49,7 @@ class SelectCommand(unittest.TestCase):
         self.assertTrue(report.supported)
 
     def test_fallback_out_of_range_is_not_used(self):
-        mapping = {"/opt/a/opencode": "2.0.0", "/opt/b/opencode": "2.5.0"}
+        mapping = {"/opt/a/opencode": "3.0.0", "/opt/b/opencode": "3.5.0"}
         with mock.patch.object(versions, "probe_version", _probe(mapping)):
             argv, report, used = versions.select_command(
                 "opencode", [["/opt/a/opencode"], ["/opt/b/opencode"]])
@@ -58,7 +58,7 @@ class SelectCommand(unittest.TestCase):
         self.assertTrue(report.blocked)
 
     def test_best_in_range_candidate_wins(self):
-        mapping = {"/opt/a/opencode": "2.0.0", "/opt/b/opencode": "1.17.0",
+        mapping = {"/opt/a/opencode": "3.0.0", "/opt/b/opencode": "1.17.0",
                    "/opt/c/opencode": "1.19.0"}
         with mock.patch.object(versions, "probe_version", _probe(mapping)):
             argv, report, used = versions.select_command(
@@ -75,7 +75,7 @@ class SelectCommand(unittest.TestCase):
         self.assertIsNone(versions.blocked_reason(report))
 
     def test_custom_command_is_not_gated(self):
-        with mock.patch.object(versions, "probe_version", lambda argv: "2.0.0"):
+        with mock.patch.object(versions, "probe_version", lambda argv: "3.0.0"):
             report = versions.evaluate("opencode", ["/opt/wrapper-but-not-opencode"])
         self.assertIs(report.supported, False)
         self.assertFalse(report.canonical)
@@ -109,7 +109,7 @@ class SettingsAutoSelect(unittest.TestCase):
     def test_effective_command_switches_to_fallback(self):
         settings.patch({"providers.opencode.command": self.primary,
                         "providers.opencode.fallback_command": self.fallback}, confirm=True)
-        mapping = {self.primary: "2.0.0", self.fallback: "1.18.34"}
+        mapping = {self.primary: "3.0.0", self.fallback: "1.18.34"}
         with mock.patch.object(versions, "probe_version", _probe(mapping)):
             argv, report, used = settings.provider_effective_command("opencode")
         self.assertTrue(used)
@@ -118,7 +118,7 @@ class SettingsAutoSelect(unittest.TestCase):
 
     def test_check_provider_flags_blocked(self):
         settings.patch({"providers.opencode.command": self.primary}, confirm=True)
-        with mock.patch.object(versions, "probe_version", lambda argv: "2.0.0"):
+        with mock.patch.object(versions, "probe_version", lambda argv: "3.0.0"):
             out = settings.check_provider("opencode")
         self.assertTrue(out["blocked"])
         self.assertIs(out["supported"], False)
@@ -135,14 +135,14 @@ class GateBlocks(unittest.TestCase):
     def test_enforce_version_raises(self):
         with mock.patch("crewhall.settings.get", return_value=False):
             with self.assertRaises(UnsupportedVersionError):
-                self.controller._enforce_version("opencode", _report(False, "2.0.0"))
+                self.controller._enforce_version("opencode", _report(False, "3.0.0"))
 
     def test_enforce_version_allowed_by_setting(self):
         with mock.patch("crewhall.settings.get", return_value=True):
-            self.controller._enforce_version("opencode", _report(False, "2.0.0"))
+            self.controller._enforce_version("opencode", _report(False, "3.0.0"))
 
     def test_launch_command_blocks_out_of_range(self):
-        with mock.patch.object(versions, "probe_version", lambda argv: "2.0.0"), \
+        with mock.patch.object(versions, "probe_version", lambda argv: "3.0.0"), \
                 mock.patch("crewhall.settings.get", return_value=False):
             with self.assertRaises(UnsupportedVersionError):
                 self.controller._launch_command("opencode", [])
@@ -150,7 +150,7 @@ class GateBlocks(unittest.TestCase):
     def test_assert_operable_blocks_marked_harness(self):
         harness = self._harness("x")
         harness.version_blocked = True
-        harness.version_report = _report(False, "2.0.0")
+        harness.version_report = _report(False, "3.0.0")
         with self.assertRaises(UnsupportedVersionError):
             self.controller._assert_operable(harness)
 
@@ -161,7 +161,7 @@ class GateBlocks(unittest.TestCase):
         sender = self._harness("a")
         recipient = self._harness("b")
         recipient.version_blocked = True
-        recipient.version_report = _report(False, "2.0.0")
+        recipient.version_report = _report(False, "3.0.0")
         self.controller.register_agent(sender)
         self.controller.register_agent(recipient)
         with self.assertRaises(MessagingError):
@@ -170,7 +170,7 @@ class GateBlocks(unittest.TestCase):
     def _blocked(self, name: str) -> OpenCodeHarness:
         harness = self._harness(name)
         harness.version_blocked = True
-        harness.version_report = _report(False, "2.0.0")
+        harness.version_report = _report(False, "3.0.0")
         self.controller.register_agent(harness)
         return harness
 
@@ -197,7 +197,7 @@ class GateBlocks(unittest.TestCase):
 
     def test_relaunch_without_enforce_does_not_raise(self):
         """A restart/restore of a blocked agent must still produce a command."""
-        with mock.patch.object(versions, "probe_version", lambda argv: "2.0.0"), \
+        with mock.patch.object(versions, "probe_version", lambda argv: "3.0.0"), \
                 mock.patch("crewhall.settings.get", return_value=False):
             with self.assertRaises(UnsupportedVersionError):
                 self.controller._launch_command("opencode", [])  # a fresh launch blocks
@@ -222,7 +222,7 @@ class RestartNotGated(unittest.TestCase):
         harness = self.controller.create_agent(
             "claude", name="w", backend="pty", cwd=self.tmp)
         harness.version_blocked = True
-        harness.version_report = _report(False, "2.0.0")
+        harness.version_report = _report(False, "3.0.0")
         result = self.controller.force_restart_agent(
             harness.agent_id, reason="unsupported", timeout=0.3)
         self.assertEqual(result["agent_id"], harness.agent_id)
@@ -256,7 +256,7 @@ class AutoDiscovery(unittest.TestCase):
 
     def test_auto_switch_without_configured_fallback(self):
         good = self._exe("1.18.33")
-        mapping = {good: "1.18.33", "/usr/bin/opencode": "2.0.0"}
+        mapping = {good: "1.18.33", "/usr/bin/opencode": "3.0.0"}
         with mock.patch("crewhall.harness.versions.discovery_roots", return_value=[self.d]), \
                 mock.patch.object(versions, "probe_version", _probe(mapping)):
             discovered = versions.discover_candidates("opencode")
@@ -288,7 +288,7 @@ class NoticesStore(unittest.TestCase):
 
     def test_switch_notice_recorded_once(self):
         controller = Controller(adopt=False)
-        primary = _report(False, "2.0.0")
+        primary = _report(False, "3.0.0")
         chosen = _report(True, "1.18.33")
         with mock.patch("crewhall.watch.notify", return_value=True):
             controller._record_version_notice("opencode", primary, chosen, True)

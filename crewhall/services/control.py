@@ -106,9 +106,16 @@ class ServicesControl:
             args = self._agent_args.get(agent_id, [])
             base_env = dict(self._base_env.get(agent_id) or {})
             env = self._build_agent_env(agent_id, harness.name or agent_id, teams, base_env, host)
-            link = None if host else self._new_opencode_link(kind, args)
+            link, server_proc = (None, None) if host else self._reopen_opencode_link(
+                agent_id, kind, args, spec.cwd)
             if link:
                 env["OPENCODE_SERVER_PASSWORD"] = link.password
+            if server_proc is not None:
+                self._opencode_servers[agent_id] = server_proc
+            if link is not None:
+                self._opencode_links[agent_id] = {
+                    "port": link.port, "password": link.password, "api": link.api,
+                }
             can_resume = bool(conversation_id and kind in RESUMABLE and not host)
             resume_id = conversation_id if can_resume and not fresh else None
             new_conv = resume_id if resume_id else self._new_conversation_id(kind, args)
@@ -116,6 +123,8 @@ class ServicesControl:
                 command=self._launch_command(
                     kind, args, new_conv, link.port if link else None, host=host,
                     resume=resume_id, enforce=False,
+                    server_url=(f"http://127.0.0.1:{link.port}"
+                                if link is not None and link.api == "v2" else None),
                 ),
                 cwd=spec.cwd,
                 env=env,
