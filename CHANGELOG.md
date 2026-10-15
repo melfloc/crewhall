@@ -5,6 +5,18 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.83.1] — 2026-10-15
+
+**OpenCode 2 listo para actualizar.** Validado con la 2.0.28 real.
+
+- Corregido: una sesión v2 recién creada quedaba en `unknown` (sin el texto
+  "Ask anything") y no recibía mensajes; ahora el cuadro de entrada cuenta como listo.
+- Corregido: una conversación v1 que no existe en v2 se "reanudaba" vacía sin avisar;
+  ahora el reinicio abre una sesión nueva y lo notifica.
+- ADAPTERS.md: cómo volver a OpenCode v1 (probado).
+- Pruebas reales: `scripts/opencode_v2_model_test.py` y
+  `scripts/opencode_v1_to_v2_migration_test.py`.
+
 ## [0.83.0] — 2026-10-14
 
 **OpenCode 2 y control de versiones.** crewhall valida la versión de cada CLI, cambia
