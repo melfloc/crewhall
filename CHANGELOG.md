@@ -7,6 +7,22 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+**OpenCode v2: el modelo/agente pedidos se aplican por la API (nunca en silencio).**
+La TUI v2 rechaza `--model`/`--agent`, así que crewhall creaba la sesión con el
+modelo por defecto y descartaba los flags sin avisar. Ahora, al arrancar (crear,
+restart, force_restart y restore tras reiniciar el daemon), crewhall **crea la
+sesión y aplica `--model`** (o el `default_model` del provider) **y `--agent`** con
+los endpoints de v2 (`POST /api/session`, `.../{id}/model`, `.../{id}/agent`),
+antes de que el agente sea usable; en restart los reaplica sobre la sesión
+reanudada. Si no se pueden aplicar (modelo/agente inexistente o error de API) el
+agente arranca igual, pero queda claro: **notice** (modal en la Web UI +
+notificación de escritorio), campo `session_config` en `agent_summary` y línea en
+`crewhall agent status` (`model requested X, running Y`). Cualquier otro flag
+descartado en v2 también se lista en un notice. Pruebas con un servidor v2 falso
+(`tests/test_opencode_v2_model.py`) y verificación real aislada
+(`scripts/opencode_v2_model_test.py`: crea con `--model`, comprueba API y pie de la
+TUI, y reaplica tras restart).
+
 **Puerta de versión de las CLI de agente (gate) y pin de binario.** Un cambio de
 versión de un agente puede mover las frases de su TUI (o su API/CLI) en las que el
 adaptador se apoya. Ahora crewhall no solo lo avisa: **se niega a lanzar o manejar**

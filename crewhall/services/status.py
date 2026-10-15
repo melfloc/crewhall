@@ -61,6 +61,7 @@ class ServicesStatus:
             "human_draft": draft,  # boolean only: never the draft's text
             "version_blocked": version_blocked,
             "cli": summary.get("cli"),
+            "session_config": summary.get("session_config"),
             "processes": self._status_processes(harness, host, include_output),
             "subagents": sorted(self._opencode_children.get(harness.agent_id, set())),
             "queue": self.messaging.queue_info(harness.agent_id),

@@ -187,6 +187,9 @@ class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesS
         # Persisted OpenCode link per agent: {"port", "password", "api"} so a
         # daemon restart can bring the server back on the same port (A1).
         self._opencode_links: dict[str, dict[str, Any]] = {}
+        # OpenCode v2: the model/agent crewhall applied through the API (or could
+        # not), per agent. Shown in agent_summary / ``crewhall agent status``.
+        self._v2_config: dict[str, dict[str, Any]] = {}
         # Conversations an agent left with /clear or /new: never picked again by
         # discovery or by activity, only if the TUI explicitly creates/selects them.
         self._retired_conversations: dict[str, set[str]] = {}

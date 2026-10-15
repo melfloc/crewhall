@@ -279,6 +279,15 @@ class ServicesPersistence:
             host = self._agent_hosts.get(agent_id)
             link, server_proc = (None, None) if host else self._reopen_opencode_link(
                 agent_id, kind, self._agent_args.get(agent_id, []), spec.cwd)
+            v2_session: str | None = None
+            if link is not None and getattr(link, "api", "v1") == "v2" and not host:
+                report = self._configure_v2_session(
+                    agent_id, kind, link, self._agent_args.get(agent_id, []),
+                    session_id=conversation_id,
+                )
+                v2_session = report.get("session_id") or conversation_id
+                if v2_session:
+                    conversation_id = v2_session
             try:
                 harness.session.backend.close()
             except Exception:  # noqa: BLE001 - the session is being rebuilt anyway
@@ -300,6 +309,7 @@ class ServicesPersistence:
                 command=self._launch_command(
                     kind, self._agent_args.get(agent_id, []), conversation_id,
                     link.port if link else None, host=host, enforce=False,
+                    resume=v2_session,
                     server_url=(f"http://127.0.0.1:{link.port}"
                                 if link is not None and link.api == "v2" else None),
                 ),
@@ -429,6 +439,7 @@ class ServicesPersistence:
         if conversation_id == harness.conversation_id:
             return False
         harness.conversation_id = conversation_id
+        self._apply_pending_v2_config(harness, conversation_id)
         logger = getattr(harness.session, "_log", None)
         if callable(logger):
             logger("conversation", {"conversation_id": conversation_id})

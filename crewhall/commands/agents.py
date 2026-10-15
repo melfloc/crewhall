@@ -259,6 +259,19 @@ def _print_status(st: dict) -> None:
     cli = st.get("cli") or {}
     if cli.get("blocked"):
         print(f"    cli: {cli.get('version') or 'unknown'} unsupported — {cli.get('reason')}")
+    cfg = st.get("session_config") or {}
+    if cfg.get("model"):
+        running = cfg.get("running_model")
+        if cfg.get("model_applied") is not False and (not running or running == cfg["model"]):
+            print(f"    model: {cfg['model']}")
+        else:
+            print(f"    model requested {cfg['model']}, running {running or 'unknown'}")
+    if cfg.get("agent"):
+        applied = "applied" if cfg.get("agent_applied") else "not applied"
+        print(f"    agent: {cfg['agent']} ({applied})")
+    ignored = cfg.get("ignored_flags") or []
+    if ignored:
+        print(f"    ignored in v2: {', '.join(ignored)}")
     blocked = st.get("blocked_by") or []
     print(f"    deliverable_now: {st.get('deliverable_now')}"
           + (f"  blocked_by={blocked}" if blocked else ""))

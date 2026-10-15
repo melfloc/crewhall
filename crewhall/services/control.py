@@ -119,10 +119,19 @@ class ServicesControl:
             can_resume = bool(conversation_id and kind in RESUMABLE and not host)
             resume_id = conversation_id if can_resume and not fresh else None
             new_conv = resume_id if resume_id else self._new_conversation_id(kind, args)
+            v2_session: str | None = None
+            if link is not None and getattr(link, "api", "v1") == "v2" and not host:
+                # Re-apply --model/--agent to the resumed session (or create the
+                # fresh one) through the API; v2's TUI rejects both flags.
+                report = self._configure_v2_session(
+                    agent_id, kind, link, args, session_id=resume_id)
+                v2_session = report.get("session_id") or resume_id
+                if v2_session and not resume_id:
+                    new_conv = v2_session
             new_spec = SessionSpec(
                 command=self._launch_command(
                     kind, args, new_conv, link.port if link else None, host=host,
-                    resume=resume_id, enforce=False,
+                    resume=v2_session or resume_id, enforce=False,
                     server_url=(f"http://127.0.0.1:{link.port}"
                                 if link is not None and link.api == "v2" else None),
                 ),

@@ -262,8 +262,12 @@ contrato del servidor se detecta en caliente (`OpenCodeLink.detect_api` sondea
   turnos rápidos, así que `COMPLETION_RE` acepta `m?s`; fixtures `*-v2.txt` con sus
   tests de `_detect`.
 - **Flags v1-only.** La TUI v2 **rechaza** `--model`/`--agent` (y cualquier flag
-  desconocido) y sale; crewhall los omite en lanzamientos v2 (el modelo se elige con
-  el selector o vía API).
+  desconocido) y sale; crewhall los omite del argv v2 y **los aplica por la API**:
+  al arrancar crea la sesión con `POST /api/session` y fija el modelo/agente con
+  `POST /api/session/{id}/model` y `/agent` (en restart, sobre la sesión
+  reanudada). Si no puede, arranca igual pero avisa (notice + `session_config` en
+  `agent_summary`/`agent status`). Cualquier otro flag descartado también se
+  reporta; nunca se ignora en silencio.
 
 **Datos reales de v2 (aislado, 2.0.28).** `opencode serve --port N` imprime
 `server password <pw>` si no se le da `OPENCODE_SERVER_PASSWORD` (y **respeta** esa
