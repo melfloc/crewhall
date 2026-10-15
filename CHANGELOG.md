@@ -5,6 +5,11 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [0.83.2] — 2026-10-15
+
+- Corregido: con OpenCode 2 la pestaña Conversation mostraba los mensajes al revés
+  (la API v2 los entrega del más nuevo al más viejo).
+
 ## [0.83.1] — 2026-10-15
 
 **OpenCode 2 listo para actualizar.** Validado con la 2.0.28 real.
