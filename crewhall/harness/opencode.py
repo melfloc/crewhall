@@ -21,6 +21,11 @@ MOUNT_MARKERS = ("ctrl+p", "build ·", "build -")
 FOOTER_LINE_RE = re.compile(r"^[\w][\w .-]{0,40} [\u00b7-] \S")
 TOKENS_RE = re.compile(r"\d+(?:\.\d+)?[KM]?\s+\(\d+%\)")
 READY_PLACEHOLDER = "ask anything"
+# The composer's closing rule (``╹▀▀▀…``). It is drawn whenever the input box is
+# mounted, so it is the readiness marker for an *empty* session: v2 opened with
+# ``--session`` right after crewhall created it (or after a v1->v2 fallback)
+# shows this composer without the ``Ask anything`` placeholder v1 draws.
+INPUT_BOX_RE = re.compile(r"\u2579\u2580{3,}")
 
 
 class OpenCodeHarness(Harness):
@@ -372,6 +377,10 @@ class OpenCodeHarness(Harness):
                 return AgentState.WAITING_INPUT, "TUI idle (completed turn visible)"
             if READY_PLACEHOLDER in low:
                 return AgentState.READY, "input placeholder 'Ask anything' visible"
+            if INPUT_BOX_RE.search(text):
+                # An empty session (v2 with ``--session``, or ``/new``) shows the
+                # composer without the placeholder: still a ready input box.
+                return AgentState.READY, "input box visible (empty session)"
             return AgentState.UNKNOWN, "TUI mounted, no readiness marker"
         if (
             self._seen_working

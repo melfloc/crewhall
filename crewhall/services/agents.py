@@ -630,6 +630,40 @@ class ServicesAgents:
         self._report_v2_config(agent_id, report)
         return report
 
+    def _v2_session_exists(self, link: Any, session_id: str | None) -> bool:
+        """Whether the v2 server already knows this conversation id.
+
+        A conversation created before an upgrade (typically by a v1 server) is
+        not present on the v2 server, and v2's ``--session`` then *creates* an
+        empty session under that id, silently losing the history. Ask the server
+        before resuming instead of trusting the id alone.
+        """
+        if link is None or getattr(link, "api", "v1") != "v2" or not session_id:
+            return False
+        try:
+            link.get_json(f"/api/session/{session_id}", timeout=3.0)
+            return True
+        except Exception:  # noqa: BLE001 - 404/unreachable: not resumable here
+            return False
+
+    def _record_v2_unresumable(self, agent_id: str, old_id: str, *, from_v1: bool) -> None:
+        """Say plainly that a pre-upgrade conversation cannot be resumed on v2."""
+        subject = ("an OpenCode v1 conversation is not resumable in v2"
+                   if from_v1 else "the conversation was not found on the v2 server")
+        self._publish_v2_notice(notices.add(
+            key=f"v2migrate:{agent_id}:{old_id}",
+            kind="opencode", level="warn",
+            title=("OpenCode v1 conversation not resumable in v2 — "
+                   "started a new session" if from_v1
+                   else "OpenCode v2 conversation not found — started a new session"),
+            body=(
+                f"{old_id}: {subject}. The v2 server did not have it, so opening it "
+                "would have silently shown an empty conversation under the same id. "
+                "crewhall started a fresh session instead; the previous history is "
+                "still on disk but cannot be continued here."
+            ),
+        ))
+
     def _report_v2_config(self, agent_id: str, report: dict[str, Any]) -> None:
         """Explain, once, any OpenCode v2 setting crewhall could not apply."""
         ignored = report.get("ignored_flags") or []

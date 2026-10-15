@@ -16,14 +16,18 @@ isolated server database and tmux sockets (it never touches a developer's state)
      shows it;
   4. re-apply (what crewhall does on restart) and assert both again.
 
-The installed binary here is 1.19.0, which already speaks the v2 session API
-(``/api/session``, ``/api/session/{id}/model``) but has no ``/api/info`` (v2's
-readiness probe). The feature is therefore driven through crewhall's real code
-and the TUI is attached to the very session crewhall configured; the model
-application is verified end to end.
+The binary under test is chosen by ``CREWHALL_REAL_OPENCODE`` (or the first
+``opencode`` on PATH), so a real v1 (1.19.0) or a real, isolated v2 (2.0.28)
+can be exercised. The TUI is driven with the invocation each major version
+speaks: v1 attaches with ``attach <url>``; v2 (which has no ``attach``) uses
+``--server <url>``. The model is applied through crewhall's real code and the
+TUI is attached to the very session crewhall configured, so the model is
+verified end to end (API + footer), including after a restart re-apply.
 
 Exit code 0 = every check passed. Set ``SMOKE_MODEL=provider/model`` to pick the
-model (default: a cheap one).
+model (default: a cheap one)::
+
+    CREWHALL_REAL_OPENCODE=/path/to/opencode-2.0.28 python3 scripts/opencode_v2_model_test.py
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ import base64
 import contextlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -62,22 +67,36 @@ def _real_opencode() -> str:
 
 
 def isolate() -> str:
-    """A private server data dir, auth copy and tmux sockets (never the real ones)."""
+    """A private config/data dir, auth copy and tmux sockets (never the real ones).
+
+    v2's TUI writes ``cli.json`` into ``$XDG_CONFIG_HOME/opencode`` on first run,
+    so the config dir is copied into the sandbox and pointed at via
+    ``XDG_CONFIG_HOME``: the run must never leave a file in the user's real
+    config. ``node_modules`` is skipped (large, not needed here).
+    """
     global _ROOT
     if _ROOT is not None:
         return _ROOT
     root = _ROOT = tempfile.mkdtemp(prefix="at-v2model-")
+    data_home = os.path.join(root, "data")
+    config_home = os.path.join(root, "config")
     os.environ.update({
         "CREWHALL_TMUX_SOCKET": f"at_v2model_{os.getpid()}",
         "AGENT_TERMINAL_TMUX_SOCKET": f"at_v2model_{os.getpid()}",
         "CREWHALL_HOOKS": "0",
+        "XDG_DATA_HOME": data_home,
+        "XDG_CONFIG_HOME": config_home,
     })
+    real_config = os.path.expanduser("~/.config/opencode")
+    if os.path.isdir(real_config):
+        shutil.copytree(real_config, os.path.join(config_home, "opencode"),
+                        ignore=shutil.ignore_patterns("node_modules"), dirs_exist_ok=True)
     # Provider credentials live in the data dir; copy them (0600) into the
     # isolated server dir so the server can authenticate without touching the
     # user's database.
     auth = os.path.expanduser("~/.local/share/opencode/auth.json")
     if os.path.isfile(auth):
-        dest_dir = os.path.join(root, "data", "opencode")
+        dest_dir = os.path.join(data_home, "opencode")
         os.makedirs(dest_dir, mode=0o700, exist_ok=True)
         shutil.copyfile(auth, os.path.join(dest_dir, "auth.json"))
         os.chmod(os.path.join(dest_dir, "auth.json"), 0o600)
@@ -134,6 +153,17 @@ def start_server(real: str, cwd: str, port: int, password: str, data_home: str):
     return None
 
 
+def _is_v2(real: str) -> bool:
+    """True when the binary speaks the v2 CLI (major version >= 2)."""
+    try:
+        out = subprocess.run([real, "--version"], capture_output=True, text=True,
+                             timeout=15)
+    except Exception:  # noqa: BLE001 - an unprobeable binary is treated as v1
+        return False
+    match = re.search(r"(\d+)\.", out.stdout + out.stderr)
+    return bool(match and int(match.group(1)) >= 2)
+
+
 def _footer_line(screen: str) -> str:
     for line in screen.splitlines():
         if "Build" in line and "\u00b7" in line:
@@ -141,17 +171,25 @@ def _footer_line(screen: str) -> str:
     return ""
 
 
+def _tail(screen: str, limit: int = 6) -> str:
+    lines = [ln.rstrip() for ln in screen.splitlines() if ln.strip()]
+    return " | ".join(lines[-limit:])
+
+
 def view_footer(real: str, workdir: str, port: int, password: str,
-                session_id: str, token: str, sock: str, timeout: float = 45.0) -> str:
+                session_id: str, token: str, sock: str, *, v2: bool,
+                timeout: float = 45.0) -> str:
     """Attach the real TUI to the session; return the screen with the model.
 
     The server (and its database) is the isolated one; the TUI is the real,
-    installed one, attached to the very session crewhall configured.
+    installed one, attached to the very session crewhall configured. v1 has an
+    ``attach`` subcommand; v2 (2.x) has none and connects with ``--server``.
     """
     tmux = ["tmux", "-L", sock]
     subprocess.run([*tmux, "kill-server"], capture_output=True)
-    cmd = (f"cd {workdir} && OPENCODE_SERVER_PASSWORD={password} "
-           f"{real} attach http://127.0.0.1:{port} --session {session_id}")
+    target = (f"--server http://127.0.0.1:{port} --session {session_id}"
+              if v2 else f"attach http://127.0.0.1:{port} --session {session_id}")
+    cmd = f"cd {workdir} && OPENCODE_SERVER_PASSWORD={password} {real} {target}"
     subprocess.run([*tmux, "new-session", "-d", "-x", "120", "-y", "40",
                     "-s", "view", cmd], capture_output=True)
     screen = ""
@@ -171,6 +209,7 @@ def view_footer(real: str, workdir: str, port: int, password: str,
 
 def main() -> int:
     real = _real_opencode()
+    v2 = _is_v2(real)
     # The TUI needs the real provider catalog only to render the model's display
     root = isolate()
     report = Report()
@@ -194,7 +233,7 @@ def main() -> int:
             return 1
         link = OpenCodeLink(port, password, api="v2")
         token = MODEL.split("/", 1)[-1].split("-")[0].split(".")[0]
-        print(f"real opencode: {real}")
+        print(f"real opencode: {real} ({'v2' if v2 else 'v1'} CLI)")
         print(f"model:         {MODEL}")
         print(f"sandbox:       {root}\n")
 
@@ -209,9 +248,11 @@ def main() -> int:
         report.check(running.get("id") == MODEL.split("/", 1)[-1],
                      "the server API reports the requested model",
                      f"{running.get('providerID')}/{running.get('id')}")
-        screen = view_footer(real, workdir, port, password, session_id, token, "at_v2view1")
+        screen = view_footer(real, workdir, port, password, session_id, token,
+                             "at_v2view1", v2=v2)
         report.check(token.lower() in screen.lower(),
-                     "the TUI footer shows the model", _footer_line(screen))
+                     "the TUI footer shows the model",
+                     _footer_line(screen) or _tail(screen))
 
         print("\nPhase 2 — re-apply (restart) and verify again")
         second = controller._configure_v2_session(
@@ -223,9 +264,11 @@ def main() -> int:
         report.check(running2.get("id") == MODEL.split("/", 1)[-1],
                      "the restarted session still uses the requested model",
                      f"{running2.get('providerID')}/{running2.get('id')}")
-        screen2 = view_footer(real, workdir, port, password, session_id, token, "at_v2view2")
+        screen2 = view_footer(real, workdir, port, password, session_id, token,
+                              "at_v2view2", v2=v2)
         report.check(token.lower() in screen2.lower(),
-                     "the TUI footer shows the model after restart", _footer_line(screen2))
+                     "the TUI footer shows the model after restart",
+                     _footer_line(screen2) or _tail(screen2))
     finally:
         if server is not None:
             with contextlib.suppress(Exception):

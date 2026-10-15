@@ -260,8 +260,33 @@ class V2NeverSilent(V2ModelBase):
         self.assertIn("ignored in v2: --model", text)
 
 
+class V2MigrationFallback(V2ModelBase):
+    """A pre-upgrade (v1) conversation that v2 does not have must not be resumed."""
+
+    def test_session_exists_probes_the_v2_server(self):
+        FakeV2Server.sessions["ses_known"] = {"id": "ses_known"}
+        self.assertTrue(self.controller._v2_session_exists(self.link, "ses_known"))
+        self.assertFalse(self.controller._v2_session_exists(self.link, "ses_missing"))
+        self.assertFalse(self.controller._v2_session_exists(self.link, None))
+        # A v1 link is never probed against the v2 API.
+        v1_link = OpenCodeLink(self.port, PASSWORD, api="v1")
+        self.assertFalse(self.controller._v2_session_exists(v1_link, "ses_known"))
+
+    def test_unresumable_records_a_migration_notice(self):
+        self.controller._record_v2_unresumable("a1", "ses_old", from_v1=True)
+        pending = notices.pending()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["key"], "v2migrate:a1:ses_old")
+        self.assertIn("not resumable in v2", pending[0]["title"])
+        self.assertIn("ses_old", pending[0]["body"])
+        # A same-version miss gets generic wording (no "v1" claim).
+        self.controller._record_v2_unresumable("a2", "ses_x", from_v1=False)
+        titles = [n["title"] for n in notices.pending()]
+        self.assertTrue(any("not found" in t for t in titles), titles)
+
+
 class V2Wiring(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.controller = Controller(adopt=False)
 
     def test_launch_command_drops_flags_and_uses_the_session(self):

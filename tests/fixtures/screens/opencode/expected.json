@@ -4,6 +4,7 @@
   "waiting.txt": {"state": "waiting_input", "evidence_contains": "completed"},
   "starting.txt": {"state": "starting", "evidence_contains": "not mounted"},
   "ready-v2.txt": {"state": "ready", "evidence_contains": "Ask anything"},
+  "ready-empty-v2.txt": {"state": "ready", "evidence_contains": "empty session"},
   "working-v2.txt": {"state": "working", "evidence_contains": "esc interrupt"},
   "waiting-v2.txt": {"state": "waiting_input", "evidence_contains": "completed"}
 }

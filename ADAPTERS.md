@@ -210,7 +210,30 @@ resuelve el comando efectivo de cada provider y lo sondea (`<bin> --version`):
 - `crewhall doctor` informa el estado de cada CLI con el comando efectivo ya resuelto
   (primario o fallback) y avisa del override activo.
 
-### OpenCode v2 — cambios que rompen el adaptador (pendiente)
+### Rollback a OpenCode v1 (volver atrás tras actualizar a v2)
+
+Volver a v1 es solo repuntar el comando del provider: crewhall detecta la versión
+del binario en caliente (`_opencode_api` lee `<bin> --version`) y elige el contrato
+del servidor (v2 → `serve` + `--server`; v1 → `--port`/`attach`). No hace falta
+desinstalar v2 ni tocar el estado: los agentes existentes siguen en su sitio.
+
+1. **Web UI**: Settings → Providers → OpenCode → campo *binario* →
+   `~/.opencode/bin/opencode` (la ruta de v1; usa `~`, no la ruta absoluta del home).
+2. **API de control** (`settings_set`; cambiar un comando de provider exige
+   confirmación):
+   `{"providers.opencode.command": "~/.opencode/bin/opencode"}`
+3. **A mano**: en `~/.config/crewhall/settings.json`, la clave
+   `providers.opencode.command`.
+
+Después, reinicia los agentes afectados (`crewhall agent restart <nombre>`; también
+puedes reiniciar el daemon): se relanzan en v1. Si quieres impedir además el
+auto-switch a otra instalación compatible, pon `agents.auto_select_compatible=false`;
+para fijar un binario concreto sin que el gate lo bloquee, usa
+`providers.opencode.fallback_command` o `agents.allow_unvalidated_versions=true`.
+Comprobado una vez con el comando de rollback sobre un `settings.json` aislado
+(la resolución vuelve a v1 y `_opencode_api("opencode") == "v1"`).
+
+### OpenCode v2 — diferencias con el adaptador v1
 
 OpenCode 2 es un cambio de ruptura profundo; el rango validado de `opencode`
 (`>=1.0.0, <2.0.0`) hace que el gate lo **bloquee** hasta migrar el adaptador.

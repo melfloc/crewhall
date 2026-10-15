@@ -106,6 +106,9 @@ class ServicesControl:
             args = self._agent_args.get(agent_id, [])
             base_env = dict(self._base_env.get(agent_id) or {})
             env = self._build_agent_env(agent_id, harness.name or agent_id, teams, base_env, host)
+            # The api a still-registered conversation was created under (v1 for
+            # an agent that predates an upgrade): used to explain a v1->v2 fallback.
+            prev_api = (self._opencode_links.get(agent_id) or {}).get("api")
             link, server_proc = (None, None) if host else self._reopen_opencode_link(
                 agent_id, kind, args, spec.cwd)
             if link:
@@ -121,6 +124,15 @@ class ServicesControl:
             new_conv = resume_id if resume_id else self._new_conversation_id(kind, args)
             v2_session: str | None = None
             if link is not None and getattr(link, "api", "v1") == "v2" and not host:
+                if resume_id and not self._v2_session_exists(link, resume_id):
+                    # The id is not on this server (e.g. the conversation was
+                    # created by v1): v2 would silently open an empty session
+                    # under the same id. Start fresh and say so, never silently.
+                    self._record_v2_unresumable(
+                        agent_id, resume_id, from_v1=prev_api == "v1")
+                    resume_id = None
+                    new_conv = None
+                    fresh = True
                 # Re-apply --model/--agent to the resumed session (or create the
                 # fresh one) through the API; v2's TUI rejects both flags.
                 report = self._configure_v2_session(
