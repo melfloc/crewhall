@@ -5,7 +5,11 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
-## [Unreleased]
+## [0.83.0] — 2026-10-14
+
+**OpenCode 2 y control de versiones.** crewhall valida la versión de cada CLI, cambia
+solo a un binario compatible cuando uno sale de rango (con aviso en la Web UI) y
+maneja OpenCode 2 de punta a punta sin perder el modelo de cada agente.
 
 **OpenCode v2: el modelo/agente pedidos se aplican por la API (nunca en silencio).**
 La TUI v2 rechaza `--model`/`--agent`, así que crewhall creaba la sesión con el
