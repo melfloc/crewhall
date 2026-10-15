@@ -9,6 +9,9 @@ to run without it and ships these notes with the release.
 
 - Corregido: con OpenCode 2 la pestaña Conversation mostraba los mensajes al revés
   (la API v2 los entrega del más nuevo al más viejo).
+- Corregido: un agente OpenCode 2 lanzado sin seguimiento de conversaciones moría al
+  arrancar si el puerto del servicio compartido de OpenCode estaba ocupado; ahora
+  siempre recibe su servidor privado.
 
 ## [0.83.1] — 2026-10-15
 

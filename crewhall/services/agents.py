@@ -393,11 +393,17 @@ class ServicesAgents:
         TUI (``--port``); for v2 crewhall runs ``serve --port`` and the TUI
         connects with ``--server`` (the password is shared through the env).
         """
-        if not self.track_conversations or not get_harness(kind).uses_local_server:
+        if not get_harness(kind).uses_local_server:
             return None, None
         if self._user_manages_opencode_server(extra_args):
             return None, None
-        if self._opencode_api(kind) == "v2":
+        v2 = self._opencode_api(kind) == "v2"
+        # v2 always gets its private server, even with conversation tracking off:
+        # without --server its TUI falls back to OpenCode's shared managed service
+        # on a fixed port and dies when that port is taken.
+        if not self.track_conversations and not v2:
+            return None, None
+        if v2:
             password = secrets.token_urlsafe(24)
             port = free_port()
             proc = self._start_opencode_server(kind, cwd, port, password)
