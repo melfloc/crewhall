@@ -166,6 +166,8 @@ class OpenCodeLaunchWiring(unittest.TestCase):
     def test_port_and_password_and_user_overrides(self):
         c = Controller(adopt=False)
         c.track_conversations = True
+        # The v1 wiring, whatever opencode this machine has installed.
+        c._opencode_api = lambda kind: "v1"
         link = c._new_opencode_link("opencode", [])
         self.assertTrue(link.password and link.port)
         self.assertEqual(
@@ -328,6 +330,16 @@ class OpenCodeLinkV2Test(unittest.TestCase):
 
     def test_detect_api_probes_api_info(self):
         self.assertEqual(OpenCodeLink.detect_api(self.port, PASSWORD), "v2")
+
+    def test_map_v2_messages_reads_oldest_first_even_if_server_sends_newest_first(self):
+        newest_first = [
+            {"type": "assistant", "time": {"created": 3000},
+             "content": [{"type": "text", "text": "second answer"}]},
+            {"type": "user", "time": {"created": 2000}, "text": "second question"},
+            {"type": "user", "time": {"created": 1000}, "text": "first question"},
+        ]
+        texts = [e["text"] for e in map_v2_messages(newest_first)]
+        self.assertEqual(texts, ["first question", "second question", "second answer"])
 
     def test_map_v2_messages_builds_structured_blocks(self):
         entries = map_v2_messages(V2_MESSAGES)

@@ -53,6 +53,12 @@ def map_v2_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     structure ``map_messages`` (v1) produces, so transcripts are unchanged.
     """
     out: list[dict[str, Any]] = []
+    # v2 lists the newest message first; transcripts read oldest -> newest.
+    # Sort by creation time (stable), whatever order the server used.
+    messages = sorted(
+        (m for m in messages if isinstance(m, dict)),
+        key=lambda m: ((m.get("time") or {}).get("created") or 0),
+    )
     for item in messages:
         kind = item.get("type")
         if kind not in ("user", "assistant"):
