@@ -350,7 +350,7 @@ class ConversationView(_Browser):
             "/static/js/transport.js", "/static/js/terminals.js",
             "/static/js/terminal_view.js", "/static/js/sidebar.js",
             "/static/js/agent.js", "/static/js/timeline.js", "/static/js/usage.js", "/static/js/cleaning.js",
-            "/static/js/version.js", "/static/js/inbox.js", "/static/js/access.js", "/static/js/bundle.js", "/static/js/settings.js",
+            "/static/js/version.js", "/static/js/notices.js", "/static/js/inbox.js", "/static/js/access.js", "/static/js/bundle.js", "/static/js/settings.js",
             "/static/js/archived.js", "/static/js/onboarding.js", "/static/js/mission.js", "/static/js/notify.js",
             "/static/js/palette.js", "/static/js/composer.js", "/static/js/tools.js", "/static/js/conversation.js",
             "/static/js/actions.js", "/static/js/multiview.js", "/static/js/chat.js", "/static/js/main.js"])
