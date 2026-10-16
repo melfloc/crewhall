@@ -253,3 +253,37 @@ def ensure_control_token() -> str:
 
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def provider_bin_dirs() -> list[str]:
+    """Directories where agent CLIs (claude, opencode, codex...) usually install.
+
+    A systemd user service or a non-login shell does not read ``.bashrc``, so
+    installer-managed dirs such as ``~/.opencode/bin`` are missing from PATH.
+    """
+    home = os.path.expanduser("~")
+    data = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+    return [
+        os.path.join(home, ".local", "bin"),
+        os.path.join(home, ".opencode", "bin"),
+        os.path.join(home, ".claude", "local"),
+        os.path.join(home, ".npm-global", "bin"),
+        os.path.join(home, ".bun", "bin"),
+        os.path.join(data, "mise", "shims"),
+        os.path.join(home, ".asdf", "shims"),
+        "/usr/local/bin",
+    ]
+
+
+def extend_provider_path() -> None:
+    """Append the provider install dirs that exist to this process's PATH."""
+    current = os.environ.get("PATH", "")
+    parts = [p for p in current.split(os.pathsep) if p]
+    for directory in provider_bin_dirs():
+        try:
+            ok = os.path.isdir(directory) and not os.stat(directory).st_mode & 0o002
+        except OSError:
+            ok = False
+        if ok and directory not in parts:
+            parts.append(directory)
+    os.environ["PATH"] = os.pathsep.join(parts)

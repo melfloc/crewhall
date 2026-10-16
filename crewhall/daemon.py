@@ -592,6 +592,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--socket", default=None)
     args = parser.parse_args(argv)
 
+    paths.extend_provider_path()
     _setup_logging()
     paths.cleanup_tmpdir()  # prune any leaked agent temp files on startup
     try:

@@ -664,6 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    paths.extend_provider_path()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

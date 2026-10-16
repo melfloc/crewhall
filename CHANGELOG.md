@@ -5,6 +5,15 @@ as defined in [RELEASING.md](RELEASING.md). Every release needs a section here: 
 to run without it and ships these notes with the release.
 
 
+## [Unreleased]
+
+## [0.83.3] — 2026-10-16
+
+- Corregido: crewhall ubica por sí mismo los CLIs de los proveedores (`~/.opencode/bin`,
+  `~/.local/bin`, mise, npm/bun…) aunque el daemon corra bajo systemd sin el PATH del
+  `.bashrc`; antes no se podían crear ni reiniciar agentes OpenCode en ese caso. El
+  comando se lanza con ruta absoluta.
+
 ## [0.83.2] — 2026-10-15
 
 - Corregido: con OpenCode 2 la pestaña Conversation mostraba los mensajes al revés

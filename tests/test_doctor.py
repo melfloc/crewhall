@@ -169,3 +169,16 @@ class DoctorChecks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProviderPath(unittest.TestCase):
+    def test_extend_provider_path_adds_existing_install_dir(self) -> None:
+        from crewhall import paths
+
+        with tempfile.TemporaryDirectory() as home:
+            os.makedirs(os.path.join(home, ".opencode", "bin"))
+            with mock.patch.dict(os.environ, {"HOME": home, "PATH": "/usr/bin"}):
+                paths.extend_provider_path()
+                parts = os.environ["PATH"].split(os.pathsep)
+            self.assertIn(os.path.join(home, ".opencode", "bin"), parts)
+            self.assertNotIn(os.path.join(home, ".bun", "bin"), parts)

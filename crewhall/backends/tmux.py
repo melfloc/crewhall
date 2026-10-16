@@ -86,6 +86,10 @@ class TmuxBackend(Backend):
         from ..terminals import is_terminal
 
         argv = spec.argv()
+        # The tmux server may have an older, narrower PATH than this process
+        # (see paths.extend_provider_path): launch by absolute path.
+        if argv and "/" not in argv[0] and (found := shutil.which(argv[0])):
+            argv = [found, *argv[1:]]
         terminal = is_terminal(spec)
         cwd = spec.cwd or os.getcwd()
         assert self.session is not None
