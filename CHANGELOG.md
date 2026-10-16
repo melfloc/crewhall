@@ -7,6 +7,15 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.83.4] — 2026-10-16
+
+- Corregido: con OpenCode 2 cada reinicio acumulaba pestañas en el TUI. El TUI guarda las
+  pestañas abiertas por directorio en un archivo compartido (`tabs.json`) y nunca las cierra;
+  ahora cada agente usa su propio `XDG_STATE_HOME` (con tus preferencias copiadas y las
+  pestañas reiniciadas en cada arranque), así que solo ve la pestaña de su sesión.
+- Corregido: al revivir un agente OpenCode 2 (caída o reinicio del daemon) se creaba una
+  sesión nueva cada vez; ahora se reanuda la sesión propia del agente.
+
 ## [0.83.3] — 2026-10-16
 
 - Corregido: crewhall ubica por sí mismo los CLIs de los proveedores (`~/.opencode/bin`,

@@ -285,6 +285,80 @@ class V2MigrationFallback(V2ModelBase):
         self.assertTrue(any("not found" in t for t in titles), titles)
 
 
+class V2ReviveKeepsSession(V2ModelBase):
+    """Reviving a v2 agent reopens its own session instead of piling up new ones."""
+
+    def _revive(self, conversation_id):
+        h = FakeHarness("revive")
+        h.kind = "opencode"
+        h.conversation_id = conversation_id
+        self.controller.register_agent(h)
+        h.session.status = mock.Mock(alive=False)
+        with mock.patch.object(self.controller, "_reopen_opencode_link",
+                               return_value=(self.link, None)), \
+                mock.patch("crewhall.services.persistence.InteractiveSession"), \
+                mock.patch.object(self.controller, "_launch_command",
+                                  return_value=["true"]) as launch, \
+                mock.patch.object(self.controller, "_build_agent_env", return_value={}), \
+                mock.patch.object(self.controller, "_attach_link"), \
+                mock.patch.object(self.controller, "_attach_version"), \
+                mock.patch.object(self.controller, "_persist"), \
+                mock.patch.object(self.controller, "_ensure_control_file"), \
+                mock.patch("crewhall.services.persistence.get_harness",
+                           return_value=FakeHarness):
+            try:
+                self.controller.restart_agent(h.agent_id)
+            except Exception:  # noqa: BLE001 - only the session calls matter here
+                pass
+        return launch
+
+    def test_revive_resumes_the_known_session(self):
+        FakeV2Server.sessions["ses_mine"] = {"id": "ses_mine"}
+        launch = self._revive("ses_mine")
+        creates = [r for r in FakeV2Server.requests if r[0] == "POST" and r[1] == "/api/session"]
+        self.assertEqual(creates, [])
+        self.assertEqual(launch.call_args.kwargs.get("resume"), "ses_mine")
+
+    def test_revive_with_a_missing_session_starts_one_fresh(self):
+        launch = self._revive("ses_gone")
+        creates = [r for r in FakeV2Server.requests if r[0] == "POST" and r[1] == "/api/session"]
+        self.assertEqual(len(creates), 1)
+        self.assertNotEqual(launch.call_args.kwargs.get("resume"), "ses_gone")
+
+
+class V2TabIsolation(unittest.TestCase):
+    """Each v2 TUI gets its own tab bar instead of the user's shared one."""
+
+    def test_private_state_dir_keeps_prefs_and_resets_tabs(self):
+        import os
+        import tempfile
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        real = os.path.join(tmp, "real", "opencode", "latest", "tui")
+        os.makedirs(real)
+        open(os.path.join(tmp, "real", "opencode", "kv.json"), "w").write('{"a":1}')
+        open(os.path.join(real, "tabs.json"), "w").write('{"cwd":{"/x":{"tabs":[1,2,3]}}}')
+        controller = Controller(adopt=False)
+        link = OpenCodeLink(1, PASSWORD, api="v2")
+        env: dict[str, str] = {}
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": os.path.join(tmp, "real")}), \
+                mock.patch("crewhall.services.agents.paths.state_dir",
+                           return_value=os.path.join(tmp, "crewhall")):
+            controller._isolate_opencode_tabs(env, "a1", link)
+            # a second launch resets tabs the TUI added in between
+            mine = os.path.join(env["XDG_STATE_HOME"], "opencode")
+            os.makedirs(os.path.join(mine, "latest", "tui"), exist_ok=True)
+            open(os.path.join(mine, "latest", "tui", "tabs.json"), "w").write("{}")
+            controller._isolate_opencode_tabs(env, "a1", link)
+            v1_env: dict[str, str] = {}
+            controller._isolate_opencode_tabs(v1_env, "a1", OpenCodeLink(1, PASSWORD, api="v1"))
+        self.assertEqual(open(os.path.join(mine, "kv.json")).read(), '{"a":1}')
+        self.assertFalse(os.path.exists(os.path.join(mine, "latest", "tui", "tabs.json")))
+        self.assertNotEqual(env["XDG_STATE_HOME"], os.path.join(tmp, "real"))
+        self.assertEqual(v1_env, {})
+
+
 class V2Wiring(unittest.TestCase):
     def setUp(self) -> None:
         self.controller = Controller(adopt=False)

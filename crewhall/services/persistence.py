@@ -281,9 +281,14 @@ class ServicesPersistence:
                 agent_id, kind, self._agent_args.get(agent_id, []), spec.cwd)
             v2_session: str | None = None
             if link is not None and getattr(link, "api", "v1") == "v2" and not host:
+                # Reopen the agent's own session: creating a new one on every
+                # revive piles abandoned sessions into the TUI's session list.
+                resume_id = harness.conversation_id
+                if not resume_id or not self._v2_session_exists(link, resume_id):
+                    resume_id = None
                 report = self._configure_v2_session(
                     agent_id, kind, link, self._agent_args.get(agent_id, []),
-                    session_id=conversation_id,
+                    session_id=resume_id,
                 )
                 v2_session = report.get("session_id") or conversation_id
                 if v2_session:
@@ -299,6 +304,8 @@ class ServicesPersistence:
             env = self._build_agent_env(agent_id, harness.name or agent_id, teams, base_env, host)
             if link:
                 env["OPENCODE_SERVER_PASSWORD"] = link.password
+                if not host:
+                    self._isolate_opencode_tabs(env, agent_id, link)
             if server_proc is not None:
                 self._opencode_servers[agent_id] = server_proc
             if link is not None:

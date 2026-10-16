@@ -113,6 +113,8 @@ class ServicesControl:
                 agent_id, kind, args, spec.cwd)
             if link:
                 env["OPENCODE_SERVER_PASSWORD"] = link.password
+                if not host:
+                    self._isolate_opencode_tabs(env, agent_id, link)
             if server_proc is not None:
                 self._opencode_servers[agent_id] = server_proc
             if link is not None:

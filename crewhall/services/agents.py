@@ -126,6 +126,44 @@ class ServicesAgents:
             return None
         return str(uuid.uuid4())
 
+    def _isolate_opencode_tabs(self, env: dict[str, str], agent_id: str, link: Any) -> None:
+        """Give an OpenCode v2 TUI its own state dir so its tab bar is its own.
+
+        The v2 TUI keeps the open-session tabs per working directory in
+        ``<state>/opencode/latest/tui/tabs.json``, shared by every TUI of the
+        user, and never closes them: each restart or sibling agent in the same
+        directory added another tab. A private ``XDG_STATE_HOME`` per agent (seeded
+        with the user's preferences, tabs reset on every launch) leaves just the
+        agent's own session open. Sessions themselves stay in the shared data dir.
+        """
+        if link is None or getattr(link, "api", "v1") != "v2":
+            return
+        import shutil
+
+        real = os.path.join(
+            os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "opencode")
+        home = os.path.join(paths.state_dir(), "opencode-state", agent_id)
+        mine = os.path.join(home, "opencode")
+        try:
+            for dirpath, dirs, files in os.walk(real):
+                dirs[:] = [d for d in dirs if d != "locks"]
+                rel = os.path.relpath(dirpath, real)
+                for name in files:
+                    if name in ("tabs.json", "service.json"):
+                        continue
+                    target = os.path.join(mine, rel, name)
+                    if not os.path.exists(target):
+                        os.makedirs(os.path.dirname(target), exist_ok=True)
+                        shutil.copy2(os.path.join(dirpath, name), target)
+            os.makedirs(mine, exist_ok=True)
+            for dirpath, _dirs, files in os.walk(mine):
+                if "tabs.json" in files:
+                    os.remove(os.path.join(dirpath, "tabs.json"))
+        except OSError:
+            log.warning("could not isolate the OpenCode tabs for %s", agent_id, exc_info=True)
+            return
+        env["XDG_STATE_HOME"] = home
+
     def _resolve_provider_command(
         self, kind: str, host: str | None
     ) -> tuple[list[str], Any, bool]:
@@ -1010,6 +1048,8 @@ class ServicesAgents:
         agent_env = self._build_agent_env(session_id, agent_name, [], env, host)
         if link:
             agent_env["OPENCODE_SERVER_PASSWORD"] = link.password
+            if not host:
+                self._isolate_opencode_tabs(agent_env, session_id, link)
         spec = SessionSpec(
             command=self._launch_command(
                 kind, extra_args, conversation_id, link.port if link else None, mcp_args,
