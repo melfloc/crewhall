@@ -61,6 +61,7 @@ AGENT_OPS = frozenset({
     "agent_interrupt",
     "agent_signal",
     "agent_restart",
+    "agent_effort",
     "agent_hook",
     "agent_permission_request",
     "request_create",
@@ -72,7 +73,8 @@ AGENT_OPS = frozenset({
 # Agent ops that are *also* valid control-plane ops: with a ``sender``+``token``
 # they act as the token-authenticated agent; without them they require the
 # control token (the human's CLI/Web UI). Same special-casing as ``request_cancel``.
-_AGENT_AUTH_OPS = frozenset({"agent_status", "agent_interrupt", "agent_signal", "agent_restart"})
+_AGENT_AUTH_OPS = frozenset({"agent_status", "agent_interrupt", "agent_signal", "agent_restart",
+                             "agent_effort"})
 
 log = logging.getLogger("crewhall.daemon")
 
@@ -125,6 +127,22 @@ def _peer_pid(conn: socket.socket) -> int | None:
     return pid or None
 
 
+def take_singleton_lock() -> Any:
+    """Take the daemon's exclusive lock; the open file, or None if another holds it.
+
+    Taken *before* the controller is built: adopting tmux sessions and re-attaching
+    the OpenCode ``serve`` processes are side effects a duplicate daemon must not
+    perform while the real one is starting.
+    """
+    fd = open(paths.lock_path(), "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fd.close()
+        return None
+    return fd
+
+
 class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsSystem):
 
     # Office co-editing ops an agent may drive for its *own* chat (or a chat
@@ -163,12 +181,13 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             log.exception("could not create the control token")
             self._control_token = paths.load_control_token() or ""
     def _acquire_singleton_lock(self) -> bool:
-        self._lock_fd = open(paths.lock_path(), "w")
-        try:
-            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError:
+        if self._lock_fd is not None:
+            return True  # main() took it before building the controller
+        fd = take_singleton_lock()
+        if fd is None:
             return False
+        self._lock_fd = fd
+        return True
     def _still_owner(self) -> bool:
         """True while our lock file and socket are still the ones on disk.
 
@@ -601,11 +620,17 @@ def main(argv: list[str] | None = None) -> int:
         uploads.cleanup()
     except Exception:  # noqa: BLE001 - never block startup on cleanup
         log.exception("upload cleanup failed")
+    lock_fd = take_singleton_lock()
+    if lock_fd is None:
+        log.info("daemon starting (pid=%s): another daemon already holds the lock; "
+                 "exiting", os.getpid())
+        return 0
     controller = Controller(adopt=True, persist=True)
     controller.restore()
     _start_tmpdir_janitor(controller.workers)
     _start_terminals_janitor(controller)
     server = Server(controller, args.socket or paths.socket_path())
+    server._lock_fd = lock_fd
 
     def handle_signal(signum: int, _frame: Any) -> None:
         log.info("received signal %s, stopping", signum)

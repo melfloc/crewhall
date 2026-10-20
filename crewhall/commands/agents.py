@@ -318,6 +318,25 @@ def cmd_agent_interrupt(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agent_effort(args: argparse.Namespace) -> int:
+    """Show or set a teammate's reasoning effort (lead-only to set, from an agent)."""
+    params: dict[str, Any] = {"target": args.target, "effort": args.effort}
+    params.update(_agent_auth_params())
+    try:
+        resp = common._client(args).call("agent_effort", **params)
+    except RpcError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(resp, indent=2))
+        return 0
+    name = resp.get("name") or resp.get("agent_id")
+    verb = "set to" if resp.get("changed") else "is"
+    print(f"{name}: effort {verb} {resp.get('effort')} on {resp.get('model')}"
+          f"  (available: {', '.join(resp.get('available') or []) or 'none'}, default)")
+    return 0
+
+
 def cmd_agent_signal(args: argparse.Namespace) -> int:
     """Signal a teammate's background process (--pid) or every shell (--all-shells)."""
     if args.pid is None and not args.all_shells:

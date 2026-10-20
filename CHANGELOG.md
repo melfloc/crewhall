@@ -7,6 +7,14 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- Nuevo: `crewhall agent effort <agente> [low|high|max|default]` muestra o cambia el esfuerzo de razonamiento
+  de un agente OpenCode 2 vivo, sin reiniciarlo. Se aplica por API y se confirma leyendo la sesión; solo
+  acepta los niveles que ofrece el modelo. Lo elegido queda fijado y persistido: la política `default_variant`
+  (`max`) ya no lo pisa. Un agente solo puede cambiar el de sus miembros si es su lead (leerlo es libre).
+- Corregido: un daemon duplicado ya no readopta agentes ni levanta `serve` antes de saber si ganó el candado
+  único. Antes podía disputar los puertos con el daemon real y publicar el aviso falso "server could not be
+  reattached" (se vio al desplegar).
+
 ## [0.84.5] — 2026-10-20
 
 - Nuevo: esfuerzo de razonamiento por defecto en OpenCode 2. El ajuste `providers.opencode.default_variant`

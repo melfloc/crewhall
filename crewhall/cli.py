@@ -18,7 +18,7 @@ from .session import SessionTimeout
 from .commands.agents import (
     _hook_payload,
     cmd_agent_capture, cmd_agent_create, cmd_agent_hook, cmd_agent_identity,
-    cmd_agent_interrupt, cmd_agent_list, cmd_agent_message, cmd_agent_messages,
+    cmd_agent_effort, cmd_agent_interrupt, cmd_agent_list, cmd_agent_message, cmd_agent_messages,
     cmd_agent_new_session, cmd_agent_restart, cmd_agent_send, cmd_agent_signal,
     cmd_agent_state, cmd_agent_status, cmd_agent_stop, cmd_agent_wait,
 )
@@ -389,6 +389,14 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--reason", default=None, help="why (shown to the restarted agent)")
     a.add_argument("--json", action="store_true")
     a.set_defaults(func=cmd_agent_restart)
+
+    a = asub.add_parser("effort", help="show or set an OpenCode 2 agent's reasoning "
+                        "effort (low|high|max|default); setting it is lead-only from an agent")
+    a.add_argument("target")
+    a.add_argument("effort", nargs="?", default=None,
+                   help="the level to apply; omit to show the current one")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(func=cmd_agent_effort)
 
     a = asub.add_parser("wait", help="wait for a semantic state")
     a.add_argument("target")

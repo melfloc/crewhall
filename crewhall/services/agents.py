@@ -945,6 +945,7 @@ class ServicesAgents:
 
     def _ensure_default_variant(
         self, link: Any, session_id: str, report: dict[str, Any] | None = None,
+        agent_id: str | None = None,
     ) -> None:
         """Raise a session still on its model's default variant to the configured
         reasoning effort (``providers.opencode.default_variant``, ``max``).
@@ -956,6 +957,9 @@ class ServicesAgents:
         want = str(settings.provider("opencode").get("default_variant") or "").strip()
         if not want or not session_id:
             return
+        pinned = (report or self._v2_config.get(agent_id or "") or {}).get("effort_pinned")
+        if pinned:
+            return  # chosen explicitly (`crewhall agent effort`): never overridden
         try:
             current = self._v2_session_value(link, session_id, "model")
             if not isinstance(current, dict):
@@ -1063,7 +1067,7 @@ class ServicesAgents:
             if agent and report["agent_applied"] is None:
                 report["agent_applied"] = False
         if report["session_id"]:
-            self._ensure_default_variant(link, report["session_id"], report)
+            self._ensure_default_variant(link, report["session_id"], report, agent_id)
             report["running_model"] = self._v2_running_model(link, report["session_id"])
         report["error"] = "; ".join(errors) or None
         # Every dropped flag that was not (re)applied is reported, not silent.
@@ -1164,7 +1168,7 @@ class ServicesAgents:
         args = self._agent_args.get(harness.agent_id, [])
         report = self._v2_config.get(harness.agent_id) or {}
         if report.get("session_id") == session_id and report.get("error") is None:
-            self._ensure_default_variant(link, session_id, report)
+            self._ensure_default_variant(link, session_id, report, harness.agent_id)
             return  # already applied to this very session
         self._configure_v2_session(
             harness.agent_id, harness.kind, link, args, session_id=session_id,
@@ -1422,7 +1426,7 @@ class ServicesAgents:
                 return  # a running turn is never touched: effort waits for idle
         if not harness.conversation_id:
             return
-        self._ensure_default_variant(link, harness.conversation_id)
+        self._ensure_default_variant(link, harness.conversation_id, None, harness.agent_id)
         try:
             raw = link.get_json(f"/api/session/{harness.conversation_id}", timeout=2.0)
             session = raw.get("data") if isinstance(raw, dict) else raw
@@ -1972,6 +1976,66 @@ class ServicesAgents:
                     break
         return {"kind": harness.kind, "current": selected,
                 "mode": harness.model_switch_mode, "models": entries}
+
+    def set_agent_effort(
+        self, target: str, effort: str | None = None, by: str = "user",
+    ) -> dict[str, Any]:
+        """Show or change a live OpenCode 2 agent's reasoning effort (model variant).
+
+        Without ``effort`` it reports the current one and what the model offers.
+        A value is applied through the session API and confirmed by reading it
+        back; it is pinned so the standing ``default_variant`` never overrides it.
+        """
+        harness = self.agents.resolve(target)
+        link = getattr(harness, "link", None)
+        session_id = harness.conversation_id
+        if (link is None or getattr(link, "api", "v1") != "v2" or not session_id
+                or harness.kind != "opencode"):
+            raise HarnessError(
+                harness.agent_id,
+                "effort can only be changed on an OpenCode 2 agent with a live API session")
+        current = self._v2_session_value(link, session_id, "model")
+        if not isinstance(current, dict) or not (current.get("id") or current.get("modelID")):
+            raise HarnessError(harness.agent_id, "this session has no model yet")
+        model_id = str(current.get("id") or current.get("modelID"))
+        provider = str(current.get("providerID") or "")
+        raw = link.get_json("/api/model", timeout=3.0)
+        catalog = raw.get("data") if isinstance(raw, dict) else raw
+        offered: list[str] = []
+        for entry in catalog if isinstance(catalog, list) else []:
+            if (isinstance(entry, dict)
+                    and str(entry.get("modelID") or entry.get("id") or "") == model_id
+                    and (not provider or entry.get("providerID") == provider)):
+                for variant in entry.get("variants") or []:
+                    vid = str(variant.get("id") if isinstance(variant, dict) else variant)
+                    if vid and vid not in offered:
+                        offered.append(vid)
+        name = harness.name or harness.agent_id
+        shown = str(current.get("variant") or "default")
+        wanted = (effort or "").strip().lower()
+        if not wanted:
+            return {"agent_id": harness.agent_id, "name": name, "model": f"{provider}/{model_id}",
+                    "effort": shown, "available": offered, "changed": False}
+        if wanted != "default" and wanted not in offered:
+            raise HarnessError(
+                harness.agent_id,
+                f"{model_id} offers: {', '.join(offered) or 'no effort levels'} "
+                f"(or default), not {wanted!r}")
+        link.post_json(f"/api/session/{session_id}/model", {"model": {
+            "providerID": provider, "id": model_id, "variant": wanted}})
+        applied = self._v2_session_value(link, session_id, "model")
+        got = str((applied or {}).get("variant") or "default") if isinstance(applied, dict) else ""
+        if got != wanted:
+            raise HarnessError(
+                harness.agent_id,
+                f"the server did not apply effort {wanted!r} (it reports {got!r})")
+        report = self._v2_config.setdefault(harness.agent_id, {})
+        report["model_variant"] = wanted
+        report["effort_pinned"] = True
+        self._persist()
+        self._log_action(harness, "effort", by, extra={"effort": wanted, "was": shown})
+        return {"agent_id": harness.agent_id, "name": name, "model": f"{provider}/{model_id}",
+                "effort": got, "available": offered, "changed": got != shown}
 
     def set_agent_model(self, target: str, model: str | None = None) -> dict[str, Any]:
         """Change a running agent's model: the v2 API, or a direct command/picker."""

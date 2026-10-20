@@ -104,6 +104,20 @@ class OpsAgents(OpsBase):
             by = sender_h.agent_id
         return self.controller.interrupt_agent(request["target"], by=by)
 
+    def _op_agent_effort(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Show or set a teammate's reasoning effort; leads only when from an agent."""
+        sender = request.get("sender")
+        by = "user"
+        value = request.get("effort")
+        if sender:
+            sender_h = self.controller.agents.resolve(sender)
+            self.controller._check_token(sender_h.agent_id, request.get("token"))
+            target_h = self.controller.agents.resolve(request["target"])
+            if value:  # reading it needs no authority; changing it does
+                self.controller._authorize_lead(sender_h, target_h)
+            by = sender_h.agent_id
+        return self.controller.set_agent_effort(request["target"], value, by=by)
+
     def _op_agent_signal(self, request: dict[str, Any]) -> dict[str, Any]:
         """Signal a teammate's background process(es); leads only when from an agent."""
         sender = request.get("sender")
