@@ -25,6 +25,21 @@ from ..usage import parse_usage
 from ..controller import _OPENCODE_INTERACTION_EVENTS, log
 
 
+class _AdoptedServe:
+    """A live ``opencode serve`` owned by a previous daemon process.
+
+    Behaves like the ``subprocess.Popen`` crewhall keeps for servers it started
+    (``pid``/``poll``), so process trees and shutdown keep working after an
+    orphan server is adopted instead of being rebound/killed.
+    """
+
+    def __init__(self, pid: int) -> None:
+        self.pid = int(pid)
+
+    def poll(self) -> int | None:
+        return None if os.path.isdir(f"/proc/{self.pid}") else 0
+
+
 class ServicesAgents:
 
     def _agent_token(self, agent_id: str) -> str:
@@ -59,6 +74,16 @@ class ServicesAgents:
         host: str | None = None,
     ) -> dict[str, str]:
         env = dict(extra or {})
+        # Never inherit a parent OpenCode/agent session: if crewhall itself runs
+        # inside one, variables like OPENCODE_SESSION_ID or OPENCODE_PASSWORD make
+        # the child TUI/server behave as nested (or point at the parent). Only
+        # the per-launch OPENCODE_SERVER_PASSWORD is added afterwards.
+        for key in os.environ:
+            if key.startswith("OPENCODE_"):
+                env.setdefault(key, "")
+        for key in ("AI_AGENT", "AGENT"):
+            if key in os.environ:
+                env.setdefault(key, "")
         self._ensure_usable_tmpdir(env)
         values = {
             "AGENT_ID": agent_id,
@@ -126,8 +151,41 @@ class ServicesAgents:
             return None
         return str(uuid.uuid4())
 
-    def _isolate_opencode_tabs(self, env: dict[str, str], agent_id: str, link: Any) -> None:
-        """Give an OpenCode v2 TUI its own state dir so its tab bar is its own.
+    @staticmethod
+    def _v2_tabs_off_content(existing: str | None) -> str:
+        """Merge ``{"tabs":{"mode":"off"}}`` into an existing CLI config.
+
+        ``OPENCODE_CLI_CONFIG_CONTENT`` is deep-merged by OpenCode over the
+        user's ``cli.json``, so this disables the tab strip for *this* agent
+        without touching the user's config (theme/keybinds survive).
+        """
+        import json
+
+        data: dict[str, Any] = {}
+        if existing:
+            try:
+                parsed = json.loads(existing)
+                if isinstance(parsed, dict):
+                    data = parsed
+            except ValueError:
+                pass
+        tabs = data.get("tabs")
+        merged = dict(tabs) if isinstance(tabs, dict) else {}
+        merged["mode"] = "off"
+        data["tabs"] = merged
+        return json.dumps(data, separators=(",", ":"), sort_keys=True)
+
+    def _apply_v2_tabs(self, env: dict[str, str]) -> None:
+        """Force the v2 tab strip off for one agent (merge, never replace)."""
+        current = env.get("OPENCODE_CLI_CONFIG_CONTENT")
+        if current is None:
+            current = os.environ.get("OPENCODE_CLI_CONFIG_CONTENT")
+        env["OPENCODE_CLI_CONFIG_CONTENT"] = self._v2_tabs_off_content(current)
+
+    def _isolate_opencode_tabs(
+        self, env: dict[str, str], agent_id: str, link: Any, api: str | None = None,
+    ) -> None:
+        """Give an OpenCode v2 TUI its own state dir (and no stray tab strip).
 
         The v2 TUI keeps the open-session tabs per working directory in
         ``<state>/opencode/latest/tui/tabs.json``, shared by every TUI of the
@@ -135,8 +193,12 @@ class ServicesAgents:
         directory added another tab. A private ``XDG_STATE_HOME`` per agent (seeded
         with the user's preferences, tabs reset on every launch) leaves just the
         agent's own session open. Sessions themselves stay in the shared data dir.
+
+        ``prompt-history.jsonl``/``frecency.jsonl`` are deliberately **not**
+        copied: they are the user's other projects' prompts, not this agent's.
         """
-        if link is None or getattr(link, "api", "v1") != "v2":
+        is_v2 = api == "v2" or (link is not None and getattr(link, "api", "v1") == "v2")
+        if not is_v2:
             return
         import shutil
 
@@ -144,12 +206,14 @@ class ServicesAgents:
             os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "opencode")
         home = os.path.join(paths.state_dir(), "opencode-state", agent_id)
         mine = os.path.join(home, "opencode")
+        private_files = {"tabs.json", "service.json",
+                         "prompt-history.jsonl", "frecency.jsonl"}
         try:
             for dirpath, dirs, files in os.walk(real):
                 dirs[:] = [d for d in dirs if d != "locks"]
                 rel = os.path.relpath(dirpath, real)
                 for name in files:
-                    if name in ("tabs.json", "service.json"):
+                    if name in private_files:
                         continue
                     target = os.path.join(mine, rel, name)
                     if not os.path.exists(target):
@@ -157,12 +221,14 @@ class ServicesAgents:
                         shutil.copy2(os.path.join(dirpath, name), target)
             os.makedirs(mine, exist_ok=True)
             for dirpath, _dirs, files in os.walk(mine):
-                if "tabs.json" in files:
-                    os.remove(os.path.join(dirpath, "tabs.json"))
+                for name in private_files:
+                    if name in files:
+                        os.remove(os.path.join(dirpath, name))
         except OSError:
             log.warning("could not isolate the OpenCode tabs for %s", agent_id, exc_info=True)
             return
         env["XDG_STATE_HOME"] = home
+        self._apply_v2_tabs(env)
 
     def _resolve_provider_command(
         self, kind: str, host: str | None
@@ -310,10 +376,13 @@ class ServicesAgents:
         server_url: str | None = None,
     ) -> list[str]:
         cls = get_harness(kind)
-        if server_url and kind == "opencode":
-            # v2's TUI rejects --model/--agent (and any unknown flag) and exits;
-            # the model is chosen with the picker or set through the API instead.
-            extra_args = self._drop_flags(extra_args, ("--model", "-m", "--agent"))
+        if kind == "opencode" and self._opencode_api(kind) == "v2":
+            # v2's TUI rejects every v1 flag (and exits); the model/agent are set
+            # through the API and ``--session`` is the only session selector it
+            # accepts. The gate is the *API of the resolved CLI*, not whether a
+            # private link happened to start: a failed `serve` must not fall back
+            # to v1 argv and the user's managed service.
+            extra_args = self._v2_clean_args(extra_args)
         # A remote agent runs the remote machine's own CLI (bare name, remote
         # PATH): a local override path or local settings file means nothing there.
         command, report, _used = self._resolve_provider_command(kind, host)
@@ -422,6 +491,32 @@ class ServicesAgents:
             except (ProcessLookupError, PermissionError, OSError):
                 proc.kill()
 
+    def _v2_serve_fallback(
+        self, kind: str, args: list[str], link: Any, agent_id: str,
+    ) -> list[str]:
+        """Never let a failed private ``serve`` fall back to the managed service.
+
+        Without ``--server`` the v2 TUI silently connects to the user's shared
+        OpenCode service. When crewhall could not start/link its own server (and
+        the user did not pass one), launch ``--standalone`` with a visible notice.
+        """
+        if (kind != "opencode" or link is not None
+                or self._opencode_api(kind) != "v2"
+                or self._user_manages_opencode_server(args)):
+            return args
+        self._publish_v2_notice(notices.add(
+            key=f"v2serve:{agent_id}", kind="opencode", level="warn",
+            title="OpenCode v2 started without its private server",
+            body=(
+                "The per-agent `opencode serve` did not start, so crewhall launched "
+                "this agent in --standalone mode instead of silently using your "
+                "managed OpenCode service (which would mix tabs and sessions). "
+                "History, activity and API delivery are unavailable for this agent "
+                "until it is restarted."
+            ),
+        ))
+        return [*args, "--standalone"]
+
     def _open_opencode_link(
         self, kind: str, extra_args: list[str], cwd: str,
     ) -> tuple[OpenCodeLink | None, Any]:
@@ -453,8 +548,11 @@ class ServicesAgents:
     def _reattach_opencode_link(self, harness: Harness, info: dict[str, Any], cwd: str) -> None:
         """Rebuild the link for an adopted agent after a daemon restart.
 
-        v2: restart a ``serve`` on the same port/password (the surviving TUI
-        reconnects to it). v1: the TUI still owns its server on that port.
+        v2: first probe ``GET /api/info`` on the persisted port/password. A
+        ``serve`` that survived a daemon crash is adopted (its pid becomes the
+        process-tree root) instead of starting a new one on an occupied port.
+        Only when nothing answers is a fresh ``serve`` started. v1: the TUI
+        still owns its server on that port.
         """
         if harness.kind != "opencode" or not self.track_conversations:
             return
@@ -465,10 +563,33 @@ class ServicesAgents:
             return
         link = OpenCodeLink(port, password, api=api)
         if api == "v2":
-            proc = self._start_opencode_server(harness.kind, cwd, port, password)
-            if proc is None:
-                return  # could not rebind: stay screen-only, honestly
-            self._opencode_servers[harness.agent_id] = proc
+            adopted = False
+            try:
+                live = link.get_json("/api/info", timeout=2.0)
+            except Exception:  # noqa: BLE001 - nobody is listening: start one
+                live = None
+            if isinstance(live, dict):
+                pid = live.get("pid")
+                if isinstance(pid, int) and pid > 0:
+                    self._opencode_servers[harness.agent_id] = _AdoptedServe(pid)
+                    adopted = True
+                elif live.get("version"):
+                    adopted = True  # answering, but no pid: keep the link
+            if not adopted:
+                proc = self._start_opencode_server(harness.kind, cwd, port, password)
+                if proc is None:
+                    self._publish_v2_notice(notices.add(
+                        key=f"v2reattach:{harness.agent_id}", kind="opencode", level="warn",
+                        title="OpenCode v2 server could not be reattached",
+                        body=(
+                            "Neither the previous per-agent `opencode serve` nor a "
+                            "replacement on its persisted port responded, so this "
+                            "agent is screen-only (no API history/state) until it is "
+                            "restarted. It was not pointed at your managed service."
+                        ),
+                    ))
+                    return
+                self._opencode_servers[harness.agent_id] = proc
         self._opencode_links[harness.agent_id] = {
             "port": port, "password": password, "api": api,
         }
@@ -505,10 +626,40 @@ class ServicesAgents:
 
     # Flags the v2 TUI rejects: crewhall never passes them; the model/agent are
     # applied through the server API instead (any other dropped flag is reported).
-    _V2_DROP_FLAGS = ("--model", "-m", "--agent")
-    # Flags that pick the session themselves: with one of these the caller owns
-    # the session, so crewhall does not create or reconfigure it up front.
-    _V2_SESSION_FLAGS = ("--session", "-s", "--continue", "-c", "--session-id", "--resume", "-r")
+    _V2_DROP_FLAGS = ("--model", "-m", "--agent", "--session-id", "--resume", "-r",
+                      "--port", "--hostname", "--variant")
+    # Flags that pick the session themselves: crewhall parses and validates them
+    # (``--session``) or resolves them to one (``--continue``) before launching.
+    _V2_SESSION_FLAGS = ("--session", "-s", "--continue", "-c")
+    # v2 accepts these; every other option-like argument is a v1 flag and is
+    # dropped with a notice (positional arguments, e.g. a directory, are kept).
+    _V2_ACCEPTED_FLAGS = ("--server", "--session", "--standalone", "-s", "-c",
+                          "--help", "-h", "--version", "-v", "--print-logs",
+                          "--log-level")
+
+    def _v2_clean_args(self, args: list[str]) -> list[str]:
+        """Remove v1/unknown options from the argv handed to the v2 TUI."""
+        out: list[str] = []
+        skip = False
+        for arg in args:
+            if skip:
+                skip = False
+                continue
+            if arg in self._V2_DROP_FLAGS:
+                skip = True
+                continue
+            if any(arg.startswith(flag + "=") for flag in self._V2_DROP_FLAGS):
+                continue
+            if arg in ("--session", "-s", "--continue", "-c"):
+                skip = True
+                continue
+            if (arg.startswith("-") and arg not in self._V2_ACCEPTED_FLAGS
+                    and not arg.startswith("--log-level=")):
+                if "=" not in arg:
+                    skip = True  # an unknown ``--flag value`` pair
+                continue
+            out.append(arg)
+        return out
 
     @staticmethod
     def _flag_value(args: list[str], names: tuple[str, ...]) -> str | None:
@@ -539,44 +690,115 @@ class ServicesAgents:
         """Session-selecting flags the caller used (they own the session)."""
         return self._present_flags(args, self._V2_SESSION_FLAGS)
 
+    def _v2_latest_session(self, link: Any, cwd: str) -> str | None:
+        """Newest root session of ``cwd`` (what v2's ``--continue`` opens)."""
+        from urllib.parse import quote
+
+        try:
+            raw = link.get_json(
+                f"/api/session?directory={quote(cwd)}&order=desc&limit=1", timeout=3.0)
+        except Exception:  # noqa: BLE001 - the server may still be starting
+            return None
+        data = raw.get("data") if isinstance(raw, dict) else raw
+        for session in data if isinstance(data, list) else []:
+            if isinstance(session, dict) and session.get("id") and not session.get("parentID"):
+                return str(session["id"])
+        return None
+
+    def _resolve_v2_session(
+        self, link: Any, extra_args: list[str], cwd: str, agent_id: str,
+    ) -> tuple[str | None, list[str], str | None]:
+        """Resolve ``--session``/``--continue`` to a validated session id.
+
+        Returns ``(session_id, cleaned_args, missing_id)``. A missing session is
+        *not* opened under the same id (v2 would create an empty one): the caller
+        starts a fresh session and records a visible notice. ``--continue`` is
+        rewritten to the newest session of the working directory.
+        """
+        session_id = self._flag_value(extra_args, ("--session", "-s"))
+        cleaned = list(extra_args)
+        missing: str | None = None
+        if self._present_flags(extra_args, ("--continue", "-c")):
+            session_id = self._v2_latest_session(link, cwd)
+            cleaned = self._drop_flags(cleaned, ("--continue", "-c"))
+            if session_id is None:
+                missing = "--continue"
+        if session_id and not self._v2_session_exists(link, session_id):
+            missing = session_id
+            session_id = None
+        if session_id:
+            cleaned = self._drop_flags(cleaned, ("--session", "-s", "--continue", "-c"))
+        else:
+            # Never keep a stale selector: v2 would create an empty session
+            # under the missing id/continue target.
+            cleaned = self._drop_flags(cleaned, ("--session", "-s", "--continue", "-c"))
+            if missing:
+                self._record_v2_unresumable(agent_id, missing, from_v1=False)
+        return session_id, cleaned, missing
+
     @staticmethod
     def _v2_model_ref(link: Any, model: str | None) -> dict[str, str]:
-        """``--model provider/model`` -> a v2 ``Model.Ref`` (``{providerID, id}``).
+        """``--model provider/model[#variant]`` -> a v2 ``Model.Ref``.
 
-        The CLI takes ``provider/model``; when only a model is given the server's
-        default model supplies the provider. Returns ``{}`` when unusable.
+        The CLI accepts ``provider/model``, a model alone (the server's default
+        provider supplies the provider), a display name, and a ``#variant``
+        suffix. The catalog is authoritative: aliases (``opencode``) resolve to
+        the canonical provider id, and an unknown model fails here (with a
+        notice from the caller) instead of being POSTed for a silent 204.
         """
         text = (model or "").strip()
         if not text:
             return {}
+        variant = ""
+        base, sep, suffix = text.rpartition("#")
+        if sep and base and suffix:
+            text, variant = base.strip(), suffix.strip()
         raw_provider, sep, raw_model = text.partition("/")
         provider: str | None = raw_provider if (sep and raw_provider and raw_model) else None
         model_id = raw_model if provider else text
-        # The catalog is authoritative: it maps an alias (``opencode``) to the
-        # canonical provider id (``opencode-go``) the server actually accepts.
         try:
             raw = link.get_json("/api/model", timeout=3.0)
             catalog = raw.get("data") if isinstance(raw, dict) else raw
         except Exception:  # noqa: BLE001 - the server may be busy or older
             catalog = None
+        entries = [e for e in catalog if isinstance(e, dict)] if isinstance(catalog, list) else []
         matches: list[dict[str, str]] = []
-        for entry in catalog or []:
-            if not isinstance(entry, dict):
-                continue
+        for entry in entries:
             mid = str(entry.get("modelID") or entry.get("id") or "").strip()
             pid = str(entry.get("providerID") or "").strip()
-            if not mid or not pid or model_id not in (mid, str(entry.get("id") or "")):
+            name = str(entry.get("name") or "").strip()
+            if not mid or not pid:
+                continue
+            if model_id.casefold() not in (
+                mid.casefold(), str(entry.get("id") or "").casefold(),
+                name.casefold(),
+            ):
                 continue
             matches.append({"providerID": pid, "id": mid,
                             "canonical": str(entry.get("canonical") or "").strip()})
         if matches:
+            chosen = matches[0]
             if provider:
                 for match in matches:
-                    if provider in (match["providerID"], match["canonical"]):
-                        return {"providerID": match["providerID"], "id": match["id"]}
-            return {"providerID": matches[0]["providerID"], "id": matches[0]["id"]}
+                    ids = (match["providerID"].casefold(), match["canonical"].casefold())
+                    if (provider.casefold() in ids
+                            or any(provider.casefold() in i or i in provider.casefold()
+                                   for i in ids if i)):
+                        chosen = match
+                        break
+                else:
+                    return {}  # the model exists, but not under that provider
+            ref = {"providerID": chosen["providerID"], "id": chosen["id"]}
+            if variant:
+                ref["variant"] = variant
+            return ref
+        if entries:
+            return {}  # a catalog exists and does not know this model/display name
         if provider:
-            return {"providerID": provider, "id": model_id}
+            ref = {"providerID": provider, "id": model_id}
+            if variant:
+                ref["variant"] = variant
+            return ref
         try:
             raw = link.get_json("/api/model/default", timeout=3.0)
             data = raw.get("data") if isinstance(raw, dict) else None
@@ -585,7 +807,10 @@ class ServicesAgents:
             default_provider = None
         if not default_provider:
             return {}
-        return {"providerID": default_provider, "id": model_id}
+        ref = {"providerID": default_provider, "id": model_id}
+        if variant:
+            ref["variant"] = variant
+        return ref
 
     @staticmethod
     def _v2_running_model(link: Any, session_id: str) -> str | None:
@@ -609,6 +834,31 @@ class ServicesAgents:
         agent = self._flag_value(extra_args, ("--agent",))
         return (str(model) if model else None, agent)
 
+    def _v2_agent_exists(self, link: Any, agent: str) -> bool:
+        try:
+            raw = link.get_json("/api/agent", timeout=3.0)
+        except Exception:  # noqa: BLE001 - unreachable: let the read-back decide
+            return True
+        data = raw.get("data") if isinstance(raw, dict) else raw
+        if not isinstance(data, list):
+            return True
+        return any(isinstance(a, dict) and a.get("id") == agent for a in data)
+
+    @staticmethod
+    def _v2_session_value(link: Any, session_id: str, key: str) -> Any:
+        raw = link.get_json(f"/api/session/{session_id}", timeout=3.0)
+        data = raw.get("data") if isinstance(raw, dict) else raw
+        return (data or {}).get(key) if isinstance(data, dict) else None
+
+    @staticmethod
+    def _model_matches(value: Any, ref: dict[str, Any]) -> bool:
+        if not isinstance(value, dict):
+            return False
+        model_id = value.get("id") or value.get("modelID")
+        provider = value.get("providerID")
+        return (model_id == ref.get("id")
+                and (not provider or provider == ref.get("providerID")))
+
     def _configure_v2_session(
         self, agent_id: str, kind: str, link: Any, extra_args: list[str],
         session_id: str | None = None,
@@ -617,25 +867,41 @@ class ServicesAgents:
 
         With ``session_id=None`` a fresh session is created first, so the model
         and agent are set before the TUI can use it; otherwise the switches are
-        applied to the resumed session. Never raises: a failure is recorded as a
-        notice (modal + desktop) and in the report, never silently.
+        applied to the resumed session. v2 answers **204 even for an unknown
+        value**, so every switch is validated against the catalog *and* read
+        back: only a matching session reports ``applied``. Never raises: a
+        failure is a notice (modal + desktop) and a report, never silent.
 
         Returns the report (also stored in ``self._v2_config[agent_id]``).
         """
         model, agent = self._requested_v2_config(kind, extra_args)
+        # A model/agent chosen in the TUI/Web UI at runtime is not in the original
+        # args; reapply the last known session_config on a reset/restart.
+        saved = self._v2_config.get(agent_id) or {}
+        if saved:
+            # A runtime choice (picker/Web UI) is not in the original args; only
+            # an explicit --model/--agent wins over the last applied config.
+            if not act.model_from_args(extra_args) and saved.get("model"):
+                model = saved["model"]
+            if not self._flag_value(extra_args, ("--agent",)) and saved.get("agent"):
+                agent = saved["agent"]
         dropped = self._present_flags(extra_args, self._V2_DROP_FLAGS)
         report: dict[str, Any] = {
             "model": model, "running_model": None, "model_applied": None,
             "agent": agent, "agent_applied": None,
             "session_id": session_id, "ignored_flags": [], "error": None,
+            "model_variant": None,
         }
         errors: list[str] = []
         if link is None or getattr(link, "api", "v1") != "v2":
             return report
         try:
             ref = self._v2_model_ref(link, model) if model else {}
+            report["model_variant"] = ref.get("variant")
             if model and not ref:
                 raise RuntimeError(f"could not resolve model {model!r}")
+            if agent and not self._v2_agent_exists(link, agent):
+                raise RuntimeError(f"agent {agent!r} is not available on this server")
             if session_id is None:
                 # The TUI takes its composer model from the session's *creation*
                 # model, so set it in the create call (the switch endpoint alone
@@ -646,14 +912,25 @@ class ServicesAgents:
                 if not session_id:
                     raise RuntimeError("the server did not return a session id")
                 report["session_id"] = session_id
-                if model:
-                    report["model_applied"] = True
             elif model:
                 link.post_json(f"/api/session/{session_id}/model", {"model": ref})
-                report["model_applied"] = True
+            # Read-back: v2 does not reject an unknown model/agent, it ignores it.
+            if model:
+                report["model_applied"] = self._model_matches(
+                    self._v2_session_value(link, session_id, "model"), ref)
+                if not report["model_applied"]:
+                    errors.append(f"the server did not apply model {model!r}")
             if agent:
-                link.post_json(f"/api/session/{session_id}/agent", {"agent": agent})
-                report["agent_applied"] = True
+                try:
+                    link.post_json(
+                        f"/api/session/{session_id}/agent", {"agent": agent})
+                    report["agent_applied"] = (
+                        self._v2_session_value(link, session_id, "agent") == agent)
+                except Exception as exc:  # noqa: BLE001 - record it, keep the model result
+                    report["agent_applied"] = False
+                    errors.append(str(exc))
+                if not report["agent_applied"]:
+                    errors.append(f"the server did not apply agent {agent!r}")
         except Exception as exc:  # noqa: BLE001 - a bad model/agent must not abort the launch
             errors.append(str(exc))
             if model and report["model_applied"] is None:
@@ -813,12 +1090,12 @@ class ServicesAgents:
         # The TUI needs a moment to open its port, so connection errors are
         # simply retried until the agent stops.
         while not should_stop():
-            if not getattr(link, "_api_detected", False):
+            if not getattr(link, "api_detected", False):
                 # Ask the running server whether it speaks v1 or v2; keep trying
                 # until it answers (the port may not be open yet).
                 try:
                     link.api = OpenCodeLink.detect_api(link.port, link.password)
-                    link._api_detected = True
+                    link.api_detected = True
                 except Exception:  # noqa: BLE001 - not up yet
                     stop.wait(1.0)
                     continue
@@ -880,6 +1157,10 @@ class ServicesAgents:
         ``session.execution.started`` begins a turn and ``session.execution.
         succeeded|failed|interrupted`` ends it. Questions became ``form.*`` and
         ``permission.rejected`` joined ``permission.asked/replied``.
+
+        Focus rule: a turn in *another* session (a background tab) must never
+        change ``conversation_id``; only explicit navigation (``session.viewed``,
+        ``session.created``, ``session.forked``) adopts a session.
         """
         kind = event.get("type")
         raw = event.get("data")
@@ -893,6 +1174,7 @@ class ServicesAgents:
             return
         if kind == "server.connected" and harness.link is not None:
             self._sync_opencode_interactions(harness, harness.link)
+            self._resync_opencode_v2(harness, harness.link)
             return
         if kind == "session.created":
             sid = sid or data.get("id")
@@ -901,18 +1183,222 @@ class ServicesAgents:
             elif sid:
                 self._opencode_children.setdefault(harness.agent_id, set()).add(sid)
             return
-        if sid and sid != harness.conversation_id and kind == "session.execution.started":
-            # Activity in another session (the user switched): follow it.
-            self._follow_opencode_session(harness, sid)
-        if sid and sid in self._opencode_children.get(harness.agent_id, ()):
+        if kind == "session.viewed" and sid:
+            # Explicit navigation (opening a session or the visible one going
+            # idle): this *is* the user choosing the conversation.
+            self._opencode_children.get(harness.agent_id, set()).discard(sid)
+            self._adopt_conversation(harness, sid)
+            return
+        if kind == "session.forked" and sid:
+            # A fork the user works in is a root conversation, not a subagent.
+            self._opencode_children.get(harness.agent_id, set()).discard(sid)
+            self._adopt_conversation(harness, sid)
+            return
+        if kind == "session.deleted" and sid:
+            self._on_opencode_session_deleted(harness, sid)
+            return
+        if kind in ("session.moved", "session.renamed"):
+            self._on_opencode_session_meta(harness, kind, data)
+            return
+        if kind in ("session.agent.selected", "session.model.selected"):
+            self._on_opencode_session_selected(harness, kind, data)
+            return
+        children = self._opencode_children.get(harness.agent_id, ())
+        if sid and sid in children:
             return  # a subagent's turn is not the agent's turn
         if kind == "session.execution.started":
+            if sid and sid != harness.conversation_id:
+                if harness.conversation_id is None:
+                    # Nothing tracked yet (missed created/viewed): the sole
+                    # session that starts working is the agent's own.
+                    self._follow_opencode_session(harness, sid)
+                else:
+                    return  # a background tab: never hijack the conversation
             last = self._hook_events.get(harness.agent_id) or {}
             if last.get("event") != "prompt_submit":
                 self._apply_hook(harness, "prompt_submit")
         elif kind in ("session.execution.succeeded", "session.execution.failed",
                       "session.execution.interrupted"):
+            if sid and sid != harness.conversation_id:
+                return
             self._apply_hook(harness, "stop")
+
+    def _on_opencode_session_deleted(self, harness: Harness, sid: str) -> None:
+        if sid != harness.conversation_id:
+            self._opencode_children.get(harness.agent_id, set()).discard(sid)
+            return
+        harness.conversation_id = None
+        harness.conversation_since = time.time()
+        self._publish_v2_notice(notices.add(
+            key=f"v2deleted:{harness.agent_id}:{sid}", kind="opencode", level="warn",
+            title="The OpenCode session was deleted",
+            body=(
+                f"{sid} was deleted in the TUI, so crewhall stopped tracking it. "
+                "The next prompt creates a new session."
+            ),
+        ))
+        self._persist()
+
+    def _on_opencode_session_meta(self, harness: Harness, kind: str,
+                                  data: dict[str, Any]) -> None:
+        if data.get("sessionID") != harness.conversation_id:
+            return
+        if kind == "session.moved":
+            location = data.get("location") or {}
+            directory = location.get("directory") if isinstance(location, dict) else None
+            if isinstance(directory, str) and directory:
+                harness.session.spec.cwd = directory
+        else:
+            title = data.get("title")
+            if isinstance(title, str) and title:
+                harness.session_title = title
+        self._persist()
+
+    def _on_opencode_session_selected(self, harness: Harness, kind: str,
+                                      data: dict[str, Any]) -> None:
+        if data.get("sessionID") != harness.conversation_id:
+            return
+        report = self._v2_config.setdefault(harness.agent_id, {})
+        if kind == "session.agent.selected":
+            report["agent"] = data.get("agent")
+            report["agent_applied"] = True
+        else:
+            model = data.get("model") or {}
+            model_id = model.get("id") or model.get("modelID") if isinstance(model, dict) else None
+            provider = model.get("providerID") if isinstance(model, dict) else None
+            if model_id:
+                report["model"] = f"{provider}/{model_id}" if provider else model_id
+                report["running_model"] = report["model"]
+                report["model_applied"] = True
+                if model.get("variant"):
+                    report["model_variant"] = model["variant"]
+        self._persist()
+
+    def _resync_opencode_v2(self, harness: Harness, link: OpenCodeLink) -> None:
+        """Recover state/interactions after an SSE (re)connection.
+
+        Events emitted while the stream was down are lost; ``active`` plus the
+        tracked session's own fields are authoritative, so a reconnect never
+        leaves the agent stuck in UNKNOWN.
+        """
+        try:
+            raw = link.get_json("/api/session/active", timeout=2.0)
+            active = raw.get("data") if isinstance(raw, dict) else raw
+        except Exception:  # noqa: BLE001 - the stream will retry
+            active = None
+        if not harness.conversation_id and isinstance(active, dict) and len(active) == 1:
+            only = next(iter(active))
+            self._follow_opencode_session(harness, only)
+        if harness.conversation_id and isinstance(active, dict):
+            if harness.conversation_id in active:
+                self._apply_hook(harness, "prompt_submit")
+                return
+        if not harness.conversation_id:
+            return
+        try:
+            raw = link.get_json(f"/api/session/{harness.conversation_id}", timeout=2.0)
+            session = raw.get("data") if isinstance(raw, dict) else raw
+        except Exception:  # noqa: BLE001
+            return
+        if isinstance(session, dict) and session.get("outcome") is not None:
+            self._apply_hook(harness, "stop")
+
+    def _backfill_opencode_legacy(self, harness: Harness, cwd: str | None) -> None:
+        """Recover the link/conversation of an adopted pre-upgrade agent.
+
+        An agent adopted from a surviving tmux pane has no persisted link. The
+        real TUI is a descendant of the pane shell: read its ``/proc`` argv and
+        environment for ``--port``/``--server`` and ``OPENCODE_SERVER_PASSWORD``,
+        probe the server and adopt the newest session of its directory. If that
+        cannot be done, mark it ``legacy`` (visible in status) instead of
+        pretending it is a v2 agent with no history.
+        """
+        if harness.conversation_id and self._opencode_links.get(harness.agent_id):
+            return
+        pid = harness.session.pid
+        if not pid:
+            return
+        for child in self._proc_descendants(int(pid)):
+            try:
+                with open(f"/proc/{child}/cmdline", "rb") as fh:
+                    argv = [p.decode("utf-8", "replace") for p in fh.read().split(b"\0") if p]
+            except OSError:
+                continue
+            if not argv or os.path.basename(argv[0]).split()[0] != "opencode":
+                continue
+            port = self._flag_value(argv, ("--port",))
+            server = self._flag_value(argv, ("--server",))
+            if not port and server:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(server)
+                port = str(parsed.port or "") or None
+            password = ""
+            try:
+                with open(f"/proc/{child}/environ", "rb") as fh:
+                    for item in fh.read().split(b"\0"):
+                        key, _, value = item.partition(b"=")
+                        if key == b"OPENCODE_SERVER_PASSWORD":
+                            password = value.decode("utf-8", "replace")
+            except OSError:
+                password = ""
+            if not port or not password:
+                continue
+            try:
+                api = OpenCodeLink.detect_api(int(port), password)
+            except Exception:  # noqa: BLE001 - a dead/old server: legacy
+                continue
+            link = OpenCodeLink(int(port), password, api=api)
+            self._opencode_links[harness.agent_id] = {
+                "port": int(port), "password": password, "api": api,
+            }
+            self._attach_link(harness, link)
+            if not harness.conversation_id:
+                newest = link.discover(
+                    cwd, 0, {h.conversation_id for h in self.agents.all()
+                             if h is not harness and h.conversation_id})
+                if newest:
+                    harness.conversation_id = newest
+            return
+        harness.legacy = True
+        self._publish_v2_notice(notices.add(
+            key=f"legacy:{harness.agent_id}", kind="opencode", level="warn",
+            title="OpenCode agent adopted as legacy",
+            body=(
+                "This agent was started by an older OpenCode process and its "
+                "server/session could not be recovered, so crewhall marked it "
+                "legacy: its previous conversation is not available here and a "
+                "restart will start a new one. Export what you need from its TUI."
+            ),
+        ))
+
+    @staticmethod
+    def _proc_descendants(root: int) -> list[int]:
+        """Descendant pids of ``root`` from ``/proc`` (best effort, Linux)."""
+        children: dict[int, list[int]] = {}
+        try:
+            entries = os.listdir("/proc")
+        except OSError:
+            return []
+        for entry in entries:
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/stat", "rb") as fh:
+                    fields = fh.read().decode("utf-8", "replace").rsplit(")", 1)[1].split()
+                ppid = int(fields[1])
+            except (OSError, IndexError, ValueError):
+                continue
+            children.setdefault(ppid, []).append(int(entry))
+        out: list[int] = []
+        queue = [int(root)]
+        while queue:
+            current = queue.pop()
+            for child in children.get(current, []):
+                if child not in out:
+                    out.append(child)
+                    queue.append(child)
+        return out
 
     def _backend_for(self, backend_name: str | None, host_name: str | None) -> Any:
         if host_name:
@@ -944,6 +1430,25 @@ class ServicesAgents:
                 return t.workspace
         return os.getcwd()
 
+    def _assert_no_mixed_opencode_db(self, kind: str) -> None:
+        """Refuse to run OpenCode v1 and v2 agents against the same database.
+
+        v2 migrates ``opencode.db`` (``session_v2``); a live v1 TUI keeps
+        writing/reading the migrated database and can corrupt session tracking.
+        """
+        if kind != "opencode" or self._opencode_api(kind) != "v2":
+            return
+        for harness in self.agents.all():
+            if harness.kind != "opencode" or not harness.session.status.alive:
+                continue
+            info = self._opencode_links.get(harness.agent_id) or {}
+            if info.get("api") == "v1" or getattr(harness, "legacy", False):
+                raise ValueError(
+                    f"OpenCode v1 agent {harness.name or harness.agent_id!r} is still "
+                    "running against the shared OpenCode database; v1 and v2 must not "
+                    "run concurrently. Export/close the v1 agent, then create v2 ones."
+                )
+
     def create_agent(
         self,
         kind: str,
@@ -967,6 +1472,7 @@ class ServicesAgents:
         harness_cls = get_harness(kind)
         if not settings.provider_enabled(kind):
             raise ValueError(f"provider {kind!r} is disabled in Settings")
+        self._assert_no_mixed_opencode_db(kind)
         given = parse_agent_args(args)
         extra_args = [*settings.provider_args(kind, given), *given]  # provider defaults first
         team_obj = self._team_or_none(team)
@@ -1031,25 +1537,49 @@ class ServicesAgents:
         # private `serve` in the agent's directory (so its location matches).
         link, server_proc = (None, None) if host else self._open_opencode_link(
             kind, extra_args, cwd or os.getcwd())
+        if (kind == "opencode" and not host and link is None
+                and self._user_manages_opencode_server(extra_args)
+                and self._opencode_api(kind) == "v2"):
+            self._publish_v2_notice(notices.add(
+                key=f"v2userserver:{session_id}", kind="opencode", level="warn",
+                title="OpenCode v2 agent is screen-only",
+                body=(
+                    "You passed --server/--port, so crewhall did not start (or "
+                    "link to) a private server: history, activity and API delivery "
+                    "are unavailable for this agent. Remove the flag to let "
+                    "crewhall manage the server."
+                ),
+            ))
         # v2 drops --model/--agent from the TUI (it rejects them): crewhall creates
         # the session and applies them through the API, before the agent is usable.
         v2_session: str | None = None
         if link is not None and getattr(link, "api", "v1") == "v2" and not host:
-            if self._v2_session_flags(extra_args):
-                # The caller chose the session; the model/agent are applied when
-                # that session is adopted (see ``_apply_pending_v2_config``).
-                self._v2_config.setdefault(session_id, {})
+            requested, extra_args, _missing = self._resolve_v2_session(
+                link, extra_args, cwd or os.getcwd(), session_id)
+            if requested:
+                # The caller chose an existing session: apply model/agent to it
+                # and open it with ``--session`` instead of creating another.
+                v2_session = requested
+                conversation_id = requested
+                self._configure_v2_session(
+                    session_id, kind, link, extra_args, session_id=requested)
             else:
                 v2_session = self._configure_v2_session(
                     session_id, kind, link, extra_args, session_id=None,
                 ).get("session_id")
                 if v2_session:
                     conversation_id = v2_session
+        elif (kind == "opencode" and not host and self._opencode_api(kind) == "v2"
+              and not self._user_manages_opencode_server(extra_args)):
+            extra_args = self._v2_serve_fallback(kind, extra_args, link, session_id)
         agent_env = self._build_agent_env(session_id, agent_name, [], env, host)
+        if kind == "opencode" and not host:
+            # Isolate even when the link/serve failed: the TUI still must not
+            # inherit the user's tab strip or prompt history.
+            self._isolate_opencode_tabs(
+                agent_env, session_id, link, api=self._opencode_api(kind))
         if link:
             agent_env["OPENCODE_SERVER_PASSWORD"] = link.password
-            if not host:
-                self._isolate_opencode_tabs(agent_env, session_id, link)
         spec = SessionSpec(
             command=self._launch_command(
                 kind, extra_args, conversation_id, link.port if link else None, mcp_args,
@@ -1093,6 +1623,18 @@ class ServicesAgents:
         self._base_env.setdefault(session_id, dict(env or {}))
         self._agent_args[session_id] = extra_args
         self._agent_hosts[session_id] = host
+        model, requested_agent = self._requested_v2_config(kind, extra_args)
+        self._agent_launch[session_id] = {
+            "resolved_command": spec.command[0] if spec.command else None,
+            "version": (self._agent_versions.get(session_id) or {}).get("version"),
+            "args": list(extra_args),
+            "generated_args": [a for a in spec.command[1:] if a not in extra_args],
+            "model": model,
+            "agent": requested_agent,
+            "session": harness.conversation_id,
+            "server": ({"port": link.port, "api": link.api} if link else None),
+            "env_keys": sorted(agent_env),
+        }
         if server_proc is not None:
             self._opencode_servers[session_id] = server_proc
         if link is not None:
@@ -1161,6 +1703,13 @@ class ServicesAgents:
         # True when a full conversation can be read for this agent (it may
         # still be empty before the first message).
         summary["history"] = bool(harness.supports_history)
+        launch = self._agent_launch.get(harness.agent_id)
+        if launch:
+            summary["launch"] = dict(launch)
+        if getattr(harness, "session_title", None):
+            summary["session_title"] = harness.session_title
+        if getattr(harness, "legacy", False):
+            summary["legacy"] = True
         summary["interactions"] = [
             i.to_dict() for i in self.interactions.pending(harness.agent_id)
         ]
@@ -1253,9 +1802,23 @@ class ServicesAgents:
                 "mode": harness.model_switch_mode, "models": entries}
 
     def set_agent_model(self, target: str, model: str | None = None) -> dict[str, Any]:
-        """Change a running agent's model: a direct command or its own picker."""
+        """Change a running agent's model: the v2 API, or a direct command/picker."""
         harness = self.agents.resolve(target)
         name = (model or "").strip() or None
+        link = getattr(harness, "link", None)
+        if (link is not None and getattr(link, "api", "v1") == "v2"
+                and harness.conversation_id):
+            if not name:
+                raise HarnessError(harness.agent_id, "a model name is required")
+            report = self._configure_v2_session(
+                harness.agent_id, harness.kind, link, ["--model", name],
+                session_id=harness.conversation_id)
+            if not report.get("model_applied"):
+                raise HarnessError(
+                    harness.agent_id,
+                    f"the v2 server did not apply model {name!r} "
+                    f"({report.get('error') or 'no read-back match'})")
+            return self.agent_summary(harness)
         if harness.model_switch_mode == "direct" and not name:
             raise HarnessError(harness.agent_id, "a model name is required")
         harness.set_model(name)
@@ -1281,10 +1844,18 @@ class ServicesAgents:
         self._agent_args.pop(agent_id, None)
         self._kill_opencode_server(self._opencode_servers.pop(agent_id, None))
         self._opencode_links.pop(agent_id, None)
+        self._v2_config.pop(agent_id, None)
+        self._agent_launch.pop(agent_id, None)
         self._mcp_cleanup(agent_id)
         self._cleanup_worktree(agent_id, force=force)
         self.interactions.forget_agent(agent_id)
         self._retired_conversations.pop(agent_id, None)
+        # The per-agent TUI state (tabs/model/prefs) must not outlive the agent:
+        # it contained the user's prompt history before the isolation fix.
+        import shutil
+
+        state_home = os.path.join(paths.state_dir(), "opencode-state", agent_id)
+        shutil.rmtree(state_home, ignore_errors=True)
         stop = self._bridges.pop(agent_id, None)
         if stop:
             stop.set()
@@ -1303,6 +1874,9 @@ class ServicesAgents:
             agent_id=harness.agent_id, name=harness.name, kind=harness.kind,
             cwd=harness.session.spec.cwd, teams=teams,
             conversation_id=harness.conversation_id, messages=messages,
+            args=self._agent_args.get(harness.agent_id, []),
+            session_config=self._v2_config.get(harness.agent_id),
+            launch=self._agent_launch.get(harness.agent_id),
         )
 
     def list_archived_agents(self) -> list[dict[str, Any]]:

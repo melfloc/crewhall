@@ -166,6 +166,9 @@ class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesS
         # Extra CLI arguments per agent (e.g. ``--agent reviewer``), kept so a
         # restored/restarted agent is relaunched with the same command line.
         self._agent_args: dict[str, list[str]] = {}
+        # Explicit launch record per agent (command/version/generated args/model/
+        # agent/session/server) persisted without secrets: enough to rebuild.
+        self._agent_launch: dict[str, dict[str, Any]] = {}
         # Version gate: per-agent CLI version report (kind/version/supported…).
         self._agent_versions: dict[str, dict[str, Any] | None] = {}
         # Configured SSH host per agent (None = local), kept for restart/restore.
@@ -243,7 +246,7 @@ class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesS
     _SESSION_FLAGS = ("--session-id", "--resume", "-r", "--continue", "-c")
     _CONVERSATION_ID = {
         "claude": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
-        "opencode": re.compile(r"^ses_[A-Za-z0-9]+$"),
+        "opencode": re.compile(r"^ses_[A-Za-z0-9_-]+$"),
     }
     REMOTE_ADOPT_RETRY = 30.0
     REMOTE_ADOPT_IDLE = 120.0

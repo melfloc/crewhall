@@ -11,10 +11,20 @@ from ..session import InteractiveSession
 WORKING_RE = re.compile(r"esc\s+interrupt", re.IGNORECASE)
 # One ``Build · <model> · 4.3s`` line is appended to the transcript per completed
 # turn, so counting matches tells us how many turns have finished (robust across
-# turns even when the agent is not polled while working). v2 uses ``ms`` for fast
-# turns (``Build · Cat Jam Free · 654ms · 40.5 tok/s``), so both units count.
-COMPLETION_RE = re.compile(r"\u00b7\s*\d+(?:\.\d+)?m?s\b")
+# turns even when the agent is not polled while working). Validated units are
+# ``ms``/``s`` (fast turns), ``m`` and ``h`` plus combinations
+# (``2m 9s``, ``1h 2m``); a long turn must not stay UNKNOWN.
+COMPLETION_RE = re.compile(
+    r"\u00b7\s*\d+(?:\.\d+)?(?:ms|s|m|h)\b"
+    r"(?:\s*\d+(?:\.\d+)?(?:ms|s|m|h)\b)*",
+    re.IGNORECASE,
+)
 MOUNT_MARKERS = ("ctrl+p", "build ·", "build -")
+# Overlays that own the keyboard. Only the navigation/picker ones may be closed
+# with ESC: ESC in a permission or form rejects/cancels the request the user was
+# asked to answer, so those always raise ``HarnessNotReady`` for the queue to retry.
+_SAFE_OVERLAYS = {"sessions", "palette", "models", "agents", "variants", "themes"}
+_TAB_BAR_RE = re.compile(r"^\s{0,6}\S.*\s{2,}\+\s*$")
 # Session view footer: context tokens, e.g. ``13.1K (1%) · $0.00``. The home
 # screen (no session yet, e.g. right after ``/new``) shows the version instead.
 # Composer footer: ``<Agent> · <model> [provider]`` (``Build · …`` by default).
@@ -112,7 +122,8 @@ class OpenCodeHarness(Harness):
         # the new conversation and left the Conversation view empty forever, even
         # as the Live view kept showing activity (OpenCode >= 1.18.34 creates the
         # empty session before the first prompt).
-        if (self.session.status.alive and int(data.get("total") or 0) > 0
+        if (getattr(self.link, "api", "v1") != "v2"
+                and self.session.status.alive and int(data.get("total") or 0) > 0
                 and self.on_home_screen()):
             self._new_session_started()
             if self.conversation_resolver:
@@ -204,7 +215,65 @@ class OpenCodeHarness(Harness):
         return result
 
     _DIALOG_TITLES = ("select model", "select variant", "select agent",
-                      "select session", "select theme")
+                      "select session", "select theme", "sessions for",
+                      "commands", "search")
+
+    @classmethod
+    def overlay(cls, text: str | None) -> str | None:
+        """Name of the v2 overlay/mode owning the screen, if any.
+
+        ``sessions``/``palette``/``models``/``agents``/``variants``/``themes``
+        are safe to dismiss with ESC. ``permission``/``form``/``shell`` are not:
+        they need an explicit answer (or the user leaving shell mode), so the
+        keyboard path refuses to type instead of answering for them.
+        """
+        low = (text or "").lower()
+        if "permission required" in low or "\u25b3 permission" in low:
+            return "permission"
+        if "need input" in low:
+            return "form"
+        if "sessions for " in low:
+            return "sessions"
+        if "\u25b3" not in low and cls._has_title_line(text, "commands"):
+            return "palette"
+        if "select model" in low:
+            return "models"
+        if "select agent" in low:
+            return "agents"
+        if "select variant" in low:
+            return "variants"
+        if "select theme" in low:
+            return "themes"
+        if "esc exit shell mode" in low or (
+                "run a command" in low and cls._has_title_line(text, "shell")):
+            return "shell"
+        return None
+
+    @staticmethod
+    def _has_title_line(text: str | None, title: str) -> bool:
+        return any(line.strip().lower().startswith(title)
+                   for line in (text or "").splitlines())
+
+    def close_safe_overlay(self) -> None:
+        """Dismiss a navigation overlay; never touch a permission/form/shell."""
+        for _ in range(3):
+            current = self.capture()
+            kind = self.overlay(current)
+            if kind in (None, "shell", "permission", "form"):
+                return
+            if kind not in _SAFE_OVERLAYS:
+                return
+            self.session.send_key("ESC")
+            time.sleep(0.2)
+            if self.overlay(self.capture()) != kind:
+                return
+
+    def _await_text(self, needle: str, timeout: float) -> bool:
+        """Wait until ``needle`` shows up in a capture (small test/UI helper)."""
+        return self._await(lambda text: needle.lower() in text.lower(), timeout)
+
+    def _await_overlay_clear(self, kind: str, timeout: float = 2.0) -> bool:
+        return self._await(lambda text: self.overlay(text) != kind, timeout)
 
     def set_model(self, model: str | None = None) -> bool:
         """Open ``/models`` and, when a name is given, filter and select it.
@@ -242,13 +311,8 @@ class OpenCodeHarness(Harness):
         return True
 
     def _close_dialogs(self) -> None:
-        """Dismiss any TUI dialog left open (a picker would swallow keystrokes)."""
-        for _ in range(3):
-            low = self.session.capture().lower()
-            if not any(title in low for title in self._DIALOG_TITLES):
-                return
-            self.session.send_key("ESC")
-            time.sleep(0.25)
+        """Dismiss any safe TUI dialog left open (a picker swallows keystrokes)."""
+        self.close_safe_overlay()
 
     def _await(self, predicate: Callable[[str], bool], timeout: float) -> bool:
         deadline = time.monotonic() + timeout
@@ -276,12 +340,58 @@ class OpenCodeHarness(Harness):
             return {}
 
     def send(self, prompt: str, timeout: float = 30.0) -> None:
+        """Deliver a turn through the v2 API; keyboard only for UI commands.
+
+        The v2 TUI's active tab is not the tracked session (and an open picker
+        would swallow the text), so with an explicit v2 link a prompt is posted
+        to ``/api/session/{conversation_id}/prompt``. Slash commands (``/new``,
+        ``/models``…) still go to the keyboard because they drive the UI. A
+        session that does not exist yet (first prompt after ``/new``) also goes
+        through the keyboard; the API takes over once ``session.created`` lands.
+        """
+        link = self.link
+        uses_api = (
+            link is not None
+            and getattr(link, "api", "v1") == "v2"
+            and self.conversation_id
+            and not prompt.lstrip().startswith("/")
+        )
+        if uses_api:
+            link.post_json(
+                f"/api/session/{self.conversation_id}/prompt", {"text": prompt},
+                timeout=max(10.0, timeout),
+            )
+            self._prompt_sent = True
+            self._seen_working = False
+            self._sent_at = time.time()
+            self._completion_count_at_send = len(
+                COMPLETION_RE.findall(self.session.capture())
+            )
+            return
+        self._keyboard_guard()
         super().send(prompt, timeout=timeout)
         self._completion_count_at_send = len(
             COMPLETION_RE.findall(self.session.capture())
         )
         self._seen_working = False
         self._sent_at = time.time()
+
+    def send_command(self, text: str, timeout: float = 30.0) -> None:
+        self._keyboard_guard()
+        super().send_command(text, timeout=timeout)
+
+    def _keyboard_guard(self) -> None:
+        """Close safe pickers; refuse to type into an overlay that needs an answer."""
+        self.close_safe_overlay()
+        kind = self.overlay(self.capture())
+        if kind == "permission":
+            raise HarnessNotReady(self.agent_id, "a permission request needs an answer")
+        if kind == "form":
+            raise HarnessNotReady(self.agent_id, "a form needs an answer")
+        if kind == "shell":
+            raise HarnessNotReady(self.agent_id, "the TUI is in shell mode")
+        if kind is not None:
+            raise HarnessNotReady(self.agent_id, f"an overlay is open ({kind})")
 
     def input_line(self) -> str:
         """Content of the OpenCode composer line (the ``┃`` block), if any.
@@ -293,6 +403,8 @@ class OpenCodeHarness(Harness):
         OpenCode shows a rotating placeholder (``Ask anything… "..."``): empty.
         """
         lines = self.session.capture().splitlines()
+        if self.overlay(self.session.capture()) is not None:
+            return ""  # a picker/shell/ask owns the keyboard: not a composer draft
 
         def rail(line: str) -> bool:
             return line.strip().startswith("\u2503")
@@ -337,6 +449,17 @@ class OpenCodeHarness(Harness):
         rail block) so the Web UI can draw a single input of its own.
         """
         lines = self.session.capture().splitlines()
+        # v2 draws a tab strip above the session; it is UI chrome, not
+        # conversation, so the Web UI transcript must not repeat it.
+        if lines and _TAB_BAR_RE.match(lines[0]) and not lines[0].lstrip().startswith("\u2503"):
+            cut = 0
+            while cut < len(lines) and (cut == 0 or not lines[cut].strip()):
+                cut += 1
+                if cut < len(lines) and _TAB_BAR_RE.match(lines[cut]):
+                    continue
+            while cut < len(lines) and not lines[cut].strip():
+                cut += 1
+            lines = lines[cut:]
         rail = "\u2503"  # ┃
         close = "\u2579"  # ╹ — the rule that closes the composer box
         # The composer is only present when its closing rule (╹▀▀▀) is on screen.
@@ -359,8 +482,54 @@ class OpenCodeHarness(Harness):
             return self.session.capture()
         return "\n".join(lines[:first]).rstrip("\n")
 
+    def state(self) -> AgentState:
+        """Authoritative v2 state from the server, with the screen as fallback.
+
+        A background tab can look idle (or working) while the tracked session is
+        doing the opposite, and a long turn may not be captured by polling. When
+        the private server is linked: an active tracked sid is WORKING; an
+        ``outcome``/``time.idle`` newer than the last send is WAITING_INPUT.
+        """
+        link = self.link
+        if (link is not None and getattr(link, "api", "v1") == "v2"
+                and self.conversation_id):
+            self.session.poll()
+            if self.session.status.alive:
+                try:
+                    raw = link.get_json("/api/session/active", timeout=1.0)
+                    data = raw.get("data") if isinstance(raw, dict) else raw
+                    if isinstance(data, dict) and self.conversation_id in data:
+                        self._seen_working = True
+                        self._evidence = "the session is active on the v2 server"
+                        return AgentState.WORKING
+                    raw = link.get_json(
+                        f"/api/session/{self.conversation_id}", timeout=1.0)
+                    session = raw.get("data") if isinstance(raw, dict) else raw
+                    if isinstance(session, dict):
+                        times = session.get("time") or {}
+                        stamp = max(int(times.get("idle") or 0),
+                                    int(times.get("updated") or 0))
+                        if ((self._prompt_sent or self._sent_at)
+                                and (session.get("outcome") is not None
+                                     or (stamp and stamp >= self._sent_at * 1000))):
+                            self._seen_working = True
+                            self._evidence = "the v2 server reports the turn finished"
+                            return AgentState.WAITING_INPUT
+                except Exception:  # noqa: BLE001 - the screen is the fallback
+                    pass
+        return super().state()
+
     def _detect(self, text: str) -> tuple[AgentState, str]:
         low = text.lower()
+        overlay = self.overlay(text)
+        if overlay == "permission":
+            return AgentState.WAITING_INPUT, "permission required (ask)"
+        if overlay == "form":
+            return AgentState.WAITING_INPUT, "need input (ask)"
+        if overlay == "shell":
+            return AgentState.WAITING_INPUT, "shell mode is open"
+        if overlay is not None:
+            return AgentState.WAITING_INPUT, f"overlay open: {overlay}"
         if WORKING_RE.search(low):
             self._seen_working = True
             return AgentState.WORKING, "status line shows 'esc interrupt'"

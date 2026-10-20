@@ -367,7 +367,8 @@ class OpenCodeLinkV2Test(unittest.TestCase):
         self.assertIn(("POST", f"/api/session/{SID}/permission/per_1/reply"), FakeOpenCodeV2.seen)
 
     def test_question_reply_and_reject_use_forms(self):
-        self.link.reply_question("que_1", [["a"]], session_id=SID)
+        self.link.reply_question("que_1", [["a"]], session_id=SID,
+                                 answer={"name": "a"})
         self.link.reject_question("que_1", session_id=SID)
         self.assertIn(("POST", f"/api/session/{SID}/form/que_1/reply"), FakeOpenCodeV2.seen)
         self.assertIn(("DELETE", f"/api/session/{SID}/form/que_1"), FakeOpenCodeV2.seen)

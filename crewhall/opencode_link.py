@@ -166,6 +166,9 @@ class OpenCodeLink:
         self.port = port
         self.password = password
         self.api = api
+        # An explicit v2 link was built for a v2 ``serve``: never re-classify it
+        # (a transient 401/5xx during a restart must not turn it into v1).
+        self.api_detected = api == "v2"
         token = base64.b64encode(f"opencode:{password}".encode()).decode()
         self._auth = {"Authorization": f"Basic {token}"}
 
@@ -173,18 +176,19 @@ class OpenCodeLink:
     def detect_api(cls, port: int, password: str) -> str:
         """Probe a running server: v2 answers ``/api/info``; v1 does not.
 
-        An HTTP error means the server is up but is v1; a connection error
-        propagates so the caller can retry until the TUI has opened its port.
+        Only a real 404 from ``/api/info`` means "this is a v1 server". A 401
+        (bad/rotating password), a 5xx or a malformed answer is a *transient*
+        probe failure and propagates so the caller retries; downgrading the link
+        would silently hide history/state/processes until the next restart.
         """
         probe = cls(port, password)
         try:
             probe.get_json("/api/info", timeout=2.0)
             return "v2"
-        except urllib.error.HTTPError:
-            return "v1"  # the server is up but has no /api/info: it is v1
-        except ValueError:
-            return "v1"  # answered with something that is not v2 JSON
-        # A connection error propagates: the caller retries until the TUI is up.
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return "v1"
+            raise
 
     def _open(self, path: str, timeout: float):
         req = urllib.request.Request(
@@ -211,7 +215,7 @@ class OpenCodeLink:
         pattern = _V2_ID if self.api == "v2" else _REQUEST
         return bool(pattern.match(request_id or ""))
 
-    def running_tools(self, session_id: str, limit: int = 6) -> dict[str, dict[str, Any]]:
+    def running_tools(self, session_id: str, limit: int = 30) -> dict[str, dict[str, Any]]:
         """Bash tool calls still running in the latest messages: ``{command: {call, output}}``."""
         if not _SESSION.match(session_id or ""):
             return {}
@@ -242,8 +246,14 @@ class OpenCodeLink:
                 continue
             command = (state.get("input") or {}).get("command")
             if isinstance(command, str):
+                output = metadata.get("output") or state.get("output")
+                if not output:
+                    output = "\n".join(
+                        c.get("text", "") for c in (state.get("content") or [])
+                        if isinstance(c, dict) and c.get("type") == "text"
+                    )
                 out[command] = {"call": part.get("id") or part.get("callID"),
-                                "output": str(metadata.get("output") or "")}
+                                "output": str(output or "")}
         return out
 
     def abort(self, session_id: str) -> None:
@@ -263,38 +273,52 @@ class OpenCodeLink:
             raw = raw.get("data")
         return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
-    def pending_permissions(self) -> list[dict[str, Any]]:
-        path = "/api/permission/request" if self.api == "v2" else "/permission"
+    def pending_permissions(self, session_id: str | None = None) -> list[dict[str, Any]]:
+        if self.api == "v2" and session_id and _SESSION.match(session_id):
+            path = f"/api/session/{session_id}/permission"
+        else:
+            path = "/api/permission/request" if self.api == "v2" else "/permission"
         return self._data_list(self.get_json(path))
 
-    def pending_questions(self) -> list[dict[str, Any]]:
+    def pending_questions(self, session_id: str | None = None) -> list[dict[str, Any]]:
         # v2 renamed "questions" to "forms".
-        path = "/api/form" if self.api == "v2" else "/question"
+        if self.api == "v2" and session_id and _SESSION.match(session_id):
+            path = f"/api/session/{session_id}/form"
+        else:
+            path = "/api/form" if self.api == "v2" else "/question"
         return self._data_list(self.get_json(path))
 
     def reply_permission(self, request_id: str, reply: str, message: str | None = None,
                          session_id: str | None = None) -> None:
         if not self._id_ok(request_id):
             raise ValueError(f"invalid request id {request_id!r}")
-        body: dict[str, Any] = {"reply": reply}
-        if message:
-            body["message"] = message
         if self.api == "v2":
             if not _SESSION.match(session_id or ""):
                 raise ValueError(f"invalid session id {session_id!r}")
+            # v2 validates the key: ``{"reply": …}`` is a 400 (Missing key
+            # ["decision"]); the values are the same once/always/reject.
+            body: dict[str, Any] = {"decision": reply}
+            if message:
+                body["message"] = message
             self.post_json(f"/api/session/{session_id}/permission/{request_id}/reply", body)
         else:
+            body = {"reply": reply}
+            if message:
+                body["message"] = message
             self.post_json(f"/permission/{request_id}/reply", body)
 
     def reply_question(self, request_id: str, answers: list[list[str]],
-                       session_id: str | None = None) -> None:
+                       session_id: str | None = None,
+                       answer: dict[str, Any] | None = None) -> None:
         if not self._id_ok(request_id):
             raise ValueError(f"invalid request id {request_id!r}")
         if self.api == "v2":
             if not _SESSION.match(session_id or ""):
                 raise ValueError(f"invalid session id {session_id!r}")
+            if answer is None:
+                raise ValueError("a v2 form reply needs {fieldKey: value}")
             self.post_json(f"/api/session/{session_id}/form/{request_id}/reply",
-                           {"answers": answers})
+                           {"answer": answer})
         else:
             self.post_json(f"/question/{request_id}/reply", {"answers": answers})
 

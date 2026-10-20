@@ -66,16 +66,23 @@ class TmuxBackend(Backend):
         self._stop = threading.Event()
         self._reader: threading.Thread | None = None
 
-    def _run(self, *args: str, timeout: float = 10.0) -> subprocess.CompletedProcess:
+    # Large prompts are pasted in chunks: tmux's `send-keys -l` fails with
+    # "command too long" and would also put the prompt in the argument list.
+    PASTE_CHUNK = 8192
+
+    def _run(self, *args: str, timeout: float = 10.0,
+             input_text: str | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["tmux", "-L", self.socket, "-f", "/dev/null", *args],
             capture_output=True,
             text=True,
             timeout=timeout,
+            input=input_text,
         )
 
-    def _check(self, *args: str, timeout: float = 10.0) -> subprocess.CompletedProcess:
-        proc = self._run(*args, timeout=timeout)
+    def _check(self, *args: str, timeout: float = 10.0,
+               input_text: str | None = None) -> subprocess.CompletedProcess:
+        proc = self._run(*args, timeout=timeout, input_text=input_text)
         if proc.returncode != 0:
             raise RuntimeError(
                 f"tmux {' '.join(args)} failed ({proc.returncode}): {proc.stderr.strip()}"
@@ -198,7 +205,49 @@ class TmuxBackend(Backend):
             time.sleep(0.2)
 
     def write(self, text: str) -> None:
-        self._check("send-keys", "-t", self._target(), "-l", "--", text)
+        """Paste ``text`` through a private buffer, in bracketed-paste chunks.
+
+        `send-keys -l` puts the whole prompt in tmux's argv (``command too
+        long`` for long prompts, and the text leaks into error logs) and does not
+        mark newlines as a paste. `load-buffer -` reads it from stdin instead and
+        `paste-buffer -p` tells the TUI it is one paste, so multiline prompts do
+        not submit line by line.
+        """
+        if not text:
+            return
+        # OpenCode's v2 TUI consumes typed keys but ignores a tmux paste event;
+        # short single-line input therefore keeps the historical send-keys path.
+        # Long or multiline prompts use a private buffer + bracketed paste, which
+        # also avoids tmux's "command too long" and keeps the text out of argv.
+        if "\n" not in text and len(text) <= max(1, int(self.PASTE_CHUNK)):
+            try:
+                self._check("send-keys", "-t", self._target(), "-l", "--", text)
+            except RuntimeError:
+                import hashlib
+
+                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+                raise RuntimeError(
+                    f"tmux send-keys failed for a {len(text)}-char prompt "
+                    f"(sha256:{digest})") from None
+            return
+        buffer = f"crewhall-{os.getpid()}-{threading.get_ident()}"
+        size = max(1, int(self.PASTE_CHUNK))
+        chunks = [text[i:i + size] for i in range(0, len(text), size)] or [text]
+        for index, chunk in enumerate(chunks):
+            try:
+                self._check("load-buffer", "-b", buffer, "-", input_text=chunk)
+                args = ["paste-buffer", "-p", "-b", buffer]
+                if index == len(chunks) - 1:
+                    args.append("-d")  # delete the buffer after the last chunk
+                args += ["-t", self._target()]
+                self._check(*args)
+            except RuntimeError:
+                import hashlib
+
+                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+                raise RuntimeError(
+                    f"tmux paste failed for a {len(text)}-char prompt "
+                    f"(sha256:{digest})") from None
 
     def send_key(self, key: str) -> None:
         self._check("send-keys", "-t", self._target(), tmux_name(key))

@@ -150,12 +150,14 @@ class SshTmuxBackend(TmuxBackend):
         self._unreachable = proc.returncode == 255
         return proc
 
-    def _run(self, *args: str, timeout: float = 10.0) -> subprocess.CompletedProcess:
+    def _run(self, *args: str, timeout: float = 10.0,
+             input_text: str | None = None) -> subprocess.CompletedProcess:
         remote = shlex.join(["tmux", "-L", self.remote_socket, "-f", "/dev/null", *args])
-        return self._ssh_run(remote, timeout=timeout)
+        return self._ssh_run(remote, input=input_text, timeout=timeout)
 
-    def _check(self, *args: str, timeout: float = 10.0) -> subprocess.CompletedProcess:
-        proc = self._run(*args, timeout=timeout)
+    def _check(self, *args: str, timeout: float = 10.0,
+               input_text: str | None = None) -> subprocess.CompletedProcess:
+        proc = self._run(*args, timeout=timeout, input_text=input_text)
         if proc.returncode != 0:
             if proc.returncode == 255:
                 raise HostUnreachable(

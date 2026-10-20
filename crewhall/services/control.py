@@ -111,10 +111,12 @@ class ServicesControl:
             prev_api = (self._opencode_links.get(agent_id) or {}).get("api")
             link, server_proc = (None, None) if host else self._reopen_opencode_link(
                 agent_id, kind, args, spec.cwd)
+            if kind == "opencode" and not host:
+                self._isolate_opencode_tabs(
+                    env, agent_id, link, api=self._opencode_api(kind))
             if link:
                 env["OPENCODE_SERVER_PASSWORD"] = link.password
-                if not host:
-                    self._isolate_opencode_tabs(env, agent_id, link)
+            args = self._v2_serve_fallback(kind, args, link, agent_id)
             if server_proc is not None:
                 self._opencode_servers[agent_id] = server_proc
             if link is not None:

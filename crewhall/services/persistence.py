@@ -152,13 +152,23 @@ class ServicesPersistence:
         harness.conversation_id = agent.get("conversation_id")
         self._attach_version(harness, agent["kind"], host)
         self.agents.add(harness)
-        self._base_env[agent_id] = dict(agent.get("env") or {})
+        self._base_env[agent_id] = {
+            key: os.environ[key] for key in (agent.get("env_keys") or [])
+            if key in os.environ
+        }
+        if isinstance(agent.get("session_config"), dict):
+            self._v2_config[agent_id] = dict(agent["session_config"])
+        if isinstance(agent.get("launch"), dict):
+            self._agent_launch[agent_id] = dict(agent["launch"])
         self._agent_tokens.setdefault(agent_id, secrets.token_hex(16))
         link_info = agent.get("opencode")
         if isinstance(link_info, dict) and link_info:
             self._opencode_links[agent_id] = link_info
             if session is not None:  # a live tmux session survived the restart
                 self._reattach_opencode_link(harness, link_info, session.spec.cwd or os.getcwd())
+        elif (agent.get("kind") == "opencode" and session is not None
+              and getattr(session, "_adopted", False)):
+            self._backfill_opencode_legacy(harness, session.spec.cwd)
 
     def _session_by_id(self, session_id: str) -> InteractiveSession | None:
         """Exact lookup, never a name/prefix match (ids must be unambiguous)."""
@@ -271,7 +281,12 @@ class ServicesPersistence:
             if harness.session.status.alive:
                 return harness
             kind = harness.kind
-            conversation_id = self._new_conversation_id(
+            prior = harness.conversation_id
+            # A non-forced revive (Web UI "Start") continues the agent's own
+            # conversation instead of silently creating a new one.
+            resume_id = prior if (prior and kind in ("claude", "opencode", "codex")
+                                  and not self._agent_hosts.get(agent_id)) else None
+            conversation_id = resume_id or self._new_conversation_id(
                 kind, self._agent_args.get(agent_id, [])
             )
             spec = harness.session.spec
@@ -283,9 +298,12 @@ class ServicesPersistence:
             if link is not None and getattr(link, "api", "v1") == "v2" and not host:
                 # Reopen the agent's own session: creating a new one on every
                 # revive piles abandoned sessions into the TUI's session list.
-                resume_id = harness.conversation_id
-                if not resume_id or not self._v2_session_exists(link, resume_id):
+                if resume_id and not self._v2_session_exists(link, resume_id):
+                    self._record_v2_unresumable(
+                        agent_id, resume_id,
+                        from_v1=(self._opencode_links.get(agent_id) or {}).get("api") == "v1")
                     resume_id = None
+                    conversation_id = None
                 report = self._configure_v2_session(
                     agent_id, kind, link, self._agent_args.get(agent_id, []),
                     session_id=resume_id,
@@ -302,10 +320,11 @@ class ServicesPersistence:
             # one) to avoid duplicated/derived keys across restarts.
             base_env = dict(self._base_env.get(agent_id) or {})
             env = self._build_agent_env(agent_id, harness.name or agent_id, teams, base_env, host)
+            if kind == "opencode" and not host:
+                self._isolate_opencode_tabs(
+                    env, agent_id, link, api=self._opencode_api(kind))
             if link:
                 env["OPENCODE_SERVER_PASSWORD"] = link.password
-                if not host:
-                    self._isolate_opencode_tabs(env, agent_id, link)
             if server_proc is not None:
                 self._opencode_servers[agent_id] = server_proc
             if link is not None:
@@ -314,9 +333,12 @@ class ServicesPersistence:
                 }
             new_spec = SessionSpec(
                 command=self._launch_command(
-                    kind, self._agent_args.get(agent_id, []), conversation_id,
+                    kind,
+                    self._v2_serve_fallback(
+                        kind, self._agent_args.get(agent_id, []), link, agent_id),
+                    conversation_id,
                     link.port if link else None, host=host, enforce=False,
-                    resume=v2_session,
+                    resume=v2_session or resume_id,
                     server_url=(f"http://127.0.0.1:{link.port}"
                                 if link is not None and link.api == "v2" else None),
                 ),
@@ -446,6 +468,9 @@ class ServicesPersistence:
         if conversation_id == harness.conversation_id:
             return False
         harness.conversation_id = conversation_id
+        launch = self._agent_launch.get(harness.agent_id)
+        if launch is not None:
+            launch["session"] = conversation_id
         self._apply_pending_v2_config(harness, conversation_id)
         logger = getattr(harness.session, "_log", None)
         if callable(logger):

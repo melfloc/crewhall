@@ -154,7 +154,9 @@ class PtyBackend(Backend):
                 raise
 
     def write(self, text: str) -> None:
-        self._write_bytes(text.encode("utf-8"))
+        # Bracketed paste: a multiline prompt is one paste, not a series of
+        # submits (some TUIs otherwise act on each newline).
+        self._write_bytes(b"\x1b[200~" + text.encode("utf-8") + b"\x1b[201~")
 
     def send_key(self, key: str) -> None:
         self._write_bytes(pty_bytes(key))
