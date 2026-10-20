@@ -943,6 +943,47 @@ class ServicesAgents:
         return (model_id == ref.get("id")
                 and (not provider or provider == ref.get("providerID")))
 
+    def _ensure_default_variant(
+        self, link: Any, session_id: str, report: dict[str, Any] | None = None,
+    ) -> None:
+        """Raise a session still on its model's default variant to the configured
+        reasoning effort (``providers.opencode.default_variant``, ``max``).
+
+        A variant the user picked (``/effort low``) is respected: only a session
+        on the default variant is changed, and only when the model offers the
+        wanted one. Best effort: a failure never blocks the agent.
+        """
+        want = str(settings.provider("opencode").get("default_variant") or "").strip()
+        if not want or not session_id:
+            return
+        try:
+            current = self._v2_session_value(link, session_id, "model")
+            if not isinstance(current, dict):
+                return
+            model_id = str(current.get("id") or current.get("modelID") or "")
+            provider = str(current.get("providerID") or "")
+            if not model_id or str(current.get("variant") or "default") != "default":
+                return
+            raw = link.get_json("/api/model", timeout=3.0)
+            catalog = raw.get("data") if isinstance(raw, dict) else raw
+            offered = {
+                str(v.get("id") if isinstance(v, dict) else v)
+                for e in (catalog if isinstance(catalog, list) else [])
+                if isinstance(e, dict)
+                and str(e.get("modelID") or e.get("id") or "") == model_id
+                and (not provider or e.get("providerID") == provider)
+                for v in (e.get("variants") or [])
+            }
+            if want not in offered:
+                return
+            ref = {"providerID": provider, "id": model_id, "variant": want}
+            link.post_json(f"/api/session/{session_id}/model", {"model": ref})
+            applied = self._v2_session_value(link, session_id, "model")
+            if report is not None and isinstance(applied, dict):
+                report["model_variant"] = applied.get("variant")
+        except Exception:  # noqa: BLE001 - effort is a preference, never fatal
+            log.debug("could not apply the default variant", exc_info=True)
+
     def _configure_v2_session(
         self, agent_id: str, kind: str, link: Any, extra_args: list[str],
         session_id: str | None = None,
@@ -1022,6 +1063,7 @@ class ServicesAgents:
             if agent and report["agent_applied"] is None:
                 report["agent_applied"] = False
         if report["session_id"]:
+            self._ensure_default_variant(link, report["session_id"], report)
             report["running_model"] = self._v2_running_model(link, report["session_id"])
         report["error"] = "; ".join(errors) or None
         # Every dropped flag that was not (re)applied is reported, not silent.
@@ -1122,6 +1164,7 @@ class ServicesAgents:
         args = self._agent_args.get(harness.agent_id, [])
         report = self._v2_config.get(harness.agent_id) or {}
         if report.get("session_id") == session_id and report.get("error") is None:
+            self._ensure_default_variant(link, session_id, report)
             return  # already applied to this very session
         self._configure_v2_session(
             harness.agent_id, harness.kind, link, args, session_id=session_id,
@@ -1376,9 +1419,10 @@ class ServicesAgents:
         if harness.conversation_id and isinstance(active, dict):
             if harness.conversation_id in active:
                 self._apply_hook(harness, "prompt_submit")
-                return
+                return  # a running turn is never touched: effort waits for idle
         if not harness.conversation_id:
             return
+        self._ensure_default_variant(link, harness.conversation_id)
         try:
             raw = link.get_json(f"/api/session/{harness.conversation_id}", timeout=2.0)
             session = raw.get("data") if isinstance(raw, dict) else raw

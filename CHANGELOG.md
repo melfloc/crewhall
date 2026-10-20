@@ -7,6 +7,12 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- Nuevo: esfuerzo de razonamiento por defecto en OpenCode 2. El ajuste `providers.opencode.default_variant`
+  (por defecto `max`; vacío lo desactiva) sube a esa variante toda sesión que siga en la variante
+  por defecto del modelo, siempre que el modelo la ofrezca: al crear o reiniciar el agente, al
+  adoptar una sesión nueva y al readoptar sesiones vivas cuando el daemon reconecta (solo en reposo,
+  nunca durante un turno). Una variante elegida a mano en la TUI (`/effort low`) se respeta.
+
 ## [0.84.4] — 2026-10-20
 
 - Corregido: los agentes OpenCode v2 no podían usar `crewhall` desde su shell (`CREWHALL_AGENT_ID`

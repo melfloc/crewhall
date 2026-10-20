@@ -61,7 +61,11 @@ def schema() -> list[dict[str, Any]]:
 
 def provider_defaults(kind: str) -> dict[str, Any]:
     return {"enabled": True, "command": "", "fallback_command": "", "default_args": "",
-            "default_model": "", "env": {}, "mcp": False, "models": []}
+            "default_model": "",
+            # Reasoning effort applied to OpenCode 2 sessions still on the model's
+            # default variant (low|high|max...); empty turns it off.
+            "default_variant": "max" if kind == "opencode" else "",
+            "env": {}, "mcp": False, "models": []}
 
 
 _LOCK = threading.RLock()
@@ -160,7 +164,7 @@ def _provider_value(field: str, value: Any, kind: str) -> Any:
         if len(value) > 50 or any(len(v) > 200 or "\0" in v or "\n" in v for v in value):
             raise SettingsError(f"{key}: up to 50 model names")
         return value
-    if field in ("command", "fallback_command", "default_args", "default_model"):
+    if field in ("command", "fallback_command", "default_args", "default_model", "default_variant"):
         if not isinstance(value, str) or len(value) > 1024 or "\0" in value or "\n" in value:
             raise SettingsError(f"{key}: a single line of text expected")
         value = value.strip()
