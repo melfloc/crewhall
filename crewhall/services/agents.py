@@ -570,6 +570,9 @@ class ServicesAgents:
                 live = None
             if isinstance(live, dict):
                 pid = live.get("pid")
+                version = live.get("version")
+                if isinstance(version, str) and version:
+                    self._runtime_versions[harness.agent_id] = f"opencode v{version}"
                 if isinstance(pid, int) and pid > 0:
                     self._opencode_servers[harness.agent_id] = _AdoptedServe(pid)
                     adopted = True
@@ -1537,6 +1540,14 @@ class ServicesAgents:
         # private `serve` in the agent's directory (so its location matches).
         link, server_proc = (None, None) if host else self._open_opencode_link(
             kind, extra_args, cwd or os.getcwd())
+        if link is not None and getattr(link, "api", "v1") == "v2":
+            try:
+                live = link.get_json("/api/info", timeout=2.0)
+                version = live.get("version") if isinstance(live, dict) else None
+                if isinstance(version, str) and version:
+                    self._runtime_versions[session_id] = f"opencode v{version}"
+            except Exception:  # noqa: BLE001 - informational only
+                pass
         if (kind == "opencode" and not host and link is None
                 and self._user_manages_opencode_server(extra_args)
                 and self._opencode_api(kind) == "v2"):
@@ -1700,6 +1711,11 @@ class ServicesAgents:
         # Version gate: the CLI version the agent runs and whether it is inside
         # the range its adapter was verified against (and thus drivable).
         summary["cli"] = self._agent_versions.get(harness.agent_id)
+        summary["runtime_version"] = (
+            self._runtime_versions.get(harness.agent_id)
+            or (self._agent_launch.get(harness.agent_id) or {}).get("version")
+            or (summary["cli"] or {}).get("version")
+        )
         # True when a full conversation can be read for this agent (it may
         # still be empty before the first message).
         summary["history"] = bool(harness.supports_history)

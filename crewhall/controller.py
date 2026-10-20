@@ -171,6 +171,8 @@ class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesS
         self._agent_launch: dict[str, dict[str, Any]] = {}
         # Version gate: per-agent CLI version report (kind/version/supported…).
         self._agent_versions: dict[str, dict[str, Any] | None] = {}
+        # Version reported by the adopted/live server process (not the binary).
+        self._runtime_versions: dict[str, str] = {}
         # Configured SSH host per agent (None = local), kept for restart/restore.
         self._agent_hosts: dict[str, str | None] = {}
         # Last adoption probe per host: (reachable, wall-clock time).

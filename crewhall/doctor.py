@@ -415,7 +415,7 @@ def check_agent_runtime_versions() -> list[Check]:
             continue
         launch = agent.get("launch") or {}
         cli = agent.get("cli") or {}
-        running = launch.get("version")
+        running = agent.get("runtime_version") or launch.get("version")
         configured = cli.get("version")
         if running and configured and running != configured:
             out.append(_res(
