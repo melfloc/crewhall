@@ -161,24 +161,47 @@ def model_from_args(args: list[str] | None) -> str | None:
 
 
 def opencode_snapshot(link: Any, session_id: str | None) -> dict[str, Any]:
-    """Model and running tool from the latest OpenCode messages."""
+    """Model and running tool from the latest OpenCode messages (v1 or v2)."""
     if link is None or not session_id:
         return {}
+    v2 = getattr(link, "api", "v1") == "v2"
     try:
-        raw = link.get_json(f"/session/{session_id}/message?limit=6", timeout=1.5)
+        if v2:
+            raw = link.get_json(f"/api/session/{session_id}/message?limit=12",
+                                timeout=1.5)
+            data = raw.get("data") if isinstance(raw, dict) else raw
+            items = data if isinstance(data, list) else []
+        else:
+            raw = link.get_json(f"/session/{session_id}/message?limit=6", timeout=1.5)
+            items = raw if isinstance(raw, list) else []
     except Exception:  # noqa: BLE001 - the server may be busy/restarting
         return {}
     model, running = None, None
-    for item in raw if isinstance(raw, list) else []:
-        info = (item or {}).get("info") or {}
-        if info.get("role") == "assistant" and info.get("modelID"):
-            model = info["modelID"]
-        elif not model and (info.get("model") or {}).get("modelID"):
-            model = info["model"]["modelID"]  # the prompt already carries it, before any reply
-        for part in (item or {}).get("parts") or []:
+    for item in items:
+        item = item or {}
+        if v2:
+            item_model = item.get("model")
+            if isinstance(item_model, dict):
+                candidate = item_model.get("id") or item_model.get("modelID")
+            else:
+                candidate = item_model
+            if candidate and item.get("type") in ("assistant", "user", None):
+                model = str(candidate)
+            contents = item.get("content") or []
+        else:
+            info = item.get("info") or {}
+            if info.get("role") == "assistant" and info.get("modelID"):
+                model = info["modelID"]
+            elif not model and (info.get("model") or {}).get("modelID"):
+                model = info["model"]["modelID"]
+            contents = item.get("parts") or []
+        for part in contents:
             state = part.get("state") or {}
-            if part.get("type") == "tool" and state.get("status") in ("running", "pending"):
-                running = {"name": part.get("tool") or "tool", "brief": _brief(state.get("input"))}
+            if part.get("type") != "tool":
+                continue
+            if state.get("status") in ("running", "pending"):
+                running = {"name": part.get("name") or part.get("tool") or "tool",
+                           "brief": _brief(state.get("input"))}
     return {"model": model, "tool": running}
 
 
