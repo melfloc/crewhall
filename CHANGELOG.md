@@ -7,6 +7,14 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- Corregido: a message arriving while a human was typing in an OpenCode 2 agent's composer was injected
+  instead of waiting. The v2 API path posted the prompt straight to `/api/session/{id}/prompt` without
+  looking at the composer, so the turn started under the human's feet and their draft was lost when they
+  pressed ENTER. Now the API path applies the same guard as the keyboard path: a dirty composer makes the
+  message wait in the queue (reason `human draft`) and it is delivered once the human clears it. The
+  composer's placeholder/suggestion is not a draft, so it does not block delivery. This is what broke the
+  `human-draft` step of crewhall's own smoke suite on every run since the v2 API path landed (v0.84.2+).
+
 ## [0.85.0] — 2026-10-20
 
 - Nuevo: `crewhall agent effort <agente> [low|high|max|default]` muestra o cambia el esfuerzo de razonamiento
