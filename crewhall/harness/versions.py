@@ -35,7 +35,7 @@ class ValidatedRange(TypedDict):
 VALIDATED: dict[str, ValidatedRange] = {
     "claude": {"min": (2, 1, 0), "max_exclusive": (3, 0, 0), "captured": "2.1.284"},
     "codex": {"min": (0, 150, 0), "max_exclusive": (1, 0, 0), "captured": "0.158.0"},
-    "opencode": {"min": (1, 0, 0), "max_exclusive": (3, 0, 0), "captured": "1.18.34 / 2.0.29"},
+    "opencode": {"min": (1, 0, 0), "max_exclusive": (3, 0, 0), "captured": "2.0.29"},
 }
 
 

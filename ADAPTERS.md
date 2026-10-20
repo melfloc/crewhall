@@ -169,7 +169,7 @@ rango, ver `crewhall/harness/versions.py` y la subsección siguiente).
 | Kind | Fuente primaria | Respaldo | Versión validada |
 |---|---|---|---|
 | `claude` | hooks (`SessionStart`/`UserPromptSubmit`/`Stop`/`PermissionRequest`) + transcript JSONL | pantalla | 2.1.284 |
-| `opencode` | servidor local HTTP + eventos SSE (`session.execution.*` en v2, `session.status` en v1) | pantalla | 1.18.34 / 2.0.28 |
+| `opencode` | servidor local HTTP + eventos SSE (`session.execution.*` en v2, `session.status` en v1) | pantalla | 1.18.34 / 2.0.29 |
 | `codex` | rollout JSONL (`task_started` / `task_complete`) | pantalla | 0.158.0 |
 
 Las fixtures de `tests/fixtures/screens/<kind>/` son capturas reales por versión; el

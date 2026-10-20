@@ -523,7 +523,7 @@ class MixedVersions(unittest.TestCase):
 
 class DoctorAndVersions(unittest.TestCase):
     def test_opencode_is_captured_at_2_0_29(self):
-        self.assertIn("2.0.29", versions.VALIDATED["opencode"]["captured"])
+        self.assertEqual(versions.VALIDATED["opencode"]["captured"], "2.0.29")
 
     def test_doctor_warns_when_the_live_runtime_differs(self):
         from crewhall import doctor
