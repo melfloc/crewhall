@@ -32,7 +32,9 @@ to run without it and ships these notes with the release.
 - Corregido: si el `serve` privado no arranca, el agente se lanza en `--standalone`
   con aviso visible, nunca contra el servicio gestionado del usuario. Al reconectar
   tras un reinicio se adopta el `serve` huérfano vivo (probando `/api/info`) en vez de
-  fallar al reocupar el puerto.
+  fallar al reocupar el puerto; `daemon stop` conserva la TUI pero para el `serve`
+  privado y el siguiente daemon lo recupera en el puerto persistido. Un link v1/v2
+  que ya no responde no se adjunta en silencio: queda `legacy` con aviso.
 - Corregido: un agente OpenCode v1 adoptado recupera su link desde `/proc`, adopta la
   conversación **más reciente** de su cwd y reporta la versión del proceso adoptado
   (p. ej. `v1.18.31`), no la del binario configurado; si su servidor ya no responde

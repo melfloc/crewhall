@@ -593,6 +593,24 @@ class ServicesAgents:
                     ))
                     return
                 self._opencode_servers[harness.agent_id] = proc
+        else:
+            # v1 owns its server inside the TUI: if it no longer answers, do not
+            # attach a dead link and pretend history/state are available.
+            try:
+                OpenCodeLink.detect_api(port, password)
+            except Exception:  # noqa: BLE001 - connection refused/401: dead server
+                harness.legacy = True
+                self._publish_v2_notice(notices.add(
+                    key=f"v1reattach:{harness.agent_id}", kind="opencode", level="warn",
+                    title="OpenCode v1 server could not be reattached",
+                    body=(
+                        "The adopted agent's v1 server no longer answers on its "
+                        "persisted port/password, so its link was not attached: "
+                        "this agent is screen-only (no API history/state) until it "
+                        "is restarted. Its previous conversation was not discarded."
+                    ),
+                ))
+                return
         self._opencode_links[harness.agent_id] = {
             "port": port, "password": password, "api": api,
         }

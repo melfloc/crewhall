@@ -286,8 +286,8 @@ class FakeOpenCodeV2(BaseHTTPRequestHandler):
         self._empty(404)
 
 
-def start_server() -> tuple[ThreadingHTTPServer, int]:
-    """Start the double on a free loopback port; caller owns shutdown()."""
-    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeOpenCodeV2)
+def start_server(port: int = 0) -> tuple[ThreadingHTTPServer, int]:
+    """Start the double on a loopback port; caller owns shutdown()."""
+    server = ThreadingHTTPServer(("127.0.0.1", port), FakeOpenCodeV2)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, server.server_address[1]
