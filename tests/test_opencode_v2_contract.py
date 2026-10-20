@@ -57,6 +57,23 @@ def fixture(size: str, name: str) -> str:
         return fh.read()
 
 
+def _screen_with_draft(draft: str) -> str:
+    """An idle OpenCode v2 screen whose composer holds ``draft``.
+
+    Shaped like the real TUI: the ``┃`` rail block closed by the ``╹▀▀▀``
+    rule, with the agent/model footer as the block's last line.
+    """
+    return "\n".join([
+        "",
+        "  ┃",
+        f"  ┃  {draft}",
+        "  ┃",
+        "  ┃  Build · deepseek-v4.1-flash OpenCode Go",
+        "  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+        "",
+    ])
+
+
 class FixtureDetection(unittest.TestCase):
     def test_every_fixture_detects_its_expected_state(self):
         for size in ("120x40", "80x24"):
@@ -174,6 +191,25 @@ class SafeInput(unittest.TestCase):
         self.harness.send("MESSAGE_FOR_AGENT")
         self.assertEqual(self.harness.session.writes, [])
         self.assertEqual(FakeOpenCodeV2.bodies("/prompt")[0]["text"], "MESSAGE_FOR_AGENT")
+
+    def test_api_send_refuses_while_a_human_drafts(self):
+        # A human typing in the composer must never be raced or clobbered:
+        # the turn waits in the queue (reason "human draft") until they clear it.
+        self.harness.session.screen = _screen_with_draft("hola, todavia escribo")
+        with self.assertRaises(HarnessNotReady):
+            self.harness.send("mensaje del companero")
+        self.assertEqual(FakeOpenCodeV2.bodies("/prompt"), [])
+        self.assertEqual(self.harness.session.writes, [])
+        # Once the human clears the draft, the message goes through.
+        self.harness.session.screen = fixture("120x40", "tabs-off-idle")
+        self.harness.send("mensaje del companero")
+        self.assertEqual(FakeOpenCodeV2.bodies("/prompt")[0]["text"], "mensaje del companero")
+
+    def test_api_send_ignores_the_placeholder_suggestion(self):
+        # The composer's rotating suggestion is not a draft: it must not block.
+        self.harness.session.screen = _screen_with_draft("Ask anything… \"algo\"")
+        self.harness.send("mensaje del companero")
+        self.assertEqual(FakeOpenCodeV2.bodies("/prompt")[0]["text"], "mensaje del companero")
 
     def test_keyboard_fallback_closes_a_safe_picker_then_retries(self):
         self.harness.link = None
