@@ -635,7 +635,7 @@ class ServicesAgents:
     # dropped with a notice (positional arguments, e.g. a directory, are kept).
     _V2_ACCEPTED_FLAGS = ("--server", "--session", "--standalone", "-s", "-c",
                           "--help", "-h", "--version", "-v", "--print-logs",
-                          "--log-level")
+                          "--log-level", "--")
 
     def _v2_clean_args(self, args: list[str]) -> list[str]:
         """Remove v1/unknown options from the argv handed to the v2 TUI."""
