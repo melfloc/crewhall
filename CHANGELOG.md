@@ -33,6 +33,10 @@ to run without it and ships these notes with the release.
   con aviso visible, nunca contra el servicio gestionado del usuario. Al reconectar
   tras un reinicio se adopta el `serve` huérfano vivo (probando `/api/info`) en vez de
   fallar al reocupar el puerto.
+- Corregido: un agente OpenCode v1 adoptado recupera su link desde `/proc`, adopta la
+  conversación **más reciente** de su cwd y reporta la versión del proceso adoptado
+  (p. ej. `v1.18.31`), no la del binario configurado; si su servidor ya no responde
+  queda `legacy` (screen-only) con aviso.
 - Corregido: prompts largos/multilínea por tmux con `load-buffer -` + `paste-buffer -p`
   por chunks (40 KB verificados) y PTY con bracketed paste; los errores registran
   longitud/hash, nunca el cuerpo del prompt.

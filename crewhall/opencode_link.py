@@ -332,18 +332,22 @@ class OpenCodeLink:
         else:
             self.post_json(f"/question/{request_id}/reject", {})
 
-    def discover(self, directory: str | None, since_ms: float, exclude: set[str]) -> str | None:
+    def discover(self, directory: str | None, since_ms: float, exclude: set[str],
+                 newest: bool = False) -> str | None:
         """Fallback when the ``session.created`` event was missed.
 
         The agent's session is the earliest one created in its directory after
-        it started that no other agent has claimed.
+        it started that no other agent has claimed. ``newest=True`` returns the
+        most recent one instead (adopting an existing TUI, which opens its last
+        conversation, not the first one it ever created).
         """
         if not directory:
             return None
         if self.api == "v2":
             from urllib.parse import quote
 
-            query = f"?directory={quote(directory)}&parentID=null&order=asc"
+            order = "desc" if newest else "asc"
+            query = f"?directory={quote(directory)}&parentID=null&order={order}"
             try:
                 raw = self.get_json(f"/api/session{query}")
             except (OSError, ValueError):
@@ -364,6 +368,8 @@ class OpenCodeLink:
                                  or s.get("directory") or "") == want
             and s.get("time", {}).get("created", 0) >= since_ms - 2000
         ]
+        if newest:
+            return max(found)[1] if found else None
         return min(found)[1] if found else None
 
     def history(self, session_id: str, limit: int = 200, before: int | None = None) -> dict:

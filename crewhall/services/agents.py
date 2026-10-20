@@ -1355,11 +1355,15 @@ class ServicesAgents:
             self._opencode_links[harness.agent_id] = {
                 "port": int(port), "password": password, "api": api,
             }
+            version = self._opencode_process_version(child, argv)
+            if version:
+                self._runtime_versions[harness.agent_id] = version
             self._attach_link(harness, link)
             if not harness.conversation_id:
                 newest = link.discover(
                     cwd, 0, {h.conversation_id for h in self.agents.all()
-                             if h is not harness and h.conversation_id})
+                             if h is not harness and h.conversation_id},
+                    newest=True)
                 if newest:
                     harness.conversation_id = newest
             return
@@ -1374,6 +1378,32 @@ class ServicesAgents:
                 "restart will start a new one. Export what you need from its TUI."
             ),
         ))
+
+    @staticmethod
+    def _opencode_process_version(pid: int, argv: list[str]) -> str | None:
+        """The version of the *adopted* TUI binary, when it can be read.
+
+        ``_attach_version`` probes the configured CLI; an adopted agent may run
+        an older install (v1 while the configured binary is v2). Prefer the
+        process' own executable, then its ``argv[0]``.
+        """
+        candidates: list[str] = []
+        try:
+            exe = os.readlink(f"/proc/{pid}/exe")
+            if os.path.basename(exe).split()[0].startswith("opencode"):
+                candidates.append(exe)
+        except OSError:
+            pass
+        if argv:
+            candidates.append(argv[0])
+        for candidate in candidates:
+            if not candidate:
+                continue
+            text = versions.probe_version([candidate])
+            parsed = versions.parse_version(text)
+            if parsed:
+                return f"opencode v{parsed[0]}.{parsed[1]}.{parsed[2]}"
+        return None
 
     @staticmethod
     def _proc_descendants(root: int) -> list[int]:
