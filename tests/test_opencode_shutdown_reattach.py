@@ -43,6 +43,22 @@ class ShutdownAndReattach(unittest.TestCase):
         controller.register_agent(harness)
         return harness
 
+    def test_shutdown_stops_the_event_followers_before_killing_the_serve(self):
+        # A follower still running when its serve dies would try to apply the
+        # model/agent to a closed port and raise a false "could not apply" notice.
+        import threading
+        controller = Controller(adopt=False)
+        harness = self._survivor(controller)
+        stop = threading.Event()
+        controller._bridges[harness.agent_id] = stop
+        controller._opencode_servers[harness.agent_id] = _Proc()
+        seen = []
+        with mock.patch.object(
+                controller, "_kill_opencode_server",
+                lambda proc: seen.append(stop.is_set())):
+            controller.shutdown(kill_agents=False)
+        self.assertEqual(seen, [True])
+
     def test_shutdown_without_killing_agents_still_stops_private_serves(self):
         server, port = start_server()
         self.addCleanup(server.server_close)

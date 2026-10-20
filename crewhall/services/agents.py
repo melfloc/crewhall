@@ -1996,6 +1996,10 @@ class ServicesAgents:
         the control plane's own resources are released.
         """
         self.remote_links.stop_all()
+        # Stop the event followers first: one that outlives its serve would try to
+        # apply the model/agent to a closed port and raise a false notice.
+        for stop in list(self._bridges.values()):
+            stop.set()
         # The OpenCode v2 `serve` processes belong to the control plane, not to
         # tmux: always stop them here (a surviving agent is re-attached to a
         # fresh server on the same port when the daemon comes back, A1).
