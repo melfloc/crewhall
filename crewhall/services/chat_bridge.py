@@ -18,34 +18,49 @@ from ..controller import AGENT_SEND_WAIT, log
 class ServicesChatBridge:
 
     def _open_opencode_request(self, harness: Harness, kind: str, req: dict[str, Any]) -> None:
-        rid = req.get("id")
+        payload = req
+        if isinstance(req.get("form"), dict):
+            payload = req["form"]  # form.created carries ``{form: {...}}``
+        rid = payload.get("id") or req.get("id")
         if not isinstance(rid, str) or not rid:
             return
+        session_id = (payload.get("sessionID") or req.get("sessionID")
+                      or harness.conversation_id)
         if kind == "permission":
-            data = ix.opencode_permission(req)
+            data = ix.opencode_permission(payload)
         else:
-            data = {"questions": ix.normalize_questions(req.get("questions")),
-                    "session": req.get("sessionID")}
-            if not data["questions"]:
+            raw_fields = payload.get("fields")
+            raw_questions = payload.get("questions") or payload.get("questions")
+            questions = (ix.normalize_fields(raw_fields)
+                         if isinstance(raw_fields, list)
+                         else ix.normalize_questions(raw_questions))
+            if not questions:
                 return
+            data = {"questions": questions, "session": session_id}
+            if payload.get("title"):
+                data["title"] = ix._clip(payload["title"], 200)
         item, created = self.interactions.open(
             harness.agent_id, kind, f"{harness.agent_id}:{rid}", data,
-            ref={"source": "opencode", "request_id": rid},
+            ref={"source": "opencode", "request_id": rid, "sessionID": session_id},
         )
         if created:
             self._log_interaction(harness, "asked", item)
 
     def _on_opencode_interaction(self, harness: Harness, kind: str, props: dict[str, Any]) -> None:
-        if kind == "permission.asked":
+        if kind in ("permission.asked",):
             self._open_opencode_request(harness, "permission", props)
-        elif kind == "question.asked":
+        elif kind in ("question.asked", "form.created"):
             self._open_opencode_request(harness, "question", props)
-        else:  # replied / rejected, possibly in the TUI itself
-            rid = props.get("requestID")
+        else:  # replied / rejected / cancelled, possibly in the TUI itself
+            rid = props.get("requestID") or props.get("id")
+            if not isinstance(rid, str) and isinstance(props.get("form"), dict):
+                rid = props["form"].get("id")
             if isinstance(rid, str):
                 answer = (
-                    {"reply": props.get("reply")} if kind == "permission.replied"
-                    else {"answers": props.get("answers")} if kind == "question.replied"
+                    {"reply": props.get("reply") or props.get("decision")}
+                    if kind == "permission.replied"
+                    else {"answers": props.get("answers") or props.get("answer")}
+                    if kind in ("question.replied", "form.replied")
                     else {"reject": True}
                 )
                 item = self.interactions.close(f"{harness.agent_id}:{rid}", answer=answer, by="agent")
@@ -54,7 +69,9 @@ class ServicesChatBridge:
 
     def _sync_opencode_interactions(self, harness: Harness, link: OpenCodeLink) -> None:
         try:
-            perms, questions = link.pending_permissions(), link.pending_questions()
+            sid = harness.conversation_id
+            perms = link.pending_permissions(sid)
+            questions = link.pending_questions(sid)
         except Exception:  # noqa: BLE001 - the server may not be up yet
             return
         live = set()
@@ -65,8 +82,14 @@ class ServicesChatBridge:
             self._open_opencode_request(harness, "question", req)
             live.add(f"{harness.agent_id}:{req.get('id')}")
         for item in self.interactions.pending(harness.agent_id):
-            if item.ref.get("source") == "opencode" and item.interaction_id not in live:
-                self.interactions.close(item.interaction_id)
+            if item.ref.get("source") != "opencode" or item.interaction_id in live:
+                continue
+            # A request from a subagent/other tab belongs to its own session and
+            # is not listed by this session's endpoint: do not close it here.
+            if (item.ref.get("sessionID") not in (None, harness.conversation_id)
+                    and getattr(link, "api", "v1") == "v2"):
+                continue
+            self.interactions.close(item.interaction_id)
 
     def _maybe_sync_interactions(self, harness: Harness) -> None:
         """Defensive poll: recover OpenCode questions if the event was missed.
@@ -114,14 +137,21 @@ class ServicesChatBridge:
         if item.ref.get("source") != "opencode" or link is None:
             raise ix.InteractionError("this agent cannot be answered from here")
         rid = item.ref["request_id"]
-        sid = harness.conversation_id
+        # The request's own session (a subagent or another tab), not the
+        # controller's currently tracked conversation: v2 routes are per session
+        # and a mismatch is a 404.
+        sid = item.ref.get("sessionID") or harness.conversation_id
         try:
             if item.kind == "permission":
                 link.reply_permission(rid, clean["reply"], clean.get("message"), session_id=sid)
             elif clean.get("reject"):
                 link.reject_question(rid, session_id=sid)
             else:
-                link.reply_question(rid, clean["answers"], session_id=sid)
+                answer = None
+                if getattr(link, "api", "v1") == "v2":
+                    answer = ix.form_answer(item, clean)
+                link.reply_question(rid, clean["answers"], session_id=sid,
+                                    answer=answer)
         except OSError as exc:
             # Gone on the agent's side (answered in the TUI, agent restarted…).
             self._sync_opencode_interactions(harness, link)

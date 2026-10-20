@@ -68,7 +68,7 @@ class Interaction:
 
 def normalize_questions(raw: Any) -> list[dict[str, Any]]:
     out = []
-    for q in raw if isinstance(raw, list) else []:
+    for index, q in enumerate(raw if isinstance(raw, list) else []):
         if not isinstance(q, dict):
             continue
         options = [
@@ -77,12 +77,52 @@ def normalize_questions(raw: Any) -> list[dict[str, Any]]:
             for o in q.get("options") or [] if isinstance(o, dict) and o.get("label")
         ]
         out.append({
-            "question": _clip(q.get("question", ""), 2000),
-            "header": _clip(q.get("header", ""), 60),
+            "key": _clip(q.get("key") or q.get("id") or f"field{index}", 100),
+            "question": _clip(q.get("question") or q.get("title") or "", 2000),
+            "header": _clip(q.get("header") or q.get("title") or "", 60),
             "options": options,
             "multiple": bool(q.get("multiple") or q.get("multiSelect")),
             # OpenCode: custom answers are allowed unless explicitly disabled.
             "custom": q.get("custom") is not False,
+            "required": bool(q.get("required", True)),
+        })
+    return out
+
+
+def normalize_fields(fields: Any) -> list[dict[str, Any]]:
+    """v2 form ``fields`` -> the neutral question shape front-ends understand.
+
+    A field is ``{key, title, type, options?, required?}``; its answer goes back
+    keyed by ``key`` (``{"answer": {key: value}}``), so the key is preserved.
+    """
+    out = []
+    for index, field in enumerate(fields if isinstance(fields, list) else []):
+        if not isinstance(field, dict):
+            continue
+        raw_options = field.get("options") or []
+        options = []
+        for option in raw_options:
+            if isinstance(option, str):
+                options.append({"label": _clip(option, 200), "description": ""})
+            elif isinstance(option, dict):
+                label = option.get("label") or option.get("value") or option.get("title")
+                if label:
+                    options.append({
+                        "label": _clip(label, 200),
+                        "description": _clip(option.get("description", ""), 1000),
+                    })
+        ftype = str(field.get("type") or "string")
+        key = field.get("key") or field.get("id") or f"field{index}"
+        title = field.get("title") or field.get("label") or key
+        out.append({
+            "key": _clip(key, 100),
+            "question": _clip(title, 2000),
+            "header": _clip(title, 60),
+            "options": options,
+            "type": _clip(ftype, 40),
+            "multiple": ftype in ("multiselect", "multi-select", "array"),
+            "custom": ftype not in ("select", "multiselect", "multi-select"),
+            "required": bool(field.get("required", True)),
         })
     return out
 
@@ -106,6 +146,18 @@ def validate_answer(item: Interaction, answer: Any) -> dict[str, Any]:
         return {"reject": True}
     questions = item.data.get("questions") or []
     answers = answer.get("answers")
+    if isinstance(answer.get("answer"), dict):
+        # v2-shaped reply ({"answer": {fieldKey: value}}): accept it too.
+        by_key = answer["answer"]
+        answers = []
+        for index, q in enumerate(questions):
+            value = by_key.get(q.get("key") or f"field{index}")
+            if value is None or value == "":
+                answers.append([])
+            elif isinstance(value, list):
+                answers.append([str(v) for v in value])
+            else:
+                answers.append([str(value)])
     if not isinstance(answers, list) or len(answers) != len(questions):
         raise InteractionError(f"answers must be a list with one entry per question ({len(questions)})")
     clean: list[list[str]] = []
@@ -114,7 +166,10 @@ def validate_answer(item: Interaction, answer: Any) -> dict[str, Any]:
             raise InteractionError("each answer must be a non-empty list of labels")
         given = [_clip(x.strip(), 2000) for x in given]
         if not given:
-            raise InteractionError(f"no answer for {q['header'] or q['question']!r}")
+            if q.get("required", True):
+                raise InteractionError(f"no answer for {q['header'] or q['question']!r}")
+            clean.append([])
+            continue
         if len(given) > 1 and not q.get("multiple"):
             raise InteractionError(f"{q['header'] or q['question']!r} accepts a single answer")
         labels = {o["label"] for o in q.get("options") or []}
@@ -191,20 +246,42 @@ class InteractionBoard:
             del self._items[key]
 
 
+def form_answer(item: Interaction, clean: dict[str, Any]) -> dict[str, Any]:
+    """Validated neutral answers -> v2 ``{"answer": {fieldKey: value}}`` params."""
+    answers = clean.get("answers") or []
+    out: dict[str, Any] = {}
+    for index, (question, given) in enumerate(
+            zip(item.data.get("questions") or [], answers, strict=False)):
+        key = question.get("key") or f"field{index}"
+        out[key] = list(given) if question.get("multiple") else given[0]
+    return out
+
+
 def opencode_permission(props: dict[str, Any]) -> dict[str, Any]:
-    """OpenCode ``PermissionRequest`` -> neutral permission data."""
+    """OpenCode ``PermissionRequest`` (v1 and v2) -> neutral permission data."""
     meta_raw = props.get("metadata")
     metadata: dict[str, Any] = meta_raw if isinstance(meta_raw, dict) else {}
-    patterns = [_clip(p, 500) for p in props.get("patterns") or [] if isinstance(p, str)]
+    action = props.get("action") or props.get("permission")
+    patterns = [_clip(p, 500) for p in (
+        props.get("resources") or props.get("patterns") or []
+    ) if isinstance(p, str)]
     detail_bits = []
-    for key in ("command", "filepath", "filePath", "path", "url", "description"):
+    if action:
+        detail_bits.append(f"action: {_clip(action, 200)}")
+    for resource in patterns:
+        detail_bits.append(f"$ {resource}" if action in (None, "shell", "bash")
+                           else f"{resource}")
+    for key in ("source", "save", "command", "filepath", "filePath", "path", "url",
+                "description"):
         if metadata.get(key):
             detail_bits.append(f"{key}: {_clip(metadata[key], 1500)}")
+        elif props.get(key) is not None:
+            detail_bits.append(f"{key}: {_clip(props[key], 500)}")
     if not detail_bits and metadata:
         detail_bits.append(_clip(metadata, 1500))
     return {
-        "title": _clip(props.get("permission") or "permission", 200),
-        "detail": "\n".join(detail_bits),
+        "title": _clip(action or "permission", 200),
+        "detail": "\n".join(dict.fromkeys(detail_bits)),
         "patterns": patterns,
         "always": [_clip(p, 500) for p in props.get("always") or [] if isinstance(p, str)],
         "choices": list(PERMISSION_REPLIES),
