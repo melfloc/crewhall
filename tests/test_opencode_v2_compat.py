@@ -293,6 +293,18 @@ class Interactions(ServerCase):
             {"providerID": "acme-go", "id": "fast"})
         self.assertEqual(self.controller._v2_model_ref(self.link, "nope"), {})
 
+    def test_model_ref_prefers_the_exact_provider_over_a_prefix(self):
+        # The same model under "opencode" and "opencode-go": "opencode" is a
+        # substring of "opencode-go", so a fuzzy pass must not pick it first.
+        FakeOpenCodeV2.models = [
+            {"id": "m", "modelID": "m", "providerID": "opencode"},
+            {"id": "m", "modelID": "m", "providerID": "opencode-go"},
+        ]
+        self.assertEqual(self.controller._v2_model_ref(self.link, "opencode-go/m"),
+                         {"providerID": "opencode-go", "id": "m"})
+        self.assertEqual(self.controller._v2_model_ref(self.link, "opencode/m"),
+                         {"providerID": "opencode", "id": "m"})
+
 
 class ActivityV2(ServerCase):
     def setUp(self):

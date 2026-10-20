@@ -800,15 +800,18 @@ class ServicesAgents:
         if matches:
             chosen = matches[0]
             if provider:
-                for match in matches:
-                    ids = (match["providerID"].casefold(), match["canonical"].casefold())
-                    if (provider.casefold() in ids
-                            or any(provider.casefold() in i or i in provider.casefold()
-                                   for i in ids if i)):
-                        chosen = match
-                        break
-                else:
+                wanted = provider.casefold()
+                # An exact provider id beats an alias: "opencode" is a prefix of
+                # "opencode-go", so a fuzzy match alone would pick the wrong one.
+                exact = [m for m in matches if wanted in (
+                    m["providerID"].casefold(), m["canonical"].casefold())]
+                fuzzy = [m for m in matches if any(
+                    wanted in i or i in wanted
+                    for i in (m["providerID"].casefold(), m["canonical"].casefold()) if i)]
+                picked = exact or fuzzy
+                if not picked:
                     return {}  # the model exists, but not under that provider
+                chosen = picked[0]
             ref = {"providerID": chosen["providerID"], "id": chosen["id"]}
             if variant:
                 ref["variant"] = variant
