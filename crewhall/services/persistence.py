@@ -293,7 +293,10 @@ class ServicesPersistence:
             backend_name = harness.session.backend.name
             host = self._agent_hosts.get(agent_id)
             link, server_proc = (None, None) if host else self._reopen_opencode_link(
-                agent_id, kind, self._agent_args.get(agent_id, []), spec.cwd)
+                agent_id, kind, self._agent_args.get(agent_id, []), spec.cwd,
+                identity=self._build_agent_env(
+                    agent_id, harness.name or agent_id,
+                    self._team_names_of(agent_id), None, host))
             v2_session: str | None = None
             if link is not None and getattr(link, "api", "v1") == "v2" and not host:
                 # Reopen the agent's own session: creating a new one on every

@@ -39,6 +39,23 @@ class _AdoptedServe:
     def poll(self) -> int | None:
         return None if os.path.isdir(f"/proc/{self.pid}") else 0
 
+    def terminate(self) -> None:
+        with contextlib.suppress(OSError):
+            os.kill(self.pid, signal.SIGTERM)
+
+    def kill(self) -> None:
+        with contextlib.suppress(OSError):
+            os.kill(self.pid, signal.SIGKILL)
+
+    def wait(self, timeout: float | None = None) -> int:
+        """Poll until the process is gone (it is not our child, so no waitpid)."""
+        deadline = time.monotonic() + (timeout if timeout is not None else 1e9)
+        while self.poll() is None:
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(["serve"], timeout or 0)
+            time.sleep(0.05)
+        return 0
+
 
 class ServicesAgents:
 
@@ -438,14 +455,21 @@ class ServicesAgents:
         return any(a in ("--port", "--server") or a.startswith(("--port=", "--server="))
                    for a in extra_args)
 
-    def _start_opencode_server(self, kind: str, cwd: str, port: int, password: str) -> Any:
+    def _start_opencode_server(
+        self, kind: str, cwd: str, port: int, password: str,
+        identity: dict[str, str] | None = None,
+    ) -> Any:
         """Start an OpenCode v2 ``serve`` for one agent; return the Popen (or None).
 
         The password travels in the environment (never argv), exactly like v1.
+        ``identity`` is the agent's own environment (``CREWHALL_AGENT_ID``, token,
+        socket...): in v2 the shell tool runs inside this server, not in the TUI,
+        so without it the agent's ``crewhall`` calls cannot say who they are.
         """
         command, _report, _used = self._resolve_provider_command(kind, None)
         argv = [*command, "serve", "--port", str(port), "--hostname", "127.0.0.1"]
         env = dict(os.environ)
+        env.update(identity or {})
         env["OPENCODE_SERVER_PASSWORD"] = password
         self._ensure_usable_tmpdir(env)
         try:
@@ -472,6 +496,15 @@ class ServicesAgents:
         log.warning("the OpenCode server for %s did not become ready", kind)
         self._kill_opencode_server(proc)
         return None
+
+    @staticmethod
+    def _serve_has_identity(pid: int) -> bool:
+        """Does the running ``serve`` carry the agent identity? Unreadable: assume yes."""
+        try:
+            with open(os.path.join("/proc", str(pid), "environ"), "rb") as fh:
+                return b"CREWHALL_AGENT_ID=" in fh.read()
+        except OSError:
+            return True
 
     @staticmethod
     def _kill_opencode_server(proc: Any) -> None:
@@ -519,6 +552,7 @@ class ServicesAgents:
 
     def _open_opencode_link(
         self, kind: str, extra_args: list[str], cwd: str,
+        identity: dict[str, str] | None = None,
     ) -> tuple[OpenCodeLink | None, Any]:
         """Create the link (and, for v2, start the private server).
 
@@ -539,7 +573,7 @@ class ServicesAgents:
         if v2:
             password = secrets.token_urlsafe(24)
             port = free_port()
-            proc = self._start_opencode_server(kind, cwd, port, password)
+            proc = self._start_opencode_server(kind, cwd, port, password, identity=identity)
             if proc is None:
                 return None, None  # degrade to screen-only state, honestly
             return OpenCodeLink(port, password, api="v2"), proc
@@ -574,12 +608,22 @@ class ServicesAgents:
                 if isinstance(version, str) and version:
                     self._runtime_versions[harness.agent_id] = f"opencode v{version}"
                 if isinstance(pid, int) and pid > 0:
-                    self._opencode_servers[harness.agent_id] = _AdoptedServe(pid)
-                    adopted = True
+                    adopted_serve = _AdoptedServe(pid)
+                    if self._serve_has_identity(pid):
+                        self._opencode_servers[harness.agent_id] = adopted_serve
+                        adopted = True
+                    else:
+                        # Started before the serve carried the agent identity: its
+                        # tools could not tell who is calling crewhall. Replace it.
+                        self._kill_opencode_server(adopted_serve)
                 elif live.get("version"):
                     adopted = True  # answering, but no pid: keep the link
             if not adopted:
-                proc = self._start_opencode_server(harness.kind, cwd, port, password)
+                proc = self._start_opencode_server(
+                    harness.kind, cwd, port, password,
+                    identity=self._build_agent_env(
+                        harness.agent_id, harness.name or harness.agent_id,
+                        self._team_names_of(harness.agent_id), None))
                 if proc is None:
                     self._publish_v2_notice(notices.add(
                         key=f"v2reattach:{harness.agent_id}", kind="opencode", level="warn",
@@ -626,6 +670,7 @@ class ServicesAgents:
 
     def _reopen_opencode_link(
         self, agent_id: str, kind: str, extra_args: list[str], cwd: str,
+        identity: dict[str, str] | None = None,
     ) -> tuple[OpenCodeLink | None, Any]:
         """Link for a relaunched agent: reuse its v2 server, or start a fresh one."""
         if not self.track_conversations or not get_harness(kind).uses_local_server:
@@ -636,10 +681,14 @@ class ServicesAgents:
             proc = self._opencode_servers.get(agent_id)
             info = self._opencode_links.get(agent_id)
             if proc is not None and proc.poll() is None and info:
-                return OpenCodeLink(int(info["port"]), str(info["password"]), api="v2"), proc
+                if identity is None or self._serve_has_identity(proc.pid):
+                    return OpenCodeLink(
+                        int(info["port"]), str(info["password"]), api="v2"), proc
+                # A serve from before it carried the identity: replace it.
+                self._kill_opencode_server(proc)
             password = secrets.token_urlsafe(24)
             port = free_port()
-            proc = self._start_opencode_server(kind, cwd, port, password)
+            proc = self._start_opencode_server(kind, cwd, port, password, identity=identity)
             if proc is None:
                 return None, None
             return OpenCodeLink(port, password, api="v2"), proc
@@ -1601,7 +1650,8 @@ class ServicesAgents:
         # OpenCode link/server: v1 opens the port inside the TUI; v2 needs a
         # private `serve` in the agent's directory (so its location matches).
         link, server_proc = (None, None) if host else self._open_opencode_link(
-            kind, extra_args, cwd or os.getcwd())
+            kind, extra_args, cwd or os.getcwd(),
+            identity=self._build_agent_env(session_id, agent_name, [], env, host))
         if link is not None and getattr(link, "api", "v1") == "v2":
             try:
                 live = link.get_json("/api/info", timeout=2.0)

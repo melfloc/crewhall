@@ -7,6 +7,13 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- Corregido: los agentes OpenCode v2 no podían usar `crewhall` desde su shell (`CREWHALL_AGENT_ID`
+  unset). En v2 la TUI solo dibuja y las herramientas se ejecutan dentro del `serve` privado de
+  cada agente, que se arrancaba sin la identidad. Ahora el `serve` nace con el mismo entorno que
+  la TUI (`CREWHALL_*`, token, socket); un `serve` ya vivo que no la tenga se recrea al reabrir o
+  readoptar el agente. Además, un `serve` adoptado ya se puede detener al apagar el daemon
+  (antes fallaba con `AttributeError`).
+
 ## [0.84.3] — 2026-10-20
 
 - Corregido: crear un agente OpenCode v2 con `--agent <nombre>` fallaba con "agent is not available

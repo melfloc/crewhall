@@ -110,7 +110,7 @@ class ServicesControl:
             # an agent that predates an upgrade): used to explain a v1->v2 fallback.
             prev_api = (self._opencode_links.get(agent_id) or {}).get("api")
             link, server_proc = (None, None) if host else self._reopen_opencode_link(
-                agent_id, kind, args, spec.cwd)
+                agent_id, kind, args, spec.cwd, identity=env)
             if kind == "opencode" and not host:
                 self._isolate_opencode_tabs(
                     env, agent_id, link, api=self._opencode_api(kind))

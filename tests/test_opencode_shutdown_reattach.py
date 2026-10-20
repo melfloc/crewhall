@@ -119,7 +119,7 @@ class ShutdownAndReattach(unittest.TestCase):
         ]
         started = []
 
-        def start_server_again(kind, cwd, requested_port, password):
+        def start_server_again(kind, cwd, requested_port, password, identity=None):
             self.assertEqual(requested_port, port)  # the persisted port
             server, _actual = start_server(port)
             self.addCleanup(server.server_close)
