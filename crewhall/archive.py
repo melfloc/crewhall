@@ -38,6 +38,9 @@ def archive_agent(
     teams: list[str],
     conversation_id: str | None,
     messages: list[dict[str, Any]],
+    args: list[str] | None = None,
+    session_config: dict[str, Any] | None = None,
+    launch: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write an archive record for a just-closed agent."""
     record = {
@@ -47,6 +50,9 @@ def archive_agent(
         "cwd": cwd,
         "teams": list(teams),
         "conversation_id": conversation_id,
+        "args": list(args or []),
+        "session_config": dict(session_config or {}),
+        "launch": dict(launch or {}),
         "archived_at": time.time(),
         "summary": _summarize(messages),
         "messages": messages[-_MAX_MESSAGES:],

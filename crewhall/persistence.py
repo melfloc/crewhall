@@ -91,8 +91,18 @@ class StateStore:
                     # OpenCode server link (port/password/api) so a daemon
                     # restart can bring the server back on the same port (A1).
                     "opencode": getattr(controller, "_opencode_links", {}).get(harness.agent_id),
-                    # user-provided env only; identity/secret vars are omitted
-                    "env": dict(controller._base_env.get(harness.agent_id) or {}),
+                    # v2 model/agent actually applied (read back), so a reset
+                    # re-applies what the user chose instead of forgetting it.
+                    "session_config": getattr(
+                        controller, "_v2_config", {}).get(harness.agent_id),
+                    # Explicit launch record (no secrets): command, version,
+                    # user/generated args, effective model/agent, session/server.
+                    "launch": getattr(controller, "_agent_launch", {}).get(harness.agent_id),
+                    # User env only as *keys*: values may be API keys and must
+                    # never be written to state.json.
+                    "env_keys": sorted(
+                        (getattr(controller, "_base_env", {}).get(harness.agent_id) or {})
+                    ),
                 }
             )
         requests = []
