@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "items": [
+    {"message_id": "msg_111111111111", "sender": "sess_111111111111",
+     "recipient": "sess_222222222222", "sender_name": "orquestador",
+     "recipient_name": "ejecutor", "body": "queued hello",
+     "timestamp": 1790000002.0, "expires_at": 1790003602.0}
+  ]
+}

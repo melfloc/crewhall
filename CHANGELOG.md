@@ -7,6 +7,12 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.84.1] — 2026-10-20
+
+- Corregido: `--model opencode-go/<modelo>` podía resolverse al proveedor `opencode` (el id
+  del proveedor es prefijo del otro) y la sesión v2 corría con el proveedor equivocado. Ahora
+  gana el proveedor exacto y solo después el parecido.
+
 ## [0.84.0] — 2026-10-20
 
 **OpenCode v2 — compatibilidad completa (2.0.29, congelada).**
