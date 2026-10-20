@@ -7,6 +7,8 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.84.5] — 2026-10-20
+
 - Nuevo: esfuerzo de razonamiento por defecto en OpenCode 2. El ajuste `providers.opencode.default_variant`
   (por defecto `max`; vacío lo desactiva) sube a esa variante toda sesión que siga en la variante
   por defecto del modelo, siempre que el modelo la ofrezca: al crear o reiniciar el agente, al
