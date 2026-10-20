@@ -348,6 +348,10 @@ class OpenCodeHarness(Harness):
         ``/models``…) still go to the keyboard because they drive the UI. A
         session that does not exist yet (first prompt after ``/new``) also goes
         through the keyboard; the API takes over once ``session.created`` lands.
+
+        A human draft in the composer blocks the API path too: the message is
+        queued (reason ``human draft``) and delivered once the human clears it,
+        exactly as on the keyboard path.
         """
         link = self.link
         uses_api = (
@@ -357,6 +361,12 @@ class OpenCodeHarness(Harness):
             and not prompt.lstrip().startswith("/")
         )
         if uses_api:
+            # A human drafting in the composer is never clobbered and never
+            # raced: if the input holds text, the message waits in the queue
+            # (reason "human draft") until the human clears it. The API path
+            # must apply the same guard as the keyboard path below.
+            if not self.input_is_clean():
+                raise HarnessNotReady(self.agent_id, "input line not clean")
             link.post_json(
                 f"/api/session/{self.conversation_id}/prompt", {"text": prompt},
                 timeout=max(10.0, timeout),
