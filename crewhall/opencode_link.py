@@ -24,10 +24,13 @@ from datetime import datetime, UTC
 from typing import Any
 from collections.abc import Iterator
 
-_SESSION = re.compile(r"^ses_[A-Za-z0-9]+$")
+_SESSION = re.compile(r"^ses_[A-Za-z0-9_-]+$")
 _REQUEST = re.compile(r"^(per|que)_?[A-Za-z0-9]+$")
-# v2 ids are opaque; accept any token without path separators.
-_V2_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+# v2 session ids are opaque tokens, but still ``ses_``-prefixed and path-safe:
+# the same shape the controller accepts (``_CONVERSATION_ID["opencode"]``).
+_V2_ID = _SESSION
+# v2 request ids (permission/form) are a different namespace.
+_V2_REQUEST = re.compile(r"^(per|que|frm)_[A-Za-z0-9_-]+$")
 MAX_TEXT = 20000
 
 
@@ -212,7 +215,7 @@ class OpenCodeLink:
         return json.loads(raw) if raw.strip() else None
 
     def _id_ok(self, request_id: str) -> bool:
-        pattern = _V2_ID if self.api == "v2" else _REQUEST
+        pattern = _V2_REQUEST if self.api == "v2" else _REQUEST
         return bool(pattern.match(request_id or ""))
 
     def running_tools(self, session_id: str, limit: int = 30) -> dict[str, dict[str, Any]]:

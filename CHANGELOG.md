@@ -42,6 +42,9 @@ to run without it and ships these notes with the release.
 - Corregido: prompts largos/multilínea por tmux con `load-buffer -` + `paste-buffer -p`
   por chunks (40 KB verificados) y PTY con bracketed paste; los errores registran
   longitud/hash, nunca el cuerpo del prompt.
+- Corregido: los ids `ses_…` de OpenCode se validan igual en el controller y en el
+  link (`ses_ab-c_1` incluido); los ids de permiso/form v2 mantienen su propio
+  espacio de nombres.
 - Corregido: `COMPLETION_RE` reconoce `ms`, `s`, `m`, `h` y combinaciones (`2m 9s`,
   `1h 2m`), y el estado v2 usa `/api/session/active` + `outcome`/`time.idle` como
   fuente autoritativa (la pantalla queda como fallback).
