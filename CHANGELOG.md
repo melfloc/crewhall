@@ -7,6 +7,8 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.84.2] — 2026-10-20
+
 - Corregido: al parar el daemon, los hilos que siguen los eventos de OpenCode v2 seguían vivos
   mientras se mataba su `serve` y podían publicar avisos falsos ("could not apply the requested
   model/agent", `Connection refused`). Ahora se detienen antes de matar el servidor.
