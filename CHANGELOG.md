@@ -7,6 +7,8 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.84.4] — 2026-10-20
+
 - Corregido: los agentes OpenCode v2 no podían usar `crewhall` desde su shell (`CREWHALL_AGENT_ID`
   unset). En v2 la TUI solo dibuja y las herramientas se ejecutan dentro del `serve` privado de
   cada agente, que se arrancaba sin la identidad. Ahora el `serve` nace con el mismo entorno que

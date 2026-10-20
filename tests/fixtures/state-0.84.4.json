@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "teams": [
+    {"team_id": "team_cccccccccccc", "name": "frente1",
+     "agent_ids": ["sess_111111111111", "sess_222222222222"],
+     "created_at": 1790000000.0, "workspace": "/tmp",
+     "workspace_mode": "shared", "host": null}
+  ],
+  "agents": [
+    {"agent_id": "sess_111111111111", "name": "orquestador", "kind": "claude", "backend": "tmux",
+     "cwd": "/tmp", "cols": 120, "rows": 40, "args": [], "host": null,
+     "conversation_id": null, "env": {}},
+    {"agent_id": "sess_222222222222", "name": "ejecutor", "kind": "opencode", "backend": "tmux",
+     "cwd": "/tmp", "cols": 120, "rows": 40, "args": ["--model", "test-model"],
+     "host": null, "conversation_id": null, "env": {"FOO": "bar"}}
+  ],
+  "requests": [],
+  "terminals": []
+}
