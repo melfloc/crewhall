@@ -7,6 +7,8 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.84.0] — 2026-10-20
+
 **OpenCode v2 — compatibilidad completa (2.0.29, congelada).**
 
 - Validado `2.0.29` y añadidas fixtures de pantalla 120×40 y 80×24 (home, sesiones,
