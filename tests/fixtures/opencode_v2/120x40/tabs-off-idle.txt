@@ -1,0 +1,11 @@
+  ┃  Say only the word: blue
+  ┃
+
+     blue
+
+     Build · MiniMax M3.1 Flash Free · 879ms · 3.5 tok/s
+  ┃
+  ┃
+  ┃  Build · MiniMax M3.1 Flash Free OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ~/work                                                                      7.4K (3%)  ctrl+p commands

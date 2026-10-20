@@ -1,0 +1,7 @@
+              Commands                                         esc
+              Search
+              Suggested
+              Switch session                              ctrl+x l
+              Switch model                                ctrl+x m
+              Connect an integration
+              Open settings

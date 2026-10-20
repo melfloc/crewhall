@@ -1,0 +1,7 @@
+                       ┃  Ask anything… "Fix broken tests"
+                       ┃
+                       ┃  Build · DeepSeek V4.1 Flash OpenCode Go
+                       ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                        ~/work             tab agents  ctrl+p commands
+                               ● Tip Run opencode upgrade to update
+   ~/work                                                       1.18.34

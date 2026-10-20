@@ -1,0 +1,7 @@
+                    Sessions for /tmp/work                                        esc
+
+                    Search
+
+                    Today
+                    eventok
+                    Delayed command completion check

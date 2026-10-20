@@ -394,8 +394,45 @@ def check_office() -> Check:
     return _res("onlyoffice", "ok", f"healthy at {public}")
 
 
+def check_agent_runtime_versions() -> list[Check]:
+    """Warn when a live agent runs a different CLI than the configured binary.
+
+    An adopted (legacy) agent can keep a v1 TUI alive after the configured
+    ``opencode`` moved to v2. Reporting it catches "crewhall says v2 but the TUI
+    shows v1" before a restart silently loses the conversation.
+    """
+    from .client import Client, ping
+
+    try:
+        if not ping():
+            return [_res("runtime versions", "ok", "daemon not running")]
+        agents = Client(autostart=False).call("agent_list").get("agents", [])
+    except Exception as exc:  # noqa: BLE001 - diagnostics must not crash
+        return [_res("runtime versions", "warn", f"unavailable: {exc}")]
+    out: list[Check] = []
+    for agent in agents:
+        if agent.get("kind") != "opencode":
+            continue
+        launch = agent.get("launch") or {}
+        cli = agent.get("cli") or {}
+        running = launch.get("version")
+        configured = cli.get("version")
+        if running and configured and running != configured:
+            out.append(_res(
+                f"runtime:{str(agent.get('name') or agent.get('agent_id'))[:12]}", "warn",
+                f"process {running}, configured {configured}",
+                "The live TUI/service was started by another version. Restart the "
+                "agent to move it onto the configured binary (a v1 conversation is "
+                "not resumable in v2; export it first).",
+            ))
+    if not out:
+        out.append(_res("runtime versions", "ok", "live agents match the configured CLIs"))
+    return out
+
+
 CHECKS: list[Callable[[], Check | list[Check]]] = [
     check_python, check_install, check_tmux, check_agent_clis, check_agent_version_ranges,
+    check_agent_runtime_versions,
     check_command_on_path, check_dirs,
     check_tmpdir, check_hooks, check_daemon, check_workers, check_daemon_log, check_web, check_office, check_security,
     check_agent_configs, check_systemd, check_tailscale,

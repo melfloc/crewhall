@@ -1,0 +1,6 @@
+                    Select agent                                                  esc
+
+                    Search
+
+                    Build
+                    Plan

@@ -1,0 +1,4 @@
+   ⬝⬝■■■■■■ esc interrupt                                                            shift+tab agents  ctrl+p commands
+     ⚙ bash
+     $ sleep 30
+     running…
