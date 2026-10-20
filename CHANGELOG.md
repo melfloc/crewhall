@@ -7,6 +7,55 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+**OpenCode v2 — compatibilidad completa (2.0.29, congelada).**
+
+- Validado `2.0.29` y añadidas fixtures de pantalla 120×40 y 80×24 (home, sesiones,
+  turnos en `s`/`m`, tools, pickers, palette, shell, permiso, form y v1) con un test
+  parametrizado de `_detect`. `doctor` avisa si un agente vivo corre otra versión
+  que el binario configurado.
+- Corregido: una tab en segundo plano ya no roba la conversación. Solo se adopta una
+  sesión por `session.created`/`session.viewed`/`session.forked`; `session.deleted`,
+  `moved`, `renamed` y `agent|model.selected` actualizan el estado con aviso.
+- Corregido: cada agente v2 fuerza `tabs.mode=off` por entorno (fusión, no reemplazo)
+  y el aislamiento ya no copia `prompt-history.jsonl`/`frecency.jsonl`; también se
+  aplica si el `serve` privado falla.
+- Corregido: con link v2 los mensajes se entregan con `POST /api/session/{id}/prompt`
+  en vez de teclearse en la tab activa; `/new`, pickers y el fallback sin link siguen
+  usando teclado. Ya no se pierde texto con `/sessions`, palette o shell mode abiertos:
+  no se envía ESC en permiso/form (la cola reintenta).
+- Corregido: `--session/-s` se valida y fija `conversation_id` antes de lanzar;
+  `--continue/-c` se resuelve a la sesión más reciente del cwd. Una sesión inexistente
+  ya no se abre vacía: sesión nueva + aviso.
+- Corregido: el descarte/traducción de flags v1 depende de la API v2, no de que exista
+  link. Se descartan `--model/-m`, `--agent`, `--session-id`, `--resume/-r`, `--port`,
+  `--hostname`, `--variant` y flags desconocidos con notice.
+- Corregido: si el `serve` privado no arranca, el agente se lanza en `--standalone`
+  con aviso visible, nunca contra el servicio gestionado del usuario. Al reconectar
+  tras un reinicio se adopta el `serve` huérfano vivo (probando `/api/info`) en vez de
+  fallar al reocupar el puerto.
+- Corregido: prompts largos/multilínea por tmux con `load-buffer -` + `paste-buffer -p`
+  por chunks (40 KB verificados) y PTY con bracketed paste; los errores registran
+  longitud/hash, nunca el cuerpo del prompt.
+- Corregido: `COMPLETION_RE` reconoce `ms`, `s`, `m`, `h` y combinaciones (`2m 9s`,
+  `1h 2m`), y el estado v2 usa `/api/session/active` + `outcome`/`time.idle` como
+  fuente autoritativa (la pantalla queda como fallback).
+- Corregido: `detect_api` solo degrada a v1 con un 404 real de `/api/info`; 401/5xx y
+  timeouts se reintentan y un link v2 explícito no se re-detecta.
+- Añadido: permisos v2 con `{decision}`, forms con `fields` → preguntas neutrales y
+  `{answer: {campo: valor}}`, `sessionID` en el ref (subagentes) y read-back de
+  modelo/agente tras el POST (v2 responde 204 incluso con valores inválidos).
+  `_v2_model_ref` acepta `#variant`, display names y alias.
+- Añadido: `launch` record y `session_config` en `state.json`, args/`session_config`
+  en el archive, env persistido solo como claves, limpieza de `opencode-state/<id>`,
+  scrub de `OPENCODE_*`/`AI_AGENT`/`AGENT`, revive no forzado de Claude/Codex con
+  `conversation_id`, backfill/`legacy` de agentes v1 y bloqueo de v1+v2 concurrentes.
+- Actividad y procesos v2: `message`/`content[]`/`state.content`, filtro y ventana
+  correctos, raíz del árbol en el `serve` (incluido el adoptado) y resync tras
+  reconectar el SSE.
+- Limitaciones conocidas: `2.0.32` no está validada. Un agente v1 adoptado cuyo
+  servidor ya no responde queda `legacy`/screen-only hasta reiniciarlo. La TUI v2 no
+  tiene `/agent`; crewhall aplica agente/modelo por API.
+
 ## [0.83.4] — 2026-10-16
 
 - Corregido: con OpenCode 2 cada reinicio acumulaba pestañas en el TUI. El TUI guarda las

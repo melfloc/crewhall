@@ -236,8 +236,9 @@ Comprobado una vez con el comando de rollback sobre un `settings.json` aislado
 ### OpenCode v2 — diferencias con el adaptador v1
 
 OpenCode 2 es un cambio de ruptura profundo; el rango validado de `opencode`
-(`>=1.0.0, <2.0.0`) hace que el gate lo **bloquee** hasta migrar el adaptador.
-Diferencias a cubrir al portar (verificado contra `https://opencode.ai/v2/openapi.json`):
+es `>=1.0.0, <3.0.0`, con `2.0.29` congelada como versión v2 de referencia (no se
+valida `2.0.32`). Diferencias cubiertas por el adaptador (verificado contra la
+API real y las capturas de `tests/fixtures/opencode_v2/`):
 
 | crewhall (v1) | OpenCode v2 |
 |---|---|
@@ -246,60 +247,111 @@ Diferencias a cubrir al portar (verificado contra `https://opencode.ai/v2/openap
 | `GET /session/{id}/message` | `GET /api/session/{sessionID}/message` — cursor, *projected messages* (`Session.Message.*`) |
 | `POST /session/{id}/abort` | `POST /api/session/{sessionID}/interrupt` |
 | `GET /permission` (global) | `GET /api/permission/request` o por sesión `GET /api/session/{sessionID}/permission` |
-| `POST /permission/{id}/reply` | `POST /api/session/{sessionID}/permission/{requestID}/reply`, `{reply: once\|always\|reject, message?}` |
-| `GET /question` + `reply`/`reject` | *forms*: `GET /api/form`, `POST /api/session/{sessionID}/form/{formID}/reply` |
+| `POST /permission/{id}/reply` | `POST /api/session/{sessionID}/permission/{requestID}/reply`, `{decision: once\|always\|reject, message?}` |
+| `GET /question` + `reply`/`reject` | *forms*: `GET /api/form`, `POST /api/session/{sessionID}/form/{formID}/reply`, `{answer: {campo: valor}}`; `DELETE` cancela |
 | `GET /provider` | `GET /api/provider` → `{data: Provider.Info[]}` |
-| `GET /event` (SSE) | `GET /api/event` (tipos de evento codificados; por verificar) |
-| CLI `opencode --port` + `OPENCODE_SERVER_PASSWORD` | **eliminado**: v2 usa un servicio de fondo compartido (`--standalone` / `--server <url>`) |
+| `GET /event` (SSE) | `GET /api/event` (`{id, type, location, data}`) |
+| CLI `opencode --port` + `OPENCODE_SERVER_PASSWORD` | **eliminado**: v2 usa `serve` privado por agente o `--standalone`/`--server` |
 | campo de config `server` | ignorado en v2; `provider/agent/command/mcp` → `providers/agents/commands/mcp.servers` |
-| id de sesión `^ses_[A-Za-z0-9]+$` | patrón `^ses` (revisar `_SESSION` y `_CONVERSATION_ID`) |
+| id de sesión `^ses_[A-Za-z0-9]+$` | `^ses_[A-Za-z0-9_-]+$` (v2 admite `-`/`_`) |
 
 **Estado: implementado (v2 primario, v1 legacy).** Un solo `kind` `opencode`; el
 contrato del servidor se detecta en caliente (`OpenCodeLink.detect_api` sondea
-`/api/info`) y `VALIDATED["opencode"]` es `>=1.0.0, <3.0.0` con capturas `1.18.34` y
-`2.0.28`. Ambos pasan `crewhall watch smoke --require` (6/6) y
-`scripts/control_check.py` (5/5).
+`/api/info`). Solo un **404 real** de `/api/info` significa v1: un 401, un 5xx o
+un timeout se reintentan (antes se degradaba un link v2 a v1 y desaparecían
+historial/estado/procesos). Un link creado con `api="v2"` nunca se re-detecta.
 
-- **Lanzamiento.** v2 no acepta `--port` en la TUI ni `OPENCODE_SERVER_PASSWORD`
-  en `--standalone` (probado: `--standalone` genera una contraseña que no imprime).
-  Por eso crewhall arranca un `opencode serve --port N --hostname 127.0.0.1` **por
-  agente**, en el cwd del agente (para que su *location* coincida), con la contraseña
-  en el entorno (nunca en argv), espera `/api/info` y lanza la TUI con
-  `--server http://127.0.0.1:N` (la TUI también recibe la contraseña por entorno, o
-  sale al no poder autenticar). v1 sigue con `--port N` dentro de la TUI. El proceso
-  `serve` se rastrea por agente y se mata en `remove_agent`, `restart`/`force_restart`
-  (se reutiliza) y `shutdown`; no queda huérfano al matar el agente.
-- **Reinicio del daemon (A1).** El puerto/contraseña/api se persisten por agente; al
-  adoptar la TUI tmux superviviente, crewhall relanza `serve` en el **mismo** puerto
-  y la TUI reconecta.
-- **Eventos v2** (`{id, type, location, data}`): `session.created` (adoptar),
-  `session.execution.started` → `prompt_submit` y `session.execution.
-  succeeded|failed|interrupted` → `stop`; `permission.asked|replied|rejected` y
-  `form.created|replied|cancelled`. v1 sigue con `session.status`/`session.idle`.
+- **Pestañas.** Cada agente v2 recibe `OPENCODE_CLI_CONFIG_CONTENT` con
+  `tabs.mode=off` (fusión profunda sobre `cli.json`, no reemplazo) y un
+  `XDG_STATE_HOME` privado. No se copian `prompt-history.jsonl` ni
+  `frecency.jsonl` (eran prompts de otros proyectos del usuario) y el
+  aislamiento se aplica aunque el `serve` falle.
+- **Lanzamiento.** v2 no acepta `--port` en la TUI. crewhall arranca un
+  `opencode serve --port N --hostname 127.0.0.1` **por agente**, en el cwd del
+  agente, con la contraseña en el entorno (nunca en argv), espera `/api/info` y
+  lanza la TUI con `--server http://127.0.0.1:N`. v1 sigue con `--port N` dentro
+  de la TUI. El gate de flags depende de `_opencode_api(kind)`, no de que exista
+  link: `--model/-m`, `--agent`, `--session-id`, `--resume/-r`, `--port`,
+  `--hostname`, `--variant` y flags desconocidos se descartan (con notice) en
+  argv v2. Si el `serve` privado no arranca, el agente se lanza con
+  `--standalone` y un aviso visible: **nunca** cae al servicio gestionado del
+  usuario en silencio. Un `--server`/`--port` del usuario se marca
+  “screen-only” con aviso.
+- **Sesiones.** `--session/-s` se valida con `GET /api/session/{id}` y fija
+  `conversation_id` antes de lanzar; si no existe se abre una sesión nueva con
+  `_record_v2_unresumable`. `--continue/-c` se resuelve a la sesión más reciente
+  del cwd (`GET /api/session?directory=…&order=desc&limit=1`) y se reescribe a
+  `--session`. La vista Conversation muestra el historial desde el primer momento.
+- **Foco.** `session.execution.*` de una pestaña de fondo **no** cambia
+  `conversation_id`; se adopta por `session.created` (sin `parentID`),
+  `session.viewed` y `session.forked`. `session.deleted` limpia la conversación
+  con aviso; `session.moved|renamed` actualizan cwd/título; `session.agent|model.
+  selected` actualizan `session_config`. `history()` no retira una conversación
+  v2 solo por ver la pantalla de inicio.
+- **Entrega.** Con link v2, `send` hace `POST /api/session/{id}/prompt` (nunca
+  teclea en la pestaña activa); el teclado queda para `/new`, pickers y fallback
+  sin link. Un picker abierto ya no se traga el texto y no se envía ESC en
+  permiso/form/shell mode: se lanza `HarnessNotReady` y la cola reintenta.
+- **Reinicio del daemon (A1).** El puerto/contraseña/api se persisten por agente;
+  al adoptar una TUI tmux superviviente se prueba `GET /api/info` y se **adopta**
+  el `serve` huérfano (su pid es la raíz del árbol); solo si no responde se
+  arranca uno nuevo. Un fallo de reattach genera aviso, nunca link nulo silencioso.
+- **Eventos v2** (`{id, type, location, data}`): `session.created`,
+  `session.viewed`, `session.execution.started` → `prompt_submit` y
+  `session.execution.succeeded|failed|interrupted` → `stop`;
+  `permission.asked|replied|rejected`, `form.created|replied|cancelled`,
+  `session.agent|model.selected`, `session.deleted|forked|moved|renamed`. Al
+  reconectar el SSE se resincronizan `active`, la sesión y las interacciones.
+- **Estado.** Fuente autoritativa: `GET /api/session/active` (working) y
+  `outcome`/`time.idle` posteriores al último envío (waiting); la pantalla es el
+  fallback. `activity.opencode_snapshot` lee `/api/session/{id}/message`,
+  `data[].content[]`, `item.model` y `state.status/input/content`.
 - **Procesos.** En v2 las herramientas corren en el proceso `serve`, no en la TUI:
-  el escaneo de procesos y el reconocimiento de descendientes usan el pid del
-  `serve` (v1 usa la TUI).
-- **Modelos** (`/api/model` en v2) y **permisos** `once|always|reject` (iguales en
-  ambos).
-- **Pantalla.** La TUI v2 es casi idéntica; la línea de fin de turno usa `ms` en
-  turnos rápidos, así que `COMPLETION_RE` acepta `m?s`; fixtures `*-v2.txt` con sus
-  tests de `_detect`.
-- **Flags v1-only.** La TUI v2 **rechaza** `--model`/`--agent` (y cualquier flag
-  desconocido) y sale; crewhall los omite del argv v2 y **los aplica por la API**:
-  al arrancar crea la sesión con `POST /api/session` y fija el modelo/agente con
-  `POST /api/session/{id}/model` y `/agent` (en restart, sobre la sesión
-  reanudada). Si no puede, arranca igual pero avisa (notice + `session_config` en
-  `agent_summary`/`agent status`). Cualquier otro flag descartado también se
-  reporta; nunca se ignora en silencio.
+  `_agent_root`, el escaneo y `signal` usan el pid del `serve` (incluido el
+  adoptado). `running_tools`/`process_output` extraen el texto de `state.content`
+  y usan una ventana mayor que 6.
+- **Permisos y forms.** Permiso: `{decision: once|always|reject, message?}`;
+  título/detalle desde `action`, `resources`, `save`, `source`. Form:
+  `fields` → preguntas neutrales (`key`, `title`, `type`, `options`,
+  `required`); respuesta `{answer: {fieldKey: valor}}` (multiselect = lista) y
+  `DELETE` para cancelar. El ref guarda el `sessionID` del request (subagente u
+  otra pestaña usan su propia URL).
+- **Read-back.** `--agent`/`--model` se validan contra `/api/agent` y `/api/model`
+  y, tras el POST, se relee `GET /api/session/{id}`: v2 responde 204 incluso con
+  valores inválidos, así que solo un valor que coincide se marca `applied`; si no,
+  notice y `ignored_flags`. `_v2_model_ref` acepta `#variant`, display names y
+  alias de provider.
+- **Persistencia.** `state.json` guarda un `launch` record (comando, versión,
+  args de usuario/generados, modelo/agente, sesión, server) y `session_config`
+  (sin secretos), y el env solo como `env_keys`. `archive` incluye args,
+  `session_config` y `launch`. Un revive no forzado de Claude/Codex reanuda
+  `conversation_id`. Los agentes v1 adoptados se rellenan leyendo
+  `/proc/<pid>/cmdline|environ` o se marcan `legacy` con aviso; se bloquea crear
+  v2 mientras haya un v1 vivo sobre la misma DB. `opencode-state/<id>` se borra
+  al eliminar el agente y se limpian `OPENCODE_*`, `AI_AGENT` y `AGENT` heredados.
+- **Prompt largo.** tmux usa `load-buffer -` por stdin + `paste-buffer -p` con
+  chunking para prompts largos/multilínea (40 KB verificados); el texto corto de
+  una línea conserva `send-keys -l` porque la TUI v2 ignora el evento de paste de
+  tmux. PTY envuelve la escritura en bracketed paste. Un fallo se reporta como
+  longitud/hash, nunca con el cuerpo del prompt.
+- **Fin de turno/pantalla.** `COMPLETION_RE` acepta `ms`, `s`, `m`, `h` y
+  combinaciones (`2m 9s`, `1h 2m`). Overlays v2 detectados (`Sessions for…`,
+  `Commands`, shell mode, `Permission required`, `Need input`); ESC solo para
+  palette/sessions/models/agents/variants/themes. Hay fixtures de 120×40 y 80×24
+  en `tests/fixtures/opencode_v2/` con un test parametrizado de `_detect`.
 
-**Datos reales de v2 (aislado, 2.0.28).** `opencode serve --port N` imprime
+**Limitaciones conocidas.** `2.0.32` no está validada (no actualizar sin
+recapturar fixtures). Un agente legacy cuyo `serve` ya no responde queda
+screen-only y sin historial hasta reiniciarlo. La UI del TUI sigue sin exponer
+`/agent` (v2 usa el picker `/agents`; crewhall aplica el agente por API).
+
+**Datos reales de v2 (aislado, 2.0.29).** `opencode serve --port N` imprime
 `server password <pw>` si no se le da `OPENCODE_SERVER_PASSWORD` (y **respeta** esa
 variable de entorno), y usa auth Basic `opencode:<pw>` como v1. `--standalone`
 arranca un servidor privado en un puerto **aleatorio**. La pantalla de la TUI es
 casi idéntica a v1 (`Ask anything…`, `┃`/`╹▀▀▀`, `ctrl+p commands`, `esc interrupt`,
-`Build · <model>`); la diferencia de scraping es que la línea de fin de turno usa
-`ms` para turnos rápidos (`Build · Cat Jam Free · 654ms · 40.5 tok/s`) y el pie de
-turno muestra `7.4K (3%)` (sin `· $cost` en modelos gratuitos).
+`Build · <model>`); la diferencia de scraping es la línea de fin de turno
+(`ms`/`2m 9s`) y el pie de turno (`7.4K (3%)`, sin `· $cost` en modelos gratuitos).
 
 ### Texto fantasma (placeholder/sugerencia) y borradores humanos
 
