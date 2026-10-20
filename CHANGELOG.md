@@ -7,6 +7,11 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- Corregido: crear un agente OpenCode v2 con `--agent <nombre>` fallaba con "agent is not available
+  on this server" aunque el agente existiera. Un `serve` recién arrancado responde `/api/info` antes
+  de cargar los agentes del usuario (aparecen ~1-2 s después), y crewhall validaba justo ahí. Ahora
+  reintenta hasta 5 s antes de dar el agente por inexistente.
+
 ## [0.84.2] — 2026-10-20
 
 - Corregido: al parar el daemon, los hilos que siguen los eventos de OpenCode v2 seguían vivos

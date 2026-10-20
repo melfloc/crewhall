@@ -858,15 +858,26 @@ class ServicesAgents:
         agent = self._flag_value(extra_args, ("--agent",))
         return (str(model) if model else None, agent)
 
-    def _v2_agent_exists(self, link: Any, agent: str) -> bool:
-        try:
-            raw = link.get_json("/api/agent", timeout=3.0)
-        except Exception:  # noqa: BLE001 - unreachable: let the read-back decide
-            return True
-        data = raw.get("data") if isinstance(raw, dict) else raw
-        if not isinstance(data, list):
-            return True
-        return any(isinstance(a, dict) and a.get("id") == agent for a in data)
+    _V2_AGENT_WAIT = 5.0
+
+    def _v2_agent_exists(self, link: Any, agent: str, wait: float | None = None) -> bool:
+        """Is ``agent`` on the server? A fresh ``serve`` answers ``/api/info`` before
+        it has loaded the user's agents (they show up ~1-2 s later), so a miss is
+        retried for ``wait`` seconds before the agent is declared missing."""
+        deadline = time.monotonic() + (self._V2_AGENT_WAIT if wait is None else wait)
+        while True:
+            try:
+                raw = link.get_json("/api/agent", timeout=3.0)
+            except Exception:  # noqa: BLE001 - unreachable: let the read-back decide
+                return True
+            data = raw.get("data") if isinstance(raw, dict) else raw
+            if not isinstance(data, list):
+                return True
+            if any(isinstance(a, dict) and a.get("id") == agent for a in data):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.5)
 
     @staticmethod
     def _v2_session_value(link: Any, session_id: str, key: str) -> Any:

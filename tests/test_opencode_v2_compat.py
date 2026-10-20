@@ -52,6 +52,7 @@ class ServerCase(unittest.TestCase):
             "location": {"directory": "/tmp/work"},
         }
         self.controller = Controller(adopt=False)
+        self.controller._V2_AGENT_WAIT = 0.0  # a missing agent fails fast in tests
         self.link = OpenCodeLink(self.port, PASSWORD, api="v2")
         notices.clear()
         self.addCleanup(notices.clear)
@@ -272,6 +273,29 @@ class Interactions(ServerCase):
         self.assertFalse(report["agent_applied"])
         self.assertIn("--agent", report["ignored_flags"])
         self.assertTrue(any("could not apply" in n["title"] for n in notices.pending()))
+
+    def test_agent_that_the_server_loads_late_is_still_applied(self):
+        # A freshly started `serve` answers /api/info before it has loaded the
+        # user's agents: the first /api/agent lists only the built-ins.
+        late = {"id": "ejecutor", "name": "ejecutor", "mode": "all"}
+        calls = []
+        original = type(self.link).get_json
+
+        def get_json(link, path, *a, **kw):
+            if path == "/api/agent":
+                calls.append(path)
+                if len(calls) < 3:
+                    return {"data": [x for x in FakeOpenCodeV2.agents if x["id"] != "ejecutor"]}
+            return original(link, path, *a, **kw)
+
+        FakeOpenCodeV2.agents = [*FakeOpenCodeV2.agents, late]
+        self.controller._V2_AGENT_WAIT = 5.0
+        with mock.patch.object(type(self.link), "get_json", get_json), \
+                mock.patch("crewhall.services.agents.time.sleep"):
+            report = self.controller._configure_v2_session(
+                "a1", "opencode", self.link, ["--agent", "ejecutor"], session_id=SID)
+        self.assertTrue(report["agent_applied"], report)
+        self.assertGreaterEqual(len(calls), 3)
 
     def test_unknown_model_is_not_reported_as_applied(self):
         FakeOpenCodeV2.models = [{"id": "real", "modelID": "real", "providerID": "p"}]
