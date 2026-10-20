@@ -1,0 +1,570 @@
+F..F/usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 401: 'Unauthorized'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+F/usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 404: 'Not Found'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+.EFF.FEF.FEEFE.FFEFFFEEFFFFFFFEFE/usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 400: 'Bad Request'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+FFFFEEEFE/tmp/ocv2-head/tests/test_opencode_v2_compat.py:454: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmp_mqexo4o/real/opencode/latest/tui/prompt-history.jsonl' mode='w' encoding='UTF-8'>
+  open(os.path.join(real, "prompt-history.jsonl"), "w").write('{"prompt":"secret"}\n')
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/tmp/ocv2-head/tests/test_opencode_v2_compat.py:455: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmp_mqexo4o/real/opencode/latest/tui/frecency.jsonl' mode='w' encoding='UTF-8'>
+  open(os.path.join(real, "frecency.jsonl"), "w").write("secret")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/tmp/ocv2-head/tests/test_opencode_v2_compat.py:456: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/tmp_mqexo4o/real/opencode/kv.json' mode='w' encoding='UTF-8'>
+  open(os.path.join(tmp, "real", "opencode", "kv.json"), "w").write('{"a":1}')
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+EFFFEEFEEF
+======================================================================
+ERROR: test_explicit_v2_link_is_not_redetected (tests.test_opencode_v2_contract.DetectApi.test_explicit_v2_link_is_not_redetected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 253, in test_explicit_v2_link_is_not_redetected
+    self.assertTrue(link.api_detected)
+                    ^^^^^^^^^^^^^^^^^
+AttributeError: 'OpenCodeLink' object has no attribute 'api_detected'
+
+======================================================================
+ERROR: test_overlays_are_named (tests.test_opencode_v2_contract.FixtureDetection.test_overlays_are_named)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 72, in test_overlays_are_named
+    self.assertEqual(harness.overlay(fixture("120x40", name)), want, name)
+                     ^^^^^^^^^^^^^^^
+AttributeError: 'OpenCodeHarness' object has no attribute 'overlay'
+
+======================================================================
+ERROR: test_keyboard_fallback_closes_a_safe_picker_then_retries (tests.test_opencode_v2_contract.SafeInput.test_keyboard_fallback_closes_a_safe_picker_then_retries)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 184, in test_keyboard_fallback_closes_a_safe_picker_then_retries
+    self.harness.send("hola")
+    ~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/tmp/ocv2-head/crewhall/harness/opencode.py", line 279, in send
+    super().send(prompt, timeout=timeout)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/ocv2-head/crewhall/harness/base.py", line 336, in send
+    raise HarnessError(
+        self.agent_id, f"cannot send while state={state.value}"
+    )
+crewhall.harness.base.HarnessError: agent sess_fake0024: cannot send while state=starting
+
+======================================================================
+ERROR: test_never_escapes_out_of_a_permission_or_form (tests.test_opencode_v2_contract.SafeInput.test_never_escapes_out_of_a_permission_or_form)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 194, in test_never_escapes_out_of_a_permission_or_form
+    self.harness.send("hola")
+    ~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/tmp/ocv2-head/crewhall/harness/opencode.py", line 279, in send
+    super().send(prompt, timeout=timeout)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/ocv2-head/crewhall/harness/base.py", line 336, in send
+    raise HarnessError(
+        self.agent_id, f"cannot send while state={state.value}"
+    )
+crewhall.harness.base.HarnessError: agent sess_fake0025: cannot send while state=starting
+
+======================================================================
+ERROR: test_send_works_with_a_picker_open (tests.test_opencode_v2_contract.SafeInput.test_send_works_with_a_picker_open)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 174, in test_send_works_with_a_picker_open
+    self.harness.send("MESSAGE_FOR_AGENT")
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/ocv2-head/crewhall/harness/opencode.py", line 279, in send
+    super().send(prompt, timeout=timeout)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/ocv2-head/crewhall/harness/base.py", line 336, in send
+    raise HarnessError(
+        self.agent_id, f"cannot send while state={state.value}"
+    )
+crewhall.harness.base.HarnessError: agent sess_fake0027: cannot send while state=starting
+
+======================================================================
+ERROR: test_snapshot_reads_v2_messages (tests.test_opencode_v2_compat.ActivityV2.test_snapshot_reads_v2_messages)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 314, in test_snapshot_reads_v2_messages
+    self.assertEqual(snap["model"], "m")
+                     ~~~~^^^^^^^^^
+KeyError: 'model'
+
+======================================================================
+ERROR: test_tabs_helper_merges_instead_of_replacing_the_user_config (tests.test_opencode_v2_compat.CreateAgentSession.test_tabs_helper_merges_instead_of_replacing_the_user_config)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 404, in test_tabs_helper_merges_instead_of_replacing_the_user_config
+    merged = self.controller._v2_tabs_off_content('{"tabs":{"scope":"cwd"}}')
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Controller' object has no attribute '_v2_tabs_off_content'
+
+======================================================================
+ERROR: test_doctor_warns_when_the_live_runtime_differs (tests.test_opencode_v2_compat.DoctorAndVersions.test_doctor_warns_when_the_live_runtime_differs)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 537, in test_doctor_warns_when_the_live_runtime_differs
+    checks = doctor.check_agent_runtime_versions()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'crewhall.doctor' has no attribute 'check_agent_runtime_versions'
+
+======================================================================
+ERROR: test_form_created_is_visible_and_answered_by_field_key (tests.test_opencode_v2_compat.Interactions.test_form_created_is_visible_and_answered_by_field_key)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 263, in test_form_created_is_visible_and_answered_by_field_key
+    item = self.controller.interactions.pending(h.agent_id)[0]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+IndexError: list index out of range
+
+======================================================================
+ERROR: test_permission_reply_uses_decision_and_the_request_session (tests.test_opencode_v2_compat.Interactions.test_permission_reply_uses_decision_and_the_request_session)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/crewhall/services/chat_bridge.py", line 120, in respond_interaction
+    link.reply_permission(rid, clean["reply"], clean.get("message"), session_id=sid)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/ocv2-head/crewhall/opencode_link.py", line 285, in reply_permission
+    self.post_json(f"/api/session/{session_id}/permission/{request_id}/reply", body)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/ocv2-head/crewhall/opencode_link.py", line 206, in post_json
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 493, in open
+    response = meth(req, response)
+  File "/usr/lib/python3.14/urllib/request.py", line 602, in http_response
+    response = self.parent.error(
+        'http', request, response, code, msg, hdrs)
+  File "/usr/lib/python3.14/urllib/request.py", line 531, in error
+    return self._call_chain(*args)
+           ~~~~~~~~~~~~~~~~^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 611, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 400: Bad Request
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 249, in test_permission_reply_uses_decision_and_the_request_session
+    self.controller.respond_interaction(item.interaction_id, {"reply": "once"})
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/ocv2-head/crewhall/services/chat_bridge.py", line 128, in respond_interaction
+    raise ix.InteractionError(f"the agent did not accept the answer: {exc}") from exc
+crewhall.interactions.InteractionError: the agent did not accept the answer: HTTP Error 400: Bad Request
+
+======================================================================
+ERROR: test_v2_refuses_to_share_the_db_with_a_live_v1 (tests.test_opencode_v2_compat.MixedVersions.test_v2_refuses_to_share_the_db_with_a_live_v1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 520, in test_v2_refuses_to_share_the_db_with_a_live_v1
+    controller._assert_no_mixed_opencode_db("opencode")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Controller' object has no attribute '_assert_no_mixed_opencode_db'
+
+======================================================================
+ERROR: test_archive_includes_args_and_session_config (tests.test_opencode_v2_compat.Persistence.test_archive_includes_args_and_session_config)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 436, in test_archive_includes_args_and_session_config
+    self.assertEqual(record["args"], ["--agent", "build"])
+                     ~~~~~~^^^^^^^^
+KeyError: 'args'
+
+======================================================================
+ERROR: test_env_scrubs_inherited_opencode_and_agent_markers (tests.test_opencode_v2_compat.Persistence.test_env_scrubs_inherited_opencode_and_agent_markers)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 444, in test_env_scrubs_inherited_opencode_and_agent_markers
+    self.assertEqual(env["OPENCODE_SESSION_ID"], "")
+                     ~~~^^^^^^^^^^^^^^^^^^^^^^^
+KeyError: 'OPENCODE_SESSION_ID'
+
+======================================================================
+ERROR: test_state_snapshot_stores_launch_session_config_and_env_keys_only (tests.test_opencode_v2_compat.Persistence.test_state_snapshot_stores_launch_session_config_and_env_keys_only)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 413, in test_state_snapshot_stores_launch_session_config_and_env_keys_only
+    self.controller._agent_launch[h.agent_id] = {
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Controller' object has no attribute '_agent_launch'
+
+======================================================================
+ERROR: test_tabs_off_merges_and_prompt_history_is_not_copied (tests.test_opencode_v2_compat.Persistence.test_tabs_off_merges_and_prompt_history_is_not_copied)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 461, in test_tabs_off_merges_and_prompt_history_is_not_copied
+    self.controller._isolate_opencode_tabs(env, "a1", self.link, api="v2")
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: ServicesAgents._isolate_opencode_tabs() got an unexpected keyword argument 'api'
+
+======================================================================
+ERROR: test_failed_serve_never_falls_back_to_the_managed_service (tests.test_opencode_v2_compat.ServeHandling.test_failed_serve_never_falls_back_to_the_managed_service)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 199, in test_failed_serve_never_falls_back_to_the_managed_service
+    args = self.controller._v2_serve_fallback(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Controller' object has no attribute '_v2_serve_fallback'
+
+======================================================================
+ERROR: test_continue_resolves_the_newest_session_of_the_cwd (tests.test_opencode_v2_compat.SessionFlags.test_continue_resolves_the_newest_session_of_the_cwd)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 155, in test_continue_resolves_the_newest_session_of_the_cwd
+    sid, cleaned, _missing = self.controller._resolve_v2_session(
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Controller' object has no attribute '_resolve_v2_session'
+
+======================================================================
+ERROR: test_missing_session_is_not_opened_empty (tests.test_opencode_v2_compat.SessionFlags.test_missing_session_is_not_opened_empty)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 144, in test_missing_session_is_not_opened_empty
+    sid, _cleaned, missing = self.controller._resolve_v2_session(
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Controller' object has no attribute '_resolve_v2_session'
+
+======================================================================
+ERROR: test_session_flag_is_validated_and_adopted (tests.test_opencode_v2_compat.SessionFlags.test_session_flag_is_validated_and_adopted)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 137, in test_session_flag_is_validated_and_adopted
+    sid, cleaned, missing = self.controller._resolve_v2_session(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Controller' object has no attribute '_resolve_v2_session'
+
+======================================================================
+FAIL: test_active_session_is_working_without_screen_evidence (tests.test_opencode_v2_contract.AuthoritativeState.test_active_session_is_working_without_screen_evidence)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 222, in test_active_session_is_working_without_screen_evidence
+    self.assertEqual(self.harness.state(), AgentState.WORKING)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: <AgentState.WAITING_INPUT: 'waiting_input'> != <AgentState.WORKING: 'working'>
+
+======================================================================
+FAIL: test_ms_seconds_minutes_hours_and_combinations (tests.test_opencode_v2_contract.CompletionRegex.test_ms_seconds_minutes_hours_and_combinations)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 138, in test_ms_seconds_minutes_hours_and_combinations
+    self.assertEqual(bool(COMPLETION_RE.search(line)), matches, line)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False != True : · 2m 9s
+
+======================================================================
+FAIL: test_401_and_5xx_are_retried_not_downgraded (tests.test_opencode_v2_contract.DetectApi.test_401_and_5xx_are_retried_not_downgraded)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 248, in test_401_and_5xx_are_retried_not_downgraded
+    with self.assertRaises(urllib.error.HTTPError, msg=status):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: HTTPError not raised : 401
+
+======================================================================
+FAIL: test_dialog_titles_and_safe_close_cover_the_v2_overlays (tests.test_opencode_v2_contract.FixtureDetection.test_dialog_titles_and_safe_close_cover_the_v2_overlays)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 92, in test_dialog_titles_and_safe_close_cover_the_v2_overlays
+    self.assertTrue(any(title in t for t in Harness._DIALOG_TITLES), title)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : sessions for
+
+======================================================================
+FAIL: test_every_fixture_detects_its_expected_state (tests.test_opencode_v2_contract.FixtureDetection.test_every_fixture_detects_its_expected_state)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 67, in test_every_fixture_detects_its_expected_state
+    self.assertEqual(state.value, want, f"{size}/{name}: {evidence}")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'starting' != 'waiting_input'
+- starting
++ waiting_input
+ : 120x40/sessions-picker: opencode TUI not mounted yet
+
+======================================================================
+FAIL: test_input_line_ignores_overlays_and_shell_mode (tests.test_opencode_v2_contract.FixtureDetection.test_input_line_ignores_overlays_and_shell_mode)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 116, in test_input_line_ignores_overlays_and_shell_mode
+    self.assertEqual(harness.input_line(), "", name)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'Run a command… "pwd"' != ''
+- Run a command… "pwd"
+ : shell-mode
+
+======================================================================
+FAIL: test_permission_and_form_are_asks_not_starting (tests.test_opencode_v2_contract.FixtureDetection.test_permission_and_form_are_asks_not_starting)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 78, in test_permission_and_form_are_asks_not_starting
+    self.assertNotEqual(state, AgentState.STARTING, name)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: <AgentState.STARTING: 'starting'> == <AgentState.STARTING: 'starting'> : permission
+
+======================================================================
+FAIL: test_transcript_strips_the_v2_tab_bar (tests.test_opencode_v2_contract.FixtureDetection.test_transcript_strips_the_v2_tab_bar)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 122, in test_transcript_strips_the_v2_tab_bar
+    self.assertNotIn("Other session", transcript)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'Other session' unexpectedly found in '   Blue   Other session                  +\n\n  ┃  Say only the word: blue\n  ┃\n\n     blue\n\n     Build · MiniMax M3.1 Flash Free · 879ms · 3.5 tok/s'
+
+======================================================================
+FAIL: test_send_uses_the_api_not_the_active_tab (tests.test_opencode_v2_contract.SafeInput.test_send_uses_the_api_not_the_active_tab)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_contract.py", line 167, in test_send_uses_the_api_not_the_active_tab
+    self.assertEqual(self.harness.session.writes, [])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['hola desde crewhall'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'hola desde crewhall'
+
+- ['hola desde crewhall']
++ []
+
+======================================================================
+FAIL: test_agent_status_label_uses_the_v2_tool (tests.test_opencode_v2_compat.ActivityV2.test_agent_status_label_uses_the_v2_tool)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 330, in test_agent_status_label_uses_the_v2_tool
+    self.assertEqual(summary["activity"]["kind"], "shell")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'thinking' != 'shell'
+- thinking
++ shell
+
+
+======================================================================
+FAIL: test_running_tools_and_process_output_read_state_content (tests.test_opencode_v2_compat.ActivityV2.test_running_tools_and_process_output_read_state_content)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 320, in test_running_tools_and_process_output_read_state_content
+    self.assertEqual(running["sleep 30"]["output"], "partial output")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '' != 'partial output'
++ partial output
+
+
+======================================================================
+FAIL: test_continue_resolves_to_the_newest_and_rewrites_the_flag (tests.test_opencode_v2_compat.CreateAgentSession.test_continue_resolves_to_the_newest_and_rewrites_the_flag)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 393, in test_continue_resolves_to_the_newest_and_rewrites_the_flag
+    self.assertEqual(harness.conversation_id, "ses_new")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != 'ses_new'
+
+======================================================================
+FAIL: test_missing_session_starts_fresh_with_a_notice (tests.test_opencode_v2_compat.CreateAgentSession.test_missing_session_starts_fresh_with_a_notice)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 400, in test_missing_session_starts_fresh_with_a_notice
+    self.assertTrue(any("not found" in n["title"].lower() for n in notices.pending()))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_session_sets_conversation_id_and_is_opened (tests.test_opencode_v2_compat.CreateAgentSession.test_session_sets_conversation_id_and_is_opened)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 387, in test_session_sets_conversation_id_and_is_opened
+    self.assertEqual(harness.conversation_id, "ses_old")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != 'ses_old'
+
+======================================================================
+FAIL: test_opencode_is_captured_at_2_0_29 (tests.test_opencode_v2_compat.DoctorAndVersions.test_opencode_is_captured_at_2_0_29)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 526, in test_opencode_is_captured_at_2_0_29
+    self.assertIn("2.0.29", versions.VALIDATED["opencode"]["captured"])
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '2.0.29' not found in '1.18.34 / 2.0.28'
+
+======================================================================
+FAIL: test_a_background_tab_never_hijacks_the_conversation (tests.test_opencode_v2_compat.FocusRule.test_a_background_tab_never_hijacks_the_conversation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 76, in test_a_background_tab_never_hijacks_the_conversation
+    self.assertNotIn("prompt_submit", json.dumps(self.controller._hook_events))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'prompt_submit' unexpectedly found in '{"sess_fake0033": {"event": "prompt_submit", "at": 1792472540.1565504}}'
+
+======================================================================
+FAIL: test_deleting_the_tracked_session_clears_it_with_a_notice (tests.test_opencode_v2_compat.FocusRule.test_deleting_the_tracked_session_clears_it_with_a_notice)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 98, in test_deleting_the_tracked_session_clears_it_with_a_notice
+    self.assertIsNone(h.conversation_id)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+AssertionError: 'ses_mine' is not None
+
+======================================================================
+FAIL: test_fork_is_adopted_and_leaves_the_children_set (tests.test_opencode_v2_compat.FocusRule.test_fork_is_adopted_and_leaves_the_children_set)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 91, in test_fork_is_adopted_and_leaves_the_children_set
+    self.assertEqual(h.conversation_id, "ses_fork")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'ses_mine' != 'ses_fork'
+- ses_mine
++ ses_fork
+
+
+======================================================================
+FAIL: test_history_does_not_retire_a_v2_conversation_on_the_home_screen (tests.test_opencode_v2_compat.FocusRule.test_history_does_not_retire_a_v2_conversation_on_the_home_screen)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 128, in test_history_does_not_retire_a_v2_conversation_on_the_home_screen
+    self.assertEqual(h.conversation_id, SID)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != 'ses_mine'
+
+======================================================================
+FAIL: test_moved_renamed_and_selected_update_metadata_and_config (tests.test_opencode_v2_compat.FocusRule.test_moved_renamed_and_selected_update_metadata_and_config)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 106, in test_moved_renamed_and_selected_update_metadata_and_config
+    self.assertEqual(h.session.spec.cwd, "/new/dir")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '/tmp' != '/new/dir'
+- /tmp
++ /new/dir
+
+
+======================================================================
+FAIL: test_viewed_adopts_the_session_the_user_opened (tests.test_opencode_v2_compat.FocusRule.test_viewed_adopts_the_session_the_user_opened)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 83, in test_viewed_adopts_the_session_the_user_opened
+    self.assertEqual(h.conversation_id, OTHER)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'ses_mine' != 'ses_other'
+- ses_mine
++ ses_other
+
+
+======================================================================
+FAIL: test_model_ref_accepts_variant_display_name_and_alias (tests.test_opencode_v2_compat.Interactions.test_model_ref_accepts_variant_display_name_and_alias)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 288, in test_model_ref_accepts_variant_display_name_and_alias
+    self.assertEqual(
+    ~~~~~~~~~~~~~~~~^
+        self.controller._v2_model_ref(self.link, "Fast Model#high"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"providerID": "acme-go", "id": "fast", "variant": "high"})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'providerID': 'opencode-go', 'id': 'Fast Model#high'} != {'providerID': 'acme-go', 'id': 'fast', 'variant': 'high'}
+- {'id': 'Fast Model#high', 'providerID': 'opencode-go'}
++ {'id': 'fast', 'providerID': 'acme-go', 'variant': 'high'}
+
+======================================================================
+FAIL: test_permission_v2_shape_is_rendered (tests.test_opencode_v2_compat.Interactions.test_permission_v2_shape_is_rendered)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 235, in test_permission_v2_shape_is_rendered
+    self.assertEqual(item.data["title"], "shell")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'permission' != 'shell'
+- permission
++ shell
+
+
+======================================================================
+FAIL: test_unknown_agent_is_not_reported_as_applied (tests.test_opencode_v2_compat.Interactions.test_unknown_agent_is_not_reported_as_applied)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 272, in test_unknown_agent_is_not_reported_as_applied
+    self.assertFalse(report["agent_applied"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false
+
+======================================================================
+FAIL: test_unknown_model_is_not_reported_as_applied (tests.test_opencode_v2_compat.Interactions.test_unknown_model_is_not_reported_as_applied)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 280, in test_unknown_model_is_not_reported_as_applied
+    self.assertFalse(report["model_applied"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false
+
+======================================================================
+FAIL: test_tmux_pastes_40kb_multiline_through_a_buffer (tests.test_opencode_v2_compat.LongPrompt.test_tmux_pastes_40kb_multiline_through_a_buffer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 221, in test_tmux_pastes_40kb_multiline_through_a_buffer
+    self.assertEqual(loaded, text)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: '' != 'línea de prueba con acentos ✓\nlínea de p[42280 chars]de p'
+Diff is 43694 characters long. Set self.maxDiff to None to see it.
+
+======================================================================
+FAIL: test_remove_agent_cleans_its_opencode_state (tests.test_opencode_v2_compat.Persistence.test_remove_agent_cleans_its_opencode_state)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 481, in test_remove_agent_cleans_its_opencode_state
+    self.assertFalse(os.path.exists(state_home))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false
+
+======================================================================
+FAIL: test_claude_revive_resumes_its_conversation (tests.test_opencode_v2_compat.ReviveResume.test_claude_revive_resumes_its_conversation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 507, in test_claude_revive_resumes_its_conversation
+    self.assertEqual(launch.call_args.kwargs.get("resume"), h.conversation_id)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != '11111111-1111-4111-8111-111111111111'
+
+======================================================================
+FAIL: test_an_orphan_serve_is_adopted_instead_of_rebinding (tests.test_opencode_v2_compat.ServeHandling.test_an_orphan_serve_is_adopted_instead_of_rebinding)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 192, in test_an_orphan_serve_is_adopted_instead_of_rebinding
+    start.assert_not_called()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/unittest/mock.py", line 947, in assert_not_called
+    raise AssertionError(msg)
+AssertionError: Expected '_start_opencode_server' to not have been called. Called 1 times.
+Calls: [call('opencode', '/tmp/work', 44969, 'test-password')].
+
+======================================================================
+FAIL: test_detect_api_does_not_downgrade_a_transient_401 (tests.test_opencode_v2_compat.ServeHandling.test_detect_api_does_not_downgrade_a_transient_401)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 208, in test_detect_api_does_not_downgrade_a_transient_401
+    with self.assertRaises(urllib.error.HTTPError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: HTTPError not raised
+
+======================================================================
+FAIL: test_invalid_session_flags_are_not_in_the_v2_set (tests.test_opencode_v2_compat.SessionFlags.test_invalid_session_flags_are_not_in_the_v2_set)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 178, in test_invalid_session_flags_are_not_in_the_v2_set
+    self.assertNotIn(flag, self.controller._V2_SESSION_FLAGS)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '--session-id' unexpectedly found in ('--session', '-s', '--continue', '-c', '--session-id', '--resume', '-r')
+
+======================================================================
+FAIL: test_the_gate_is_the_api_not_the_presence_of_a_link (tests.test_opencode_v2_compat.SessionFlags.test_the_gate_is_the_api_not_the_presence_of_a_link)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/ocv2-head/tests/test_opencode_v2_compat.py", line 174, in test_the_gate_is_the_api_not_the_presence_of_a_link
+    self.assertNotIn(flag, joined)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: '--model' unexpectedly found in 'opencode --model p/m --agent x --session-id s --resume r --port 1 --hostname h --variant v --bogus z'
+
+----------------------------------------------------------------------
+Ran 57 tests in 111.206s
+
+FAILED (failures=32, errors=19)
