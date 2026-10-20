@@ -7,6 +7,8 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.85.0] — 2026-10-20
+
 - Nuevo: `crewhall agent effort <agente> [low|high|max|default]` muestra o cambia el esfuerzo de razonamiento
   de un agente OpenCode 2 vivo, sin reiniciarlo. Se aplica por API y se confirma leyendo la sesión; solo
   acepta los niveles que ofrece el modelo. Lo elegido queda fijado y persistido: la política `default_variant`
