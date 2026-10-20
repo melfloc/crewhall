@@ -80,8 +80,20 @@ tmux *or* a plain PTY.
 - **Providers**: Claude Code, OpenCode and Codex, each an adapter over one small
   capability interface ([ADAPTERS.md](ADAPTERS.md)). Adding one does not touch the
   core.
+- **OpenCode 1.x and 2.x.** OpenCode 2 (validated on 2.0.29) is driven through its
+  HTTP API instead of the keyboard: messages are delivered with the session API (long
+  or multiline prompts arrive intact, and open pickers never swallow text), the tab
+  bar is turned off per agent, `--session`/`--continue` resume the right conversation
+  with its history, permissions and forms can be answered from crewhall, and
+  `--model`/`--agent` are applied and read back, with a notice when the server ignores
+  them.
 - **Teams, tasks and correlation**: assign a task (`handoff`) or ask and wait for an
   answer (`request`/`reply`), with timeouts, chain limits and anti-loop rules.
+- **Team leads and agent containment.** A team can name *leads*
+  (`crewhall team set-leads`) who inspect members with `crewhall agent status`
+  (state, activity, background processes, whether a message could be delivered now) and
+  contain them with `agent interrupt`, `agent signal` and `agent restart`, which resumes
+  the conversation and has a restart brake.
 - **A native MCP server** (stdio, stdlib only, off by default) so an agent can call
   `whoami`, `list_teammates`, `send_message`, `request`, `reply`, `handoff`,
   `new_session` and `publish_artifact` as tools.
@@ -112,6 +124,10 @@ tmux *or* a plain PTY.
   **right-click menu on the agent viewport** to send keys or insert slash commands;
   plus a per-provider **model selector**, **conversation export** (Markdown/JSON),
   **global search** and **`@`-mentions** for workspace paths.
+- **Signed releases and safe updates.** Other machines only receive signed, immutable
+  releases (`scripts/deploy.sh`, `crewhall update`); updating never restarts a daemon
+  with working agents, tmux agents survive a daemon restart, and `update --rollback`
+  returns to the previous version. See [RELEASING.md](RELEASING.md).
 - **Web terminals** (off by default): real `xterm.js` shells shown in the sidebar
   like agents and in the main pane, local or over SSH, gated by scoped tokens.
 - **Drag & drop** in the sidebar: reorder teams and move an agent to another team.
