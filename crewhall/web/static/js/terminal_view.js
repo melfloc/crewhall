@@ -23,6 +23,7 @@ async function terminalTicket(id, mode){
 
 function mountTerminalView(container, termId, opts){
   opts = opts || {};
+  const MIN_COLS = 10, MIN_ROWS = 2;
   const st = {mode:"read", readonly:!!opts.readonly, closed:false, ws:null, retry:0,
               timer:null, ping:null, disposed:false, cols:0, rows:0};
   let term=null, fit=null, search=null;
@@ -40,7 +41,21 @@ function mountTerminalView(container, termId, opts){
     payload[0] = type; if(body) payload.set(body, 1);
     st.ws.send(payload);
   }
+  // Resize only while this client owns the keyboard, and only from a visible
+  // grid of a usable size. A read client must never resize the shared tmux
+  // window (the server also rejects 0x03 from it).
+  function canResize(){
+    if(st.mode !== "write" || st.readonly || st.closed || !term) return false;
+    if(term.cols < MIN_COLS || term.rows < MIN_ROWS) return false;
+    const r = container.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function sendSize(){
+    if(!canResize()) return;
+    send(0x03, new Uint8Array([...u16(term.cols), ...u16(term.rows)]));
+  }
   function applyControl(c){
+    const wasWrite = st.mode === "write";
     if(typeof c.readonly === "boolean") st.readonly = c.readonly;
     if(typeof c.mode === "string") st.mode = c.mode;
     if(c.host !== undefined){ const h = hostEl(); if(h) h.textContent = c.host || "local"; }
@@ -53,6 +68,12 @@ function mountTerminalView(container, termId, opts){
     else setConn("connected · view", "s-ready");
     const claim = document.getElementById("termx-claim");
     if(claim) claim.disabled = st.readonly;
+    // Claiming the keyboard (or being promoted to writer) must apply this
+    // client's grid; no resize event follows by itself.
+    if(st.mode === "write" && !wasWrite && !st.readonly && !st.closed){
+      if(fit){ try{ fit.fit(); }catch(e){} }
+      sendSize();
+    }
   }
   function connect(){
     terminalTicket(termId, st.mode === "write" ? "write" : (opts.wantMode || "write"))
@@ -77,7 +98,7 @@ function mountTerminalView(container, termId, opts){
     st.ws.onopen = () => {
       st.retry = 0;
       try{ fit.fit(); }catch(e){}
-      send(0x03, new Uint8Array([...u16(term.cols), ...u16(term.rows)]));
+      sendSize();
       send(0x04, null);
       if(st.ping) clearInterval(st.ping);
       st.ping = setInterval(() => send(0x04, null), 20000);
@@ -109,7 +130,7 @@ function mountTerminalView(container, termId, opts){
     send,
     claim(){ send(0x07, null); },
     focus(){ if(term) term.focus(); },
-    fit(){ if(fit){ try{ fit.fit(); }catch(e){} } },
+    fit(){ if(fit){ try{ fit.fit(); }catch(e){} } sendSize(); },
     search(q, next){ if(search && q){ next ? search.findNext(q) : search.findPrevious(q); } },
     dispose(){
       st.disposed = true; st.closed = true;
@@ -146,7 +167,7 @@ function mountTerminalView(container, termId, opts){
     }
     requestAnimationFrame(() => { if(!st.disposed) api.fit(); });
     term.onData(d => { if(st.mode === "write" && !st.readonly && !st.closed) send(0x01, new TextEncoder().encode(d)); });
-    term.onResize(({cols, rows}) => { if(st.mode === "write" && !st.readonly) send(0x03, new Uint8Array([...u16(cols), ...u16(rows)])); });
+    term.onResize(() => sendSize());
     const searchInput = document.getElementById("termx-search");
     if(searchInput){
       searchInput.onkeydown = (e) => { if(e.key === "Enter"){ e.preventDefault(); api.search(searchInput.value, !e.shiftKey); } };

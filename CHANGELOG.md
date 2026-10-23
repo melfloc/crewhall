@@ -7,6 +7,13 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- Corregido: al reclamar el teclado en una terminal compartida, tmux conservaba el tamaño del
+  escritor anterior (columnas y filas equivocadas, sobre todo en móvil). Ahora el cliente que pasa
+  a escribir envía su grid; un cliente de solo lectura nunca redimensiona. Los `fit()` con el
+  contenedor oculto, de tamaño cero o por debajo del mínimo tampoco envían `resize`.
+- Corregido: `/terminal.html` no reconectaba porque reutilizaba el ticket de un solo uso. Ahora
+  pide un ticket nuevo al reconectar y restaura el tamaño de su ventana.
+
 ## [0.85.0] — 2026-10-20
 
 - Nuevo: `crewhall agent effort <agente> [low|high|max|default]` muestra o cambia el esfuerzo de razonamiento
