@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import subprocess
 import unittest
-from unittest import mock
 
 from crewhall import Controller, OpenCodeHarness
 from crewhall.backends.tmux import TmuxBackend

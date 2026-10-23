@@ -19,7 +19,7 @@ from unittest import mock
 
 from crewhall import Controller, OpenCodeHarness, notices
 from crewhall.harness import versions
-from crewhall.opencode_link import OpenCodeLink, free_port
+from crewhall.opencode_link import free_port
 
 from .support import FakeSession
 

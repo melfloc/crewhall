@@ -9,9 +9,8 @@ from __future__ import annotations
 import os
 import time
 import unittest
-from unittest import mock
 
-from crewhall import Controller, OpenCodeHarness
+from crewhall import OpenCodeHarness
 from crewhall.harness import AgentState
 from crewhall.harness.base import HarnessNotReady
 from crewhall.harness.opencode import COMPLETION_RE, OpenCodeHarness as Harness

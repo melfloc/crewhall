@@ -96,10 +96,10 @@ def normalize_fields(fields: Any) -> list[dict[str, Any]]:
     keyed by ``key`` (``{"answer": {key: value}}``), so the key is preserved.
     """
     out = []
-    for index, field in enumerate(fields if isinstance(fields, list) else []):
-        if not isinstance(field, dict):
+    for index, item in enumerate(fields if isinstance(fields, list) else []):
+        if not isinstance(item, dict):
             continue
-        raw_options = field.get("options") or []
+        raw_options = item.get("options") or []
         options = []
         for option in raw_options:
             if isinstance(option, str):
@@ -111,9 +111,9 @@ def normalize_fields(fields: Any) -> list[dict[str, Any]]:
                         "label": _clip(label, 200),
                         "description": _clip(option.get("description", ""), 1000),
                     })
-        ftype = str(field.get("type") or "string")
-        key = field.get("key") or field.get("id") or f"field{index}"
-        title = field.get("title") or field.get("label") or key
+        ftype = str(item.get("type") or "string")
+        key = item.get("key") or item.get("id") or f"field{index}"
+        title = item.get("title") or item.get("label") or key
         out.append({
             "key": _clip(key, 100),
             "question": _clip(title, 2000),
@@ -122,7 +122,7 @@ def normalize_fields(fields: Any) -> list[dict[str, Any]]:
             "type": _clip(ftype, 40),
             "multiple": ftype in ("multiselect", "multi-select", "array"),
             "custom": ftype not in ("select", "multiselect", "multi-select"),
-            "required": bool(field.get("required", True)),
+            "required": bool(item.get("required", True)),
         })
     return out
 

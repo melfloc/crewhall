@@ -12,7 +12,6 @@ import json
 import os
 import shutil
 import tempfile
-import time
 import unittest
 from unittest import mock
 
@@ -20,7 +19,6 @@ from crewhall import Controller, OpenCodeHarness, notices
 from crewhall import activity
 from crewhall.archive import read_archived
 from crewhall.backends.tmux import TmuxBackend
-from crewhall.harness import AgentState
 from crewhall.harness import versions
 from crewhall.opencode_link import OpenCodeLink
 from crewhall.persistence import StateStore

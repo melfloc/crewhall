@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import unittest
-from unittest import mock
 
 from crewhall import Controller, OpenCodeHarness, notices
 from crewhall.harness import HarnessError

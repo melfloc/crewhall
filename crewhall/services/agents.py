@@ -1420,10 +1420,10 @@ class ServicesAgents:
         if not harness.conversation_id and isinstance(active, dict) and len(active) == 1:
             only = next(iter(active))
             self._follow_opencode_session(harness, only)
-        if harness.conversation_id and isinstance(active, dict):
-            if harness.conversation_id in active:
-                self._apply_hook(harness, "prompt_submit")
-                return  # a running turn is never touched: effort waits for idle
+        if (harness.conversation_id and isinstance(active, dict)
+                and harness.conversation_id in active):
+            self._apply_hook(harness, "prompt_submit")
+            return  # a running turn is never touched: effort waits for idle
         if not harness.conversation_id:
             return
         self._ensure_default_variant(link, harness.conversation_id, None, harness.agent_id)

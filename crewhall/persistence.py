@@ -101,7 +101,7 @@ class StateStore:
                     # User env only as *keys*: values may be API keys and must
                     # never be written to state.json.
                     "env_keys": sorted(
-                        (getattr(controller, "_base_env", {}).get(harness.agent_id) or {})
+                        getattr(controller, "_base_env", {}).get(harness.agent_id) or {}
                     ),
                 }
             )
