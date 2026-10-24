@@ -7,6 +7,8 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.85.1] — 2026-10-23
+
 - Corregido: al reclamar el teclado en una terminal compartida, tmux conservaba el tamaño del
   escritor anterior (columnas y filas equivocadas, sobre todo en móvil). Ahora el cliente que pasa
   a escribir envía su grid; un cliente de solo lectura nunca redimensiona. Los `fit()` con el
