@@ -112,12 +112,17 @@ class OpsChat(OpsBase):
 
     def _op_conversation_delete(self, request: dict[str, Any]) -> dict[str, Any]:
         from .. import chat as conversations
+        from ..office import collab as office_collab
 
-        return conversations.delete(
-            str(request["id"]), delete_files=bool(request.get("delete_files")))
+        cid = str(request["id"])
+        office_collab.REGISTRY.close_conversation(cid)
+        return conversations.delete(cid, delete_files=bool(request.get("delete_files")))
 
     def _op_conversation_artifact_delete(self, request: dict[str, Any]) -> dict[str, Any]:
         from .. import chat as conversations
+        from ..office import collab as office_collab
 
-        return {"artifact": conversations.delete_artifact(
-            str(request["id"]), str(request.get("path") or ""))}
+        cid = str(request["id"])
+        rel = str(request.get("path") or "")
+        office_collab.REGISTRY.close(cid, rel)
+        return {"artifact": conversations.delete_artifact(cid, rel)}

@@ -236,7 +236,10 @@ pandoc informe.md -o "$CREWHALL_OUTPUTS/informe.docx"
 - Si el cambio es estructural (reordenar, dar formato a media página), edítalo
   por FS y **reabre** (`office open`) para que todos vean la versión nueva.
 - Cierra el co-editor cuando termines una tanda larga (`office close`) para
-  liberar recursos.
+  liberar recursos. crewhall también lo cierra solo tras 10 minutos sin actividad
+  (`office.collab_idle_s`) y mantiene como máximo un documento co-editado a la vez
+  (`office.collab_max_editors`, 1 por defecto); si necesitas otro, se cierra el menos
+  reciente.
 
 ## 10. Errores frecuentes y cómo evitarlos
 
@@ -496,7 +499,10 @@ pandoc report.md -o "$CREWHALL_OUTPUTS/report.docx"
 - If the change is structural (reorder, format half a page), edit it through the
   FS and **reopen** (`office open`) so everyone sees the new version.
 - Close the co-editor when you finish a long batch (`office close`) to free
-  resources.
+  resources. crewhall also closes it automatically after 10 minutes without activity
+  (`office.collab_idle_s`) and keeps at most one document co-edited at a time
+  (`office.collab_max_editors`, 1 by default); opening another closes the least recently
+  used one.
 
 ## 10. Common errors and how to avoid them
 

@@ -181,6 +181,7 @@ async function chatSetCrew(team){
 }
 
 async function chatSelect(id){
+  chatCloseOffice();
   CHAT.active = id; CHAT.msgs = []; CHAT.sig = "";
   chatRenderList();
   chatCloseDrawer();
@@ -199,6 +200,7 @@ async function chatDelete(c){
   if(!await confirmDlg({title:"Delete this chat?", message:`“${c.title||"Chat"}” and its agent will be removed. Files are kept unless you delete them.`, ok:"Delete", danger:true})) return;
   try {
     if(c.agent_id){ try { await op("agent_stop", {target:c.agent_id}); } catch(e){} }
+    if(CHAT.active === c.id) chatCloseOffice();
     await op("conversation_delete", {id:c.id});
     CHAT.list = CHAT.list.filter(x => x.id !== c.id);
     if(CHAT.active === c.id){ CHAT.active = null; CHAT.info = null; chatRenderHead(); $("chat-feed").replaceChildren(); chatRenderArtifacts(); }
@@ -489,7 +491,8 @@ function chatArtRow(f, isOutput){
   const dl = url + "&download=1";
   const acts = [
     isOutput && f.office ? el("button", {className:"btn sm", type:"button", onclick:()=>chatOpenOffice(f)}, "Open") : null,
-    isOutput && f.office ? el("button", {className:"btn sm", type:"button", title:"Let the agent edit this live as a co-editor", onclick:()=>chatLiveEdit(f)}, ic("bolt","sm"), "Live") : null,
+    isOutput && f.office && (!OS.status || OS.status.collab_enabled !== false)
+      ? el("button", {className:"btn sm", type:"button", title:"Let the agent edit this live as a co-editor", onclick:()=>chatLiveEdit(f)}, ic("bolt","sm"), "Live") : null,
     f.kind === "image" || f.kind === "pdf" ? el("button", {className:"btn sm", type:"button", onclick:()=>chatPreview(f)}, "Preview") : null,
     el("a", {className:"btn sm", href:dl, download:f.name, title:"Download"}, ic("down","sm")),
     isOutput ? el("button", {className:"btn sm danger", type:"button", title:"Delete artifact",
@@ -510,12 +513,19 @@ function artifactProducer(f){
 }
 async function chatLiveEdit(f){
   try {
+    // "Live" is the only path that starts the headless co-editor. Make sure the
+    // human editor is open too, so the agent's cursor is actually visible.
+    if(!CHAT.office || CHAT.office.path !== f.relpath){
+      const opened = await chatOpenOffice(f);
+      if(opened === false) return;
+    }
     const r = await op("office_collab_open", {id:CHAT.active, path:f.relpath});
     toast(`${r.user || "The agent"} is now editing ${f.name} live`, "ok");
   } catch(e){ flash(e.message); }
 }
 async function chatDeleteArtifact(f){
   if(!await confirmDlg({title:"Delete artifact?", message:f.name, ok:"Delete", danger:true})) return;
+  if(CHAT.office && CHAT.office.path === f.relpath) chatCloseOffice();
   try { await op("conversation_artifact_delete", {id:CHAT.active, path:f.relpath}); chatLoadArtifacts(); }
   catch(e){ flash(e.message); }
 }
@@ -538,18 +548,18 @@ async function chatOpenOffice(f){
   try {
     const r = await fetch(`/api/office/config?id=${encodeURIComponent(CHAT.active)}&path=${encodeURIComponent(f.relpath)}`, {credentials:"same-origin"});
     const j = await r.json();
-    if(r.status === 404){ toast("OnlyOffice is not enabled (Settings → OnlyOffice)", "info"); return; }
-    if(!j.ok){ flash(j.error || "cannot open the editor"); return; }
+    if(r.status === 404){ toast("OnlyOffice is not enabled (Settings → OnlyOffice)", "info"); return false; }
+    if(!j.ok){ flash(j.error || "cannot open the editor"); return false; }
     cfg = j.config;
-    CHAT.office = {config:cfg, public_url:j.public_url, path:f.relpath, title:f.name};
-  } catch(e){ flash(e.message); return; }
+    CHAT.office = {config:cfg, public_url:j.public_url, id:CHAT.active,
+                   path:f.relpath, title:f.name};
+  } catch(e){ flash(e.message); return false; }
   chatSetArtifacts(true);
   $("chat-artifacts").classList.add("previewing");
   $("chat-office-title").textContent = f.name;
   $("chat-office").classList.remove("init-hidden");
-  // Bring the agent in as a co-editor of the same session: its edits then show
-  // up live here, and it receives the document's chat and comments. Best effort.
-  op("office_collab_open", {id:CHAT.active, path:f.relpath}).catch(() => {});
+  // Opening for reading must not start a hidden Chromium. The agent joins only
+  // from the "Live" button (chatLiveEdit), and the co-editor is closed below.
   const mount = el("div", {id:"chat-office-mount"});
   $("chat-office-mount").replaceWith(mount);
   const base = (CHAT.office.public_url || "").replace(/\/$/, "");
@@ -558,6 +568,7 @@ async function chatOpenOffice(f){
     try { CHAT.office.editor = new window.DocsAPI.DocEditor("chat-office-mount", cfg); }
     catch(e){ flash("Editor error: " + e.message); }
   });
+  return true;
 }
 function chatLoadScript(src, onload){
   const s = document.createElement("script");
@@ -566,8 +577,13 @@ function chatLoadScript(src, onload){
   document.head.append(s);
 }
 function chatCloseOffice(){
-  if(CHAT.office && CHAT.office.editor){
-    try { CHAT.office.editor.destroyEditor(); } catch(e){}
+  const off = CHAT.office;
+  if(off && off.editor){
+    try { off.editor.destroyEditor(); } catch(e){}
+  }
+  if(off && off.path && off.id){
+    // Do not leave the agent's headless Chromium alive after the panel closes.
+    op("office_collab_close", {id:off.id, path:off.path}).catch(() => {});
   }
   CHAT.office = null;
   const o = $("chat-office"); if(o) o.classList.add("init-hidden");
@@ -700,13 +716,13 @@ $("chatTools").onclick = (e) => { e.stopPropagation(); openMenu($("chatTools"), 
   ...(CHAT.info && CHAT.info.agent_id ? [{label:"Send a key… (Esc, Ctrl+C…)", icon:"terminal",
     run:() => openKeysMenu($("chatTools"), CHAT.info.agent_id)}] : []),
   {label: chatArtifactsShown() ? "Hide artifacts" : "Show artifacts", icon:"file",
-   run:() => chatSetArtifacts(!chatArtifactsShown())},
+   run:() => { if(chatArtifactsShown()) chatCloseOffice(); chatSetArtifacts(!chatArtifactsShown()); }},
   {label:"Parallel view (50/50)", icon:"columns", run:chatParallel},
 ]); };
 $("chat-file").onchange = (e) => { chatAddFiles([...e.target.files]); e.target.value = ""; };
 $("chatArtWide").onclick = chatParallel;
 $("chatArtRefresh").onclick = chatLoadArtifacts;
-$("chatArtClose").onclick = () => chatSetArtifacts(false);
+$("chatArtClose").onclick = () => { chatCloseOffice(); chatSetArtifacts(false); };
 $("chatOffice").onclick = (e) => { e.stopPropagation(); chatOfficeMenu($("chatOffice")); };
 $("chat-office-close").onclick = chatCloseOffice;
 $("chat-q").oninput = (e) => { CHAT.q = e.target.value; chatRenderList(); };
@@ -722,6 +738,20 @@ $("chat-feed").addEventListener("contextmenu", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if(e.key === "Escape" && CHAT.open && CHAT.office){ e.stopPropagation(); chatCloseOffice(); }
+});
+window.addEventListener("pagehide", () => {
+  // A normal fetch may be aborted when the tab closes; keepalive/beacon is the
+  // only reliable way to tell the daemon to kill the headless co-editor.
+  const off = CHAT.office;
+  if(!off || !off.path || !off.id) return;
+  try {
+    const body = JSON.stringify({op:"office_collab_close", id:off.id, path:off.path});
+    if(navigator.sendBeacon){
+      navigator.sendBeacon("/api/op", new Blob([body], {type:"application/json"}));
+    } else {
+      fetch("/api/op", {method:"POST", body, credentials:"same-origin", keepalive:true});
+    }
+  } catch(e){ /* best effort */ }
 });
 
 /* ---------- interface init: apply the remembered top-level mode ---------- */

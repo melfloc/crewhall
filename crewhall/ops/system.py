@@ -26,11 +26,14 @@ class OpsSystem(OpsBase):
                 "channel": info["kind"], "protocol": protocol.PROTOCOL_VERSION}
 
     def _op_health(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Background-worker and queue health (surfaced by `doctor`)."""
+        """Background-worker, queue and memory health (surfaced by `doctor`)."""
+        from .. import health
+
         return {
             "workers": self.controller.workers.snapshot(),
             "queues": self.controller.messaging.queue_depth(),
             "pid": os.getpid(),
+            **health.memory_fields(),
         }
 
     def _op_meta_info(self, request: dict[str, Any]) -> dict[str, Any]:

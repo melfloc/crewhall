@@ -69,6 +69,12 @@ class TmuxBackend(Backend):
     # Large prompts are pasted in chunks: tmux's `send-keys -l` fails with
     # "command too long" and would also put the prompt in the argument list.
     PASTE_CHUNK = 8192
+    # The reader only feeds the bounded ``read`` buffer. Capturing the whole
+    # scrollback (`-S -`) every 200 ms made the delta re-emit thousands of lines
+    # once tmux history filled; a short tail is enough for interactive reads and
+    # keeps both CPU and the emitted deltas bounded. Full-screen state detection
+    # still uses ``capture()``.
+    READ_TAIL_LINES = 200
 
     def _run(self, *args: str, timeout: float = 10.0,
              input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -188,12 +194,52 @@ class TmuxBackend(Backend):
         out = proc.stdout.strip()
         return int(out) if out.isdigit() else None
 
+    @staticmethod
+    def _delta(previous: str, current: str) -> str:
+        """New text between two sliding-window captures.
+
+        ``capture-pane -S -N`` returns the last N lines, so after a new line the
+        window slides: the common part is a *suffix of ``previous``* and a
+        *prefix of ``current``*. Returning ``current`` whenever the prefix check
+        fails re-emits the whole pane on every scroll; this finds the small
+        overlap (usually one line) and returns only what was appended.
+        """
+        if current == previous or not current:
+            return ""
+        if not previous:
+            return current
+        if current.startswith(previous):
+            return current[len(previous):]
+        prev_lines = previous.splitlines(keepends=True)
+        cur_lines = current.splitlines(keepends=True)
+        # Scrolling usually drops one line, but a redraw can drop several.
+        max_drop = min(len(prev_lines) - 1, 32)
+        for drop in range(1, max_drop + 1):
+            common = len(prev_lines) - drop
+            if len(cur_lines) < common or cur_lines[0] != prev_lines[drop]:
+                continue
+            if cur_lines[:common] == prev_lines[drop:]:
+                return "".join(cur_lines[common:])
+        # No overlap (clear/redraw): the pane itself is the only reliable delta.
+        return current
+
+    def _capture_tail(self) -> str:
+        if not self.tmux_name:
+            return ""
+        # Keep the whole visible pane even for a tall terminal, plus some history.
+        rows = int(getattr(self.session, "rows", 0) or 0) if self.session is not None else 0
+        lines = max(self.READ_TAIL_LINES, rows + 50)
+        proc = self._run("capture-pane", "-p", "-t", self._target(), "-S", f"-{lines}")
+        if proc.returncode != 0:
+            return ""
+        return proc.stdout
+
     def _read_loop(self) -> None:
         last = ""
         while not self._stop.is_set():
-            text = self.capture()
+            text = self._capture_tail()
             if text != last:
-                delta = text[len(last):] if text.startswith(last) else text
+                delta = self._delta(last, text)
                 last = text
                 if delta and self.session is not None:
                     self.session._emit_output(delta)

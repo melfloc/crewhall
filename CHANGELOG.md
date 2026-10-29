@@ -7,6 +7,26 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.86.0] — 2026-10-29
+
+- Corregido: el daemon ya no acumula sin límite la salida de cada sesión. El buffer de
+  `read` está acotado (`maintenance.session_output_buffer_kb`, 1 MB por defecto) y el lector de tmux
+  captura solo las últimas 200 líneas y emite únicamente lo nuevo al desplazarse el
+  scrollback. Antes, con el historial lleno, cada cambio reemitía miles de líneas y el
+  deque crecía durante días (GBs de RSS).
+- Corregido: los co-editores headless de OnlyOffice ya no se acumulan. Abrir un artefacto
+  para leer no levanta Chromium; solo el botón **Live** lo hace. Se cierran al cerrar el
+  panel, al cambiar de chat o al cerrar la pestaña (beacon con `keepalive`), tienen TTL
+  (`office.collab_idle_s`, 10 min) y un máximo de documentos simultáneos
+  (`office.collab_max_editors`, 1). `office_collab_open` exige `office.collab_enabled`.
+- Corregido: al cerrar un co-editor se termina todo su grupo de procesos (no solo el
+  Chromium padre) y se borra el perfil; al arrancar, el daemon limpia co-editores
+  huérfanos y perfiles `crewhall-collab-*` de un apagado sucio.
+- Añadido: `doctor` muestra la memoria del daemon, de sus procesos hijos
+  (Chromium/OpenCode) y el número de co-editores; `doctor --trend` lo guarda en el
+  journal, y `crewhall office list` muestra pid, memoria e inactividad de cada
+  co-editor.
+
 ## [0.85.1] — 2026-10-23
 
 - Corregido: al reclamar el teclado en una terminal compartida, tmux conservaba el tamaño del

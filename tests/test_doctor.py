@@ -68,6 +68,22 @@ class DoctorChecks(unittest.TestCase):
                 mock.patch("crewhall.client.Client.call", return_value=health):
             self.assertEqual(doctor.check_workers()["status"], "warn")
 
+    def test_check_memory(self) -> None:
+        with mock.patch("crewhall.client.ping", return_value=False):
+            self.assertEqual(doctor.check_memory()["status"], "ok")
+        health = {"memory_kb": 2 * 1024 * 1024, "children_rss_kb": 100,
+                  "office_editors": 1}
+        with mock.patch("crewhall.client.ping", return_value=True), \
+                mock.patch("crewhall.client.Client.call", return_value=health):
+            result = doctor.check_memory()
+        self.assertEqual(result["status"], "warn")
+        self.assertIn("daemon", result["detail"])
+        health = {"memory_kb": 100, "children_rss_kb": 2 * 1024 * 1024,
+                  "office_editors": 1}
+        with mock.patch("crewhall.client.ping", return_value=True), \
+                mock.patch("crewhall.client.Client.call", return_value=health):
+            self.assertEqual(doctor.check_memory()["status"], "ok")
+
     def test_check_daemon_log(self) -> None:
         self.assertEqual(doctor.check_daemon_log()["name"], "log")
 

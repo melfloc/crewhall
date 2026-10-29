@@ -111,18 +111,27 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return doctor.exit_code(results)
 
 
+def _trend_value(value: float, scale: int) -> str:
+    return f"{value / scale:.1f}" if scale != 1 else f"{value:g}"
+
+
 def _format_trend(report: dict[str, Any]) -> str:
     if not report.get("samples"):
         return "no health journal yet (the daemon writes one sample every 10 minutes)"
     lines = [f"health journal: {report['samples']} sample(s)  {report['since']} -> {report['until']}"]
     for key, label, unit in (
-        ("memory_kb", "memory", "KB"), ("threads", "threads", ""),
+        ("memory_kb", "memory", "MiB"), ("children_rss_kb", "children mem", "MiB"),
+        ("office_editors", "co-editors", ""), ("threads", "threads", ""),
         ("queue", "queue", ""), ("workers_restarted", "worker restarts", ""),
     ):
         stat = report.get(key)
         if stat:
-            lines.append(f"  {label:<16} min={stat['min']:g}{unit} max={stat['max']:g}{unit} "
-                         f"last={stat['last']:g}{unit}")
+            scale = 1024 if key.endswith("_kb") else 1
+            lines.append(
+                f"  {label:<16} min={_trend_value(stat['min'], scale)}{unit} "
+                f"max={_trend_value(stat['max'], scale)}{unit} "
+                f"last={_trend_value(stat['last'], scale)}{unit}"
+            )
     failures = report.get("failures_last_hour") or {}
     lines.append(f"  {'failures/1h':<16} max={failures.get('max', 0)} sum={failures.get('sum', 0)}")
     lines.append("  versions: " + (", ".join(report.get("versions") or []) or "-"))

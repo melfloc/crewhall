@@ -237,6 +237,17 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
         with open(paths.pid_path(), "w") as fh:
             fh.write(str(os.getpid()))
         log.info("daemon listening on %s", self.socket_path)
+        # A killed/crashed daemon cannot run its cleanup: its headless Chromium
+        # co-editors (and their 100s of MB) would survive forever. Now that we
+        # own the singleton lock, reap anything named after a crewhall profile.
+        try:
+            from .office import collab as office_collab
+
+            removed = office_collab.sweep_orphans()
+            if removed:
+                log.info("removed %d orphaned headless co-editor(s)", removed)
+        except Exception:  # noqa: BLE001 - cleanup is best effort
+            log.exception("could not sweep orphaned co-editors")
         # Web interfaces chosen with `crewhall local|tailscale` come back up.
         self.frontends.begin_restore()
         self.controller.workers.spawn(

@@ -16,6 +16,16 @@ class SessionTimeout(TimeoutError):
         self.text = text
 
 
+def _output_buffer_bytes() -> int:
+    """Per-session cap for the ``read`` buffer (maintenance.session_output_buffer_kb)."""
+    try:
+        from . import settings
+
+        return max(64 * 1024, int(settings.get("maintenance.session_output_buffer_kb")) * 1024)
+    except Exception:  # noqa: BLE001 - a settings problem must not break sessions
+        return 1024 * 1024
+
+
 class InteractiveSession:
     def __init__(
         self,
@@ -41,7 +51,12 @@ class InteractiveSession:
         # (adopted after a restart) rather than one this daemon started.
         self._adopted = False
 
+        # ``read`` is the only consumer of this buffer (the TUI/Web use capture()).
+        # It must be bounded: a long-running tmux agent can emit for days, and an
+        # unbounded deque here was the daemon's largest memory growth path.
         self._buffer: collections.deque[str] = collections.deque()
+        self._buffer_bytes = 0
+        self._buffer_limit = _output_buffer_bytes()
         self._events: collections.deque[Event] = collections.deque(maxlen=2000)
         self._lock = threading.RLock()
         self._cv = threading.Condition(self._lock)
@@ -83,7 +98,18 @@ class InteractiveSession:
             return
         now = time.time()
         with self._lock:
-            self._buffer.append(text)
+            limit = self._buffer_limit
+            if len(text) >= limit:
+                # One chunk (e.g. a full tmux scrollback) larger than the whole
+                # cap: keep only its tail; this is what ``read`` can still use.
+                self._buffer.clear()
+                self._buffer.append(text[-limit:])
+                self._buffer_bytes = limit
+            else:
+                self._buffer.append(text)
+                self._buffer_bytes += len(text)
+                while self._buffer_bytes > limit and len(self._buffer) > 1:
+                    self._buffer_bytes -= len(self._buffer.popleft())
             self._last_output_at = now
             self._events.append(Event("output", self.session_id, now, {"size": len(text)}))
             self._cv.notify_all()
@@ -158,6 +184,7 @@ class InteractiveSession:
                 self._cv.wait(remaining if remaining is not None else 0.5)
             out = "".join(self._buffer)
             self._buffer.clear()
+            self._buffer_bytes = 0
         return out
 
     def read_until(
@@ -244,6 +271,12 @@ class InteractiveSession:
     def events(self) -> list[dict[str, Any]]:
         with self._lock:
             return [e.to_dict() for e in self._events]
+
+    @property
+    def buffered_bytes(self) -> int:
+        """Bytes currently waiting for ``read`` (never above the configured cap)."""
+        with self._lock:
+            return self._buffer_bytes
 
     def info(self) -> SessionInfo:
         with self._lock:

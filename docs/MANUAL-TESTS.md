@@ -32,6 +32,34 @@ release; record the DS version and the outcome here. If a version does not keep
 the chat history, persist the chat markers the same way comments are persisted
 (`office.collab` comment ids).
 
+## E3 - A co-editor is bounded, closes on demand and leaves no Chromium behind
+
+**Goal.** Opening a document for reading must not start a headless editor; the
+agent's co-editor must be limited to `office.collab_max_editors` (1 by default),
+close when the panel closes or after `office.collab_idle_s`, and leave no
+`chromium --user-data-dir=.../crewhall-collab-*` process behind.
+
+**Setup.** A healthy OnlyOffice Document Server, `office.collab_enabled=true`, and
+Chromium installed (the same setup as E2).
+
+**Steps.**
+1. Open a chat artifact with **Open** (not **Live**). Run `crewhall office list`:
+   it must be empty and `pgrep -af 'user-data-dir=.*crewhall-collab'` must print
+   nothing.
+2. Click **Live**. `crewhall office list` must show one editor with `pid`,
+   `memory_kb` and `idle_s`.
+3. Click **Live** on a second artifact. With the default limit, the first editor
+   must be gone from the list and only the second one remains.
+4. Close the editor panel (or switch chats). `crewhall office list` must be empty
+   and the Chromium profile directory must no longer exist.
+5. For the idle path, set `office.collab_idle_s` to 60 in a test profile, open
+   **Live**, leave it untouched, and confirm it is gone after a minute.
+
+**Expected.** At most one headless Chromium at a time; each one is closed on
+demand/idle and its whole process group is reaped. A single editor can use ~1 GB
+with the stock Document Server, which is exactly why the old unlimited registry
+reached several GB.
+
 ## D1 - A real agent cannot read the control token
 
 **Goal.** An agent running under crewhall must not be able to read

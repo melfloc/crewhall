@@ -148,6 +148,41 @@ def check_workers() -> Check:
     return _res("workers", "ok", detail)
 
 
+def check_memory() -> Check:
+    """Report daemon/children memory, the signal that grows during a leak."""
+    from .client import Client, ping
+
+    try:
+        if not ping():
+            return _res("memory", "ok", "daemon not running")
+        health = Client(autostart=False).call("health")
+    except Exception as exc:  # noqa: BLE001
+        return _res("memory", "warn", f"health unavailable: {exc}")
+    daemon = health.get("memory_kb")
+    children = health.get("children_rss_kb")
+    editors = health.get("office_editors")
+    if not isinstance(daemon, (int, float)) and not isinstance(children, (int, float)):
+        return _res("memory", "ok", "not available on this platform")
+    parts = []
+    if isinstance(daemon, (int, float)):
+        parts.append(f"daemon {daemon / 1024:.0f} MiB")
+    if isinstance(children, (int, float)):
+        parts.append(f"children {children / 1024:.0f} MiB")
+    if isinstance(editors, (int, float)):
+        parts.append(f"co-editors {int(editors)}")
+    detail = ", ".join(parts)
+    if isinstance(daemon, (int, float)) and daemon > 1024 * 1024:
+        return _res("memory", "warn", detail,
+                    "The daemon itself is above 1 GiB. Restart it and check "
+                    "`crewhall doctor --trend`; the session output buffer is bounded.")
+    if isinstance(children, (int, float)) and children > 4 * 1024 * 1024:
+        return _res("memory", "warn", detail,
+                    "Children (headless Chromium/agents) are above 4 GiB. Close idle "
+                    "co-editors with `crewhall office close` or restart the daemon; "
+                    "`crewhall office list` shows each editor.")
+    return _res("memory", "ok", detail)
+
+
 def check_daemon_log() -> Check:
     """Report the daemon log size and whether rotation is in effect."""
     import glob
@@ -434,7 +469,7 @@ CHECKS: list[Callable[[], Check | list[Check]]] = [
     check_python, check_install, check_tmux, check_agent_clis, check_agent_version_ranges,
     check_agent_runtime_versions,
     check_command_on_path, check_dirs,
-    check_tmpdir, check_hooks, check_daemon, check_workers, check_daemon_log, check_web, check_office, check_security,
+    check_tmpdir, check_hooks, check_daemon, check_workers, check_memory, check_daemon_log, check_web, check_office, check_security,
     check_agent_configs, check_systemd, check_tailscale,
 ]
 

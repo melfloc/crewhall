@@ -231,10 +231,13 @@ crewhall doctor           # also verifies OnlyOffice when it is enabled
   `outputs/` (it receives `CREWHALL_OUTPUTS`), and that is what the panel shows.
   Download one artifact, preview images/PDF, or **Export** the whole conversation
   (transcript + inputs + outputs) as a ZIP.
-- **Live co-editing.** Opening an artifact brings the agent in as a co-editor of the
-  **same session** (same `document.key`), so its edits appear in your editor as you
-  watch. You can steer it from inside the document: the co-authoring chat and
-  anchored comments are forwarded to the agent as prompts.
+- **Live co-editing.** Opening an artifact shows it in the editor; the **Live** button
+  brings the agent in as a co-editor of the **same session** (same `document.key`), so
+  its edits appear in your editor as you watch. You can steer it from inside the
+  document: the co-authoring chat and anchored comments are forwarded to the agent as
+  prompts. The headless editor closes when you close the panel or after 10 minutes
+  without activity (`office.collab_idle_s`), and at most one document is co-edited at
+  a time (`office.collab_max_editors`, 1 by default).
 - **Formats & fidelity.** OOXML is edited natively (`.docx`/`.xlsx`/`.pptx`) and Open
   Document too; `.md`/`.csv` open as text/sheet and `.pdf` is view-only. crewhall
   **validates** documents on open and on save, so a corrupt payload never replaces a

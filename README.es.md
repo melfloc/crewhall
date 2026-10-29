@@ -85,10 +85,13 @@ respaldada por un **agente crewhall real** aislado en su propia carpeta, con un
   va a `outputs/` (recibe `CREWHALL_OUTPUTS`) y es lo que muestra el panel. Puedes
   descargar un artefacto, previsualizar imagen/PDF o **exportar** la conversación
   entera (transcript + inputs + outputs) a un **ZIP**.
-- **Co-edición en vivo.** Abrir un artefacto incorpora al agente como co-editor de la
-  **misma sesión** (mismo `document.key`): sus cambios aparecen en tu editor con su
-  propio cursor. Puedes dirigirlo desde el documento: el chat de co-autoría y los
-  **comentarios anclados** llegan al agente como prompts.
+- **Co-edición en vivo.** Abrir un artefacto lo muestra en el editor; el botón **Live**
+  incorpora al agente como co-editor de la **misma sesión** (mismo `document.key`): sus
+  cambios aparecen en tu editor con su propio cursor. Puedes dirigirlo desde el
+  documento: el chat de co-autoría y los **comentarios anclados** llegan al agente como
+  prompts. El editor headless se cierra al cerrar el panel o tras 10 minutos sin
+  actividad (`office.collab_idle_s`), y como máximo se co-edita un documento a la vez
+  (`office.collab_max_editors`, 1 por defecto).
 - **Formatos.** OOXML nativo (`.docx`/`.xlsx`/`.pptx`) y OpenDocument; `.md`/`.csv` se
   abren como texto/hoja y `.pdf` es solo lectura. crewhall **valida** el documento al
   abrir y al guardar, así que un guardado inválido nunca sobreescribe el artefacto

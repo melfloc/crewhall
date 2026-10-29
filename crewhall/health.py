@@ -106,6 +106,76 @@ def _memory_kb() -> int | None:
     return None
 
 
+def _rss_kb(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/status", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _ppid(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as fh:
+            raw = fh.read().decode("utf-8", "replace")
+        tail = raw[raw.rfind(")") + 2:].split()
+        return int(tail[1])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _children_rss_kb(root: int | None = None) -> int | None:
+    """Sum RSS of every descendant of ``root`` (the daemon by default).
+
+    The daemon's own VmRSS misses the processes that actually explain a spike:
+    headless Chromium co-editors and the per-agent OpenCode ``serve`` children.
+    """
+    root = os.getpid() if root is None else root
+    children: dict[int, list[int]] = {}
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return None
+    for name in names:
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        parent = _ppid(pid)
+        if parent is not None:
+            children.setdefault(parent, []).append(pid)
+    total = 0
+    queue = list(children.get(root, []))
+    while queue:
+        pid = queue.pop()
+        rss = _rss_kb(pid)
+        if rss is not None:
+            total += rss
+        queue.extend(children.get(pid, []))
+    return total
+
+
+def _office_editor_count() -> int | None:
+    try:
+        from .office import collab
+
+        return collab.REGISTRY.count()
+    except Exception:  # noqa: BLE001 - diagnostics only
+        return None
+
+
+def memory_fields() -> dict[str, Any]:
+    """Current daemon/children/co-editor memory, safe to call from any process."""
+    return {
+        "memory_kb": _memory_kb(),
+        "children_rss_kb": _children_rss_kb(),
+        "office_editors": _office_editor_count(),
+        "threads": _threads(),
+    }
+
+
 def _failures_last_hour(now: float, path: str | None = None) -> int:
     """Error results recorded by the audit log in the last hour (best effort)."""
     from . import audit
@@ -140,8 +210,7 @@ def sample(controller: Any = None, *, now: float | None = None,
         "ts": now,
         "rst": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)),
         "version": __version__,
-        "memory_kb": _memory_kb(),
-        "threads": _threads(),
+        **memory_fields(),
         "queue": None,
         "failures_last_hour": _failures_last_hour(now, audit_path),
         "workers_restarted": None,
@@ -230,6 +299,8 @@ def summarize_trend(records: list[dict[str, Any]]) -> dict[str, Any]:
         "since": records[0].get("rst") or records[0].get("ts"),
         "until": records[-1].get("rst") or records[-1].get("ts"),
         "memory_kb": _stat(records, "memory_kb"),
+        "children_rss_kb": _stat(records, "children_rss_kb"),
+        "office_editors": _stat(records, "office_editors"),
         "threads": _stat(records, "threads"),
         "queue": _stat(records, "queue"),
         "workers_restarted": _stat(records, "workers_restarted"),

@@ -53,6 +53,19 @@ class Journal(unittest.TestCase):
         sample = health.sample()
         self.assertIn("ts", sample)
         self.assertIn("version", sample)
+        self.assertIn("children_rss_kb", sample)
+        self.assertIn("office_editors", sample)
+        self.assertTrue(sample["children_rss_kb"] is None
+                        or sample["children_rss_kb"] >= 0)
+        self.assertTrue(sample["office_editors"] is None
+                        or sample["office_editors"] >= 0)
+
+    def test_children_memory_is_summarised(self):
+        records = [self._sample(children_rss_kb=100, office_editors=1),
+                   self._sample(children_rss_kb=300, office_editors=2)]
+        summary = health.summarize_trend(records)
+        self.assertEqual(summary["children_rss_kb"]["max"], 300)
+        self.assertEqual(summary["office_editors"]["max"], 2)
 
 
 class FailuresFromAudit(unittest.TestCase):

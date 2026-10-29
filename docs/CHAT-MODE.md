@@ -262,6 +262,8 @@ Dentro de **Chat** hay un sub-conmutador de disposición **Chat | Document**
 | `office.jwt_secret` | text (sensible) | `""` | igual que en el DS |
 | `office.lang` | choice | es | idioma del editor |
 | `office.collab_enabled` | bool | false | co-editor headless (Nivel 3) |
+| `office.collab_idle_s` | int | 600 | cierra el co-editor tras N s sin actividad (0 = nunca) |
+| `office.collab_max_editors` | int | 1 | documentos co-editados a la vez (LRU) |
 | `office.chromium` | text | `""` | binario de Chromium (auto si vacío) |
 | `web.public_url` | text | `""` | base pública de crewhall (fallback de `office.base_url`) |
 

@@ -18,6 +18,8 @@ class OpsOffice(OpsBase):
 
         if not office.enabled():
             raise ValueError("OnlyOffice is not enabled")
+        if not office.collab_enabled():
+            raise ValueError("live co-editing is disabled (office.collab_enabled)")
         cid = str(request["id"])
         rel = str(request.get("path") or "")
         path = conversations.resolve(cid, "outputs", rel)
