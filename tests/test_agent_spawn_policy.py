@@ -28,6 +28,25 @@ POLICY = {
     "agent_spawn_policy": {"name_patterns": PATTERNS, "teams": ["Conciliare", "Otro"],
                            "max_live": 6, "kinds": ["claude", "opencode"]},
 }
+SKIP = "--dangerously-skip-permissions"
+BACKEND_ARGS = ["--agent", "ejecutor-backend", SKIP]
+
+
+def profiles(cwd: str) -> list[dict]:
+    """The dev machine's profiles (cwd = its ``$HOME/Projects``)."""
+    sonnet = [{"name_pattern": f"Ejecutor_{role}_Sonnet_[1-9][0-9]?", "kind": "claude",
+               "args": ["--agent", agent, SKIP], "cwd": cwd}
+              for role, agent in (("Backend", "ejecutor-backend"), ("Frontend", "ejecutor-frontend"),
+                                  ("Sonda", "sonda"), ("Redactor", "redactor"))]
+    return [*sonnet,
+            {"name_pattern": "Ejecutor_DeepSeekV4Flash_[1-9][0-9]?", "kind": "opencode",
+             "args": ["--agent", "ejecutor"], "cwd": cwd},
+            {"name_pattern": "Auditor", "kind": "claude",
+             "args": ["--agent", "auditor", SKIP], "cwd": cwd},
+            {"name_pattern": "Investigador_Claude", "kind": "claude",
+             "args": ["--agent", "investigador", SKIP], "cwd": cwd},
+            {"name_pattern": "Investigador_DeepSeek", "kind": "opencode",
+             "args": ["--agent", "investigador_deepseek"], "cwd": cwd}]
 
 
 class AgentSpawnPolicy(unittest.TestCase):
@@ -45,6 +64,9 @@ class AgentSpawnPolicy(unittest.TestCase):
         self.addCleanup(env.stop)
         os.makedirs(os.environ["XDG_RUNTIME_DIR"], mode=0o700)
         self.store = StateStore(path=os.path.join(self.root, "state.json"))
+        self.launched: list[dict] = []
+        self.crash_views: list[dict] = []
+        self.fail: str | None = None
         self.controller = self._controller()
         self.server = Server(self.controller, os.path.join(self.root, "r", "d.sock"))
         c = self.controller
@@ -65,12 +87,21 @@ class AgentSpawnPolicy(unittest.TestCase):
         c = Controller(adopt=False, persist=False)
         c._store = self.store
 
-        def create_agent(kind, *, name=None, team=None, **_kw):
+        def create_agent(kind, *, name=None, team=None, agent_id=None, **kw):
+            if self.fail == "before":
+                raise RuntimeError("injected failure before launch")
             h = FakeHarness(name)
+            if agent_id:
+                h.session.session_id = agent_id
             c.register_agent(h)
             if team:
                 c.teams.add_member(team, h.agent_id)
             c._persist()
+            self.launched.append({"kind": kind, "name": name, **kw})
+            # What a daemon crash right after the launch would leave on disk.
+            self.crash_views.append(self.store.snapshot(c))
+            if self.fail == "after":
+                raise RuntimeError("injected failure after launch")
             return h
 
         c.create_agent = create_agent
@@ -166,6 +197,8 @@ class AgentSpawnPolicy(unittest.TestCase):
                           "kind 'codex' is not allowed")
         self.assertDenied(self.create("Ejecutor_Backend_Sonnet_3", conversation="c-1"),
                           "cannot target a chat")
+        self.assertDenied(self.create("Ejecutor_Backend_Sonnet_3", host="dev"),
+                          "cannot target a chat or a remote host")
 
     def test_max_live_then_stop_frees_a_slot(self) -> None:
         self._settings({**POLICY, "agent_spawn_policy": {**POLICY["agent_spawn_policy"],
@@ -230,6 +263,119 @@ class AgentSpawnPolicy(unittest.TestCase):
             ("Heraldo", "Auditor", "denied"),
         ])
         self.assertIn("does not match", rows[1]["reason"])
+
+    # -- profiles (F1) -------------------------------------------------------
+    def use_profiles(self, **policy) -> str:
+        cwd = os.path.join(self.root, "Projects")
+        os.makedirs(cwd, exist_ok=True)
+        self._settings({**POLICY, "agent_spawn_policy": {
+            "profiles": profiles(cwd), "teams": ["Conciliare"], "max_live": 6,
+            "kinds": ["claude", "opencode"], **policy}})
+        return cwd
+
+    def test_profile_exact_args_launch_the_profile_values(self) -> None:
+        cwd = self.use_profiles()
+        # The CLI sends --args as one string; the daemon splits it shell-style.
+        resp = self.create("Ejecutor_Backend_Sonnet_9",
+                           args="--agent ejecutor-backend --dangerously-skip-permissions")
+        self.assertTrue(resp.get("ok"), resp)
+        self.assertTrue(self.create("Ejecutor_DeepSeekV4Flash_3", kind="opencode",
+                                    args=["--agent", "ejecutor"], cwd=cwd,
+                                    workspace_mode="worktree").get("ok"))
+        self.assertEqual([(x["kind"], x["args"], x["cwd"], x["workspace_mode"])
+                          for x in self.launched],
+                         [("claude", BACKEND_ARGS, cwd, None),
+                          ("opencode", ["--agent", "ejecutor"], cwd, None)])
+
+    def test_profile_args_must_match_exactly(self) -> None:
+        self.use_profiles()
+        bad = ([*BACKEND_ARGS, SKIP], [*BACKEND_ARGS, "--verbose"],
+               ["--agent", SKIP, "ejecutor-backend"], [SKIP, "--agent", "ejecutor-backend"],
+               [*BACKEND_ARGS, "--settings", "x"], ["--agent", "ejecutor-frontend", SKIP],
+               ["--agent", "ejecutor-backend"], None, "--agent 'ejecutor-backend")
+        for args in bad:
+            self.assertDenied(self.create("Ejecutor_Backend_Sonnet_9", args=args),
+                              "args/cwd not allowed for profile")
+        self.assertDenied(self.create("Ejecutor_Backend_Sonnet_9", kind="opencode",
+                                      args=BACKEND_ARGS), "args/cwd not allowed for profile")
+        self.assertEqual(self.launched, [])
+
+    def test_profile_cwd_must_match_exactly(self) -> None:
+        cwd = self.use_profiles()
+        link = os.path.join(self.root, "link")
+        os.symlink(cwd, link)
+        for other in ("/tmp", f"{cwd}/sub", f"{cwd}/../Projects", f"{cwd}/", link, ""):
+            self.assertDenied(self.create("Ejecutor_Backend_Sonnet_9", args=BACKEND_ARGS,
+                                          cwd=other), "args/cwd not allowed for profile")
+        self.assertEqual(self.launched, [])
+
+    def test_profiles_replace_name_patterns(self) -> None:
+        self.use_profiles(name_patterns=["Evil_[0-9]"])
+        self.assertDenied(self.create("Evil_1", args=BACKEND_ARGS), "does not match any profile")
+        self.assertDenied(self.create("Ejecutor_Sonnet_1", args=BACKEND_ARGS), "is protected")
+        import re
+
+        self.assertFalse(any(re.fullmatch(p["name_pattern"], "Ejecutor_Sonnet_1")
+                             for p in profiles("/x")))
+        # A profiles key whose entries are all invalid allows nothing.
+        self._settings({**POLICY, "agent_spawn_policy": {
+            "profiles": [{"name_pattern": "Auditor", "kind": "claude", "args": [],
+                          "cwd": "relative"}], "teams": ["Conciliare"]}})
+        self.assertDenied(self.create("Auditor", args=[]), "does not match any profile")
+
+    # -- max_live counts live agents (F2) -------------------------------------
+    def test_max_live_counts_only_live_agents(self) -> None:
+        from crewhall.types import Status
+
+        self.use_profiles()
+        for n in range(1, 7):
+            self.assertTrue(self.create(f"Ejecutor_Backend_Sonnet_{n}", args=BACKEND_ARGS)
+                            .get("ok"))
+        self.assertDenied(self.create("Ejecutor_Backend_Sonnet_7", args=BACKEND_ARGS),
+                          "max_live (6) reached")
+        self.assertTrue(self.stop("Ejecutor_Backend_Sonnet_1").get("ok"))
+        self.assertTrue(self.create("Ejecutor_Backend_Sonnet_7", args=BACKEND_ARGS).get("ok"))
+        # An exited agent is still registered (listed) but does not take a slot.
+        self.controller.get_agent("Ejecutor_Backend_Sonnet_2").session.status = Status.EXITED
+        self.assertTrue(self.create("Ejecutor_Backend_Sonnet_8", args=BACKEND_ARGS).get("ok"))
+        self.assertDenied(self.create("Ejecutor_Backend_Sonnet_10", args=BACKEND_ARGS),
+                          "max_live (6) reached")
+
+    # -- creator recorded before launch (F3) ----------------------------------
+    def test_creator_is_persisted_with_the_first_record(self) -> None:
+        self.use_profiles()
+        self.assertTrue(self.create("Ejecutor_Backend_Sonnet_9", args=BACKEND_ARGS).get("ok"))
+        new_id = self.controller.get_agent("Ejecutor_Backend_Sonnet_9").agent_id
+        rows = [a for a in self.crash_views[0]["agents"] if a["agent_id"] == new_id]
+        self.assertEqual([r["created_by"] for r in rows], [self.ids["Heraldo"]])
+
+    def test_failed_launch_leaves_no_unstoppable_agent(self) -> None:
+        self.use_profiles()
+        for when in ("before", "after"):
+            self.fail = when
+            resp = self.create("Ejecutor_Backend_Sonnet_9", args=BACKEND_ARGS)
+            self.assertFalse(resp.get("ok"), resp)
+            self.assertIn(f"injected failure {when} launch", resp["error"])
+            self.assertNotIn("Ejecutor_Backend_Sonnet_9",
+                             [h.name for h in self.controller.agents.all()])
+            self.assertEqual(self.controller._agent_created_by, {})
+        # A crash right after the launch: the restored agent is Heraldo's to stop.
+        self.fail = None
+        self.store.save(self.crash_views[-1])
+        c2 = self._controller()
+        c2.restore()
+        server2 = Server(c2, os.path.join(self.root, "r", "d2.sock"))
+        self.assertTrue(self.call("agent_stop", server=server2,
+                                  target="Ejecutor_Backend_Sonnet_9").get("ok"))
+
+    def test_denied_profile_create_audits_the_reason(self) -> None:
+        self.use_profiles()
+        self.create("Ejecutor_Backend_Sonnet_9", args=[*BACKEND_ARGS, "--settings", "x"])
+        with open(audit.audit_path(), encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh]
+        rows = [r for r in rows if r["op"] == "agent_spawn_policy"]
+        self.assertEqual([(r["decision"], r["reason"]) for r in rows],
+                         [("denied", "args/cwd not allowed for profile")])
 
 
 class SpawnCliSendsIdentity(unittest.TestCase):

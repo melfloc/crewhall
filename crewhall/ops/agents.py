@@ -287,28 +287,52 @@ class OpsAgents(OpsBase):
         """Create allowed by the spawn policy: re-checked under its lock, then owned."""
         from .. import spawn_policy
         from ..messaging import MessagingError
+        from ..types import new_session_id
 
         with spawn_policy.LOCK:
             caller = self.controller.agents.resolve(creator)
             reason = spawn_policy.check_create(self.controller, caller, request)
             if reason:
                 raise MessagingError(f"agent spawn policy: {reason}")
-            harness = self.controller.create_agent(
-                request["kind"],
-                name=request["name"],
-                backend=request.get("backend"),
-                cwd=request.get("cwd"),
-                team=request["team"],
-                cols=_dim(request.get("cols", 120), "cols"),
-                rows=_dim(request.get("rows", 40), "rows"),
-                wait_ready=False,
-                args=request.get("args"),
-                workspace_mode=request.get("workspace_mode"),
-            )
+            launch = spawn_policy.launch_values(request)
+            # The owner is recorded before the launch, so the first persisted
+            # record of the agent already carries it (no unstoppable orphan).
+            agent_id = new_session_id()
+            self.controller._agent_created_by[agent_id] = caller.agent_id
+            try:
+                harness = self.controller.create_agent(
+                    launch["kind"],
+                    name=request["name"],
+                    backend=request.get("backend"),
+                    cwd=launch["cwd"],
+                    team=request["team"],
+                    cols=_dim(request.get("cols", 120), "cols"),
+                    rows=_dim(request.get("rows", 40), "rows"),
+                    wait_ready=False,
+                    agent_id=agent_id,
+                    args=launch["args"],
+                    workspace_mode=launch["workspace_mode"],
+                )
+            except BaseException:
+                self._rollback_spawn(agent_id)
+                raise
             self.controller.set_agent_creator(harness.agent_id, caller.agent_id)
         if request.get("wait_ready"):
             harness.start(timeout=float(request.get("timeout", 30.0)))
         return {"agent": self.controller.agent_summary(harness)}
+
+    def _rollback_spawn(self, agent_id: str) -> None:
+        """Undo a failed agent-initiated create; the owner stays while the agent does."""
+        def registered() -> bool:
+            return any(h.agent_id == agent_id for h in self.controller.agents.all())
+
+        if registered():
+            try:
+                self.controller.remove_agent(agent_id, force=True)
+            except Exception:  # noqa: BLE001 - keep the owner so it can still stop it
+                log.warning("could not roll back agent %s", agent_id, exc_info=True)
+        if not registered():
+            self.controller._agent_created_by.pop(agent_id, None)
 
     def _op_agent_stop(self, request: dict[str, Any]) -> dict[str, Any]:
         creator = request.get("_spawn_caller")

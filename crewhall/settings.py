@@ -292,6 +292,24 @@ def _str_list(value: Any) -> list[str]:
     return [v for v in value if isinstance(v, str) and v] if isinstance(value, list) else []
 
 
+def _spawn_profile(entry: Any) -> dict[str, Any] | None:
+    """A valid ``agent_spawn_policy.profiles`` entry, or None."""
+    if not isinstance(entry, dict):
+        return None
+    pattern, kind, args, cwd = (entry.get(k) for k in ("name_pattern", "kind", "args", "cwd"))
+    if not isinstance(pattern, str) or not pattern or kind not in ("claude", "opencode"):
+        return None
+    try:
+        re.compile(pattern)
+    except re.error:
+        return None
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        return None
+    if not isinstance(cwd, str) or not os.path.isabs(cwd) or os.path.normpath(cwd) != cwd:
+        return None
+    return {"name_pattern": pattern, "kind": kind, "args": list(args), "cwd": cwd}
+
+
 def agent_spawn() -> dict[str, Any]:
     """The agent spawn policy keys (see :mod:`crewhall.spawn_policy`), validated.
 
@@ -313,9 +331,22 @@ def agent_spawn() -> dict[str, Any]:
     if not isinstance(max_live, int) or isinstance(max_live, bool) or max_live < 0:
         max_live = 0
     protected = data.get("agent_spawn_protected")
+    profiles = None
+    if "profiles" in policy:
+        # When present it is the sole source of allowed names (and fixes each
+        # name's kind/args/cwd); an invalid entry is dropped, never relaxed.
+        raw = policy["profiles"]
+        profiles = []
+        for entry in raw if isinstance(raw, list) else []:
+            profile = _spawn_profile(entry)
+            if profile is None:
+                log.warning("ignoring invalid agent_spawn_policy profile %r", entry)
+            else:
+                profiles.append(profile)
     return {
         "spawners": _str_list(data.get("agent_spawners")),
         "name_patterns": patterns,
+        "profiles": profiles,
         "teams": _str_list(policy.get("teams")),
         "max_live": max_live,
         "kinds": _str_list(policy.get("kinds", ["claude", "opencode"])),

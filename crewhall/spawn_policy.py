@@ -5,14 +5,18 @@ settings API, which is control plane):
 
 * ``agent_spawners`` — agent names allowed to create/stop agents (default ``[]``:
   the policy is off and agents get the usual control-plane refusal);
-* ``agent_spawn_policy`` — ``{"name_patterns": [regex], "teams": [name],
-  "max_live": int, "kinds": [kind]}``;
+* ``agent_spawn_policy`` — ``{"profiles": [profile], "teams": [name],
+  "max_live": int, "kinds": [kind]}``. A profile is ``{"name_pattern": regex,
+  "kind": kind, "args": [argv token], "cwd": absolute path}``: a request must
+  send exactly that kind, argv list and cwd (or omit cwd), and the agent is
+  launched with the profile's values. Legacy ``name_patterns: [regex]`` (the
+  request chooses args/cwd) is used only when ``profiles`` is absent;
 * ``agent_spawn_protected`` — names no spawner may create or stop. The names in
   :data:`ALWAYS_PROTECTED` are protected even if this key is edited.
 
 The caller is the agent authenticated by its token (never a request field). A
 spawner may create only a pattern-matching name, into a listed team it belongs
-to, up to ``max_live`` live agents of its own; it may stop only an agent it
+to, up to ``max_live`` live agents of its own (exited ones do not count); it may stop only an agent it
 created itself (``created_by``, persisted with the agent record).
 """
 from __future__ import annotations
@@ -23,6 +27,7 @@ import unicodedata
 from typing import Any
 
 from . import settings
+from .types import parse_agent_args
 
 ALWAYS_PROTECTED = ("Heraldo", "Orquestador", "Ejecutor_Sonnet_1")
 
@@ -54,10 +59,49 @@ def _created_by(controller: Any) -> dict[str, str]:
     return getattr(controller, "_agent_created_by", {})
 
 
+def _alive(harness: Any) -> bool:
+    status = getattr(getattr(harness, "session", None), "status", None)
+    return bool(getattr(status, "alive", False))
+
+
 def live_created(controller: Any, caller_id: str) -> int:
-    """Agents still registered that ``caller_id`` created."""
+    """Agents ``caller_id`` created whose process is still alive."""
     owners = _created_by(controller)
-    return sum(1 for h in controller.agents.all() if owners.get(h.agent_id) == caller_id)
+    return sum(1 for h in controller.agents.all()
+               if owners.get(h.agent_id) == caller_id and _alive(h))
+
+
+def _profile_for(cfg: dict[str, Any], request: dict[str, Any]) -> tuple[dict | None, str | None]:
+    """The profile this request matches exactly, or the reason it matches none."""
+    name = request["name"]
+    matching = [p for p in cfg["profiles"] if re.fullmatch(p["name_pattern"], name)]
+    if not matching:
+        return None, f"name {name!r} does not match any profile"
+    try:
+        args = parse_agent_args(request.get("args"))
+    except ValueError:
+        return None, "args/cwd not allowed for profile"
+    cwd = request.get("cwd")
+    for profile in matching:
+        if (profile["kind"] == request.get("kind") and args == profile["args"]
+                and (cwd is None or cwd == profile["cwd"])):
+            return profile, None
+    return None, "args/cwd not allowed for profile"
+
+
+def launch_values(request: dict[str, Any]) -> dict[str, Any]:
+    """kind/args/cwd/workspace_mode to launch an allowed request with.
+
+    With profiles they come from the matching profile, never the request.
+    """
+    cfg = config()
+    if cfg["profiles"] is None:
+        return {k: request.get(k) for k in ("kind", "args", "cwd", "workspace_mode")}
+    profile, reason = _profile_for(cfg, request)
+    if profile is None:
+        raise ValueError(reason)
+    return {"kind": profile["kind"], "args": list(profile["args"]), "cwd": profile["cwd"],
+            "workspace_mode": None}
 
 
 def check_create(controller: Any, caller: Any, request: dict[str, Any]) -> str | None:
@@ -77,7 +121,11 @@ def check_create(controller: Any, caller: Any, request: dict[str, Any]) -> str |
         return f"name {name!r} has non-ASCII, non-printable or surrounding blank characters"
     if _fold(name) in cfg["protected"]:
         return f"name {name!r} is protected"
-    if not any(re.fullmatch(p, name) for p in cfg["name_patterns"]):
+    if cfg["profiles"] is not None:
+        reason = _profile_for(cfg, request)[1]
+        if reason:
+            return reason
+    elif not any(re.fullmatch(p, name) for p in cfg["name_patterns"]):
         return f"name {name!r} does not match name_patterns"
     if any(_fold(h.name or "") == _fold(name) for h in controller.agents.all()):
         return f"name {name!r} is already taken"
