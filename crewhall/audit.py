@@ -22,6 +22,8 @@ FILENAME = "audit.jsonl"
 MAX_BYTES = 5 * 1024 * 1024
 KEEP = 3
 MAX_LINE = 4000
+MAX_FIELD = 256  # each ``extra`` value (often request-controlled)
+MAX_RECORD = 4096  # bytes per audit line
 
 _LOCK = threading.Lock()
 
@@ -130,10 +132,20 @@ def record(op: str, *, actor: str = "local", result: str = "ok", summary: str = 
         "result": str(result)[:40],
         "summary": str(summary)[:MAX_LINE],
     }
+    truncated = False
     if extra:
         for key, value in extra.items():
+            if not isinstance(value, (bool, int, float)) and value is not None:
+                text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+                if len(text) > MAX_FIELD:
+                    value, truncated = text[:MAX_FIELD], True
             entry[str(key)[:40]] = value
     line = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+    if len(line.encode("utf-8")) > MAX_RECORD:
+        entry["summary"], truncated = entry["summary"][:MAX_FIELD], True
+        line = json.dumps({**entry, "truncated": True}, ensure_ascii=False, separators=(",", ":"))
+    elif truncated:
+        line = json.dumps({**entry, "truncated": True}, ensure_ascii=False, separators=(",", ":"))
     try:
         with _LOCK:
             directory = os.path.dirname(audit_path())

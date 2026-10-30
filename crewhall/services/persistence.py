@@ -278,7 +278,17 @@ class ServicesPersistence:
         return revived
 
     def restart_agent(self, target: str) -> Harness:
-        """Restart the process of a registered agent, preserving its identity."""
+        """Restart the process of a registered agent, preserving its identity.
+
+        Reviving an agent another agent created re-checks its creator's
+        ``max_live`` (spawn policy), whatever path asks for the revive.
+        """
+        from .. import spawn_policy
+
+        with spawn_policy.revive_guard(self, self.agents.resolve(target)):
+            return self._restart_agent(target)
+
+    def _restart_agent(self, target: str) -> Harness:
         harness = self.agents.resolve(target)
         agent_id = harness.agent_id
         with self._lock_for_agent(agent_id):

@@ -7,27 +7,42 @@ settings API, which is control plane):
   the policy is off and agents get the usual control-plane refusal);
 * ``agent_spawn_policy`` — ``{"profiles": [profile], "teams": [name],
   "max_live": int, "kinds": [kind]}``. A profile is ``{"name_pattern": regex,
-  "kind": kind, "args": [argv token], "cwd": absolute path}``: a request must
-  send exactly that kind, argv list and cwd (or omit cwd), and the agent is
-  launched with the profile's values. Legacy ``name_patterns: [regex]`` (the
-  request chooses args/cwd) is used only when ``profiles`` is absent;
+  "kind": kind, "args": [argv token], "cwd": absolute path, "backend":
+  tmux|pty}``: a request must send exactly that kind, argv list and cwd (or
+  omit cwd) and no other backend, and the agent is launched with the
+  profile's values. Anything malformed (no ``profiles``, an unknown key)
+  makes the policy deny everything;
 * ``agent_spawn_protected`` — names no spawner may create or stop. The names in
-  :data:`ALWAYS_PROTECTED` are protected even if this key is edited.
+  :data:`ALWAYS_PROTECTED` and every spawner name are protected even if this
+  key is edited.
 
-The caller is the agent authenticated by its token (never a request field). A
-spawner may create only a pattern-matching name, into a listed team it belongs
-to, up to ``max_live`` live agents of its own (exited ones do not count); it may stop only an agent it
-created itself (``created_by``, persisted with the agent record).
+The keys are read ONCE, when the daemon starts (:func:`load`): editing
+settings.json afterwards changes nothing until the next daemon start.
+
+The caller is the agent authenticated by its token *and* by the calling
+process descending from that agent's own process tree. A spawner may create
+only a profile-matching name, into a listed plain (local, non-worktree) team it
+belongs to, up to ``max_live`` live agents of its own; it may stop only an
+agent it created itself (``created_by``, persisted with the agent record). An
+agent created by an agent never spawns, and reviving an exited one re-checks
+its creator's ``max_live``.
 """
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import json
+import logging
 import re
 import threading
 import unicodedata
+from collections.abc import Iterator
 from typing import Any
 
 from . import settings
 from .types import parse_agent_args
+
+log = logging.getLogger(__name__)
 
 ALWAYS_PROTECTED = ("Heraldo", "Orquestador", "Ejecutor_Sonnet_1")
 
@@ -35,20 +50,56 @@ ALWAYS_PROTECTED = ("Heraldo", "Orquestador", "Ejecutor_Sonnet_1")
 # creates cannot both see a free ``max_live`` slot or the same free name.
 LOCK = threading.Lock()
 
+# The policy as read at daemon start (see :func:`load`).
+_SNAPSHOT: dict[str, Any] | None = None
+
 
 def _fold(name: str) -> str:
     return unicodedata.normalize("NFKC", name).casefold().strip()
 
 
+def digest(raw: dict[str, Any]) -> str:
+    """SHA-256 of the ``agent_spawn*`` keys as canonical JSON."""
+    blob = json.dumps(raw, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def load() -> dict[str, Any]:
+    """Read the policy from settings.json; the daemon calls this once at start."""
+    global _SNAPSHOT
+    raw = settings.agent_spawn()
+    _SNAPSHOT = {**raw, "sha256": digest(settings.spawn_policy_raw())}
+    if raw["invalid"]:
+        log.error("agent spawn policy invalid: %s", raw["invalid"])
+    return _SNAPSHOT
+
+
+def _snapshot() -> dict[str, Any]:
+    return _SNAPSHOT if _SNAPSHOT is not None else load()
+
+
 def config() -> dict[str, Any]:
     """The effective policy (validated; defaults when absent)."""
-    raw = settings.agent_spawn()
-    protected = {_fold(n) for n in (*ALWAYS_PROTECTED, *raw["protected"])}
+    raw = _snapshot()
+    protected = {_fold(n) for n in (*ALWAYS_PROTECTED, *raw["protected"], *raw["spawners"])}
     return {**raw, "protected": protected}
 
 
 def enabled() -> bool:
-    return bool(settings.agent_spawn()["spawners"])
+    return bool(_snapshot()["spawners"])
+
+
+def audit_decision(op: str, who: str, target: Any, reason: str | None) -> None:
+    """The one ``agent_spawn_policy`` audit line of a request (its final decision)."""
+    from . import audit
+
+    decision = "denied" if reason else "allowed"
+    audit.record(
+        "agent_spawn_policy", actor=who, result=decision,
+        summary=f"{op} {str(target)[:audit.MAX_FIELD]!r}: {(reason or 'allowed')[:audit.MAX_FIELD]}",
+        extra={"caller": who, "request_op": op, "target": str(target),
+               "decision": decision, "reason": reason or ""},
+    )
 
 
 def _is_spawner(cfg: dict[str, Any], caller: Any) -> bool:
@@ -80,35 +131,38 @@ def _profile_for(cfg: dict[str, Any], request: dict[str, Any]) -> tuple[dict | N
     try:
         args = parse_agent_args(request.get("args"))
     except ValueError:
-        return None, "args/cwd not allowed for profile"
+        return None, "args/cwd/backend not allowed for profile"
     cwd = request.get("cwd")
+    backend = request.get("backend")
     for profile in matching:
         if (profile["kind"] == request.get("kind") and args == profile["args"]
-                and (cwd is None or cwd == profile["cwd"])):
+                and (cwd is None or cwd == profile["cwd"])
+                and backend in (None, "auto", profile["backend"])):
             return profile, None
-    return None, "args/cwd not allowed for profile"
+    return None, "args/cwd/backend not allowed for profile"
 
 
 def launch_values(request: dict[str, Any]) -> dict[str, Any]:
-    """kind/args/cwd/workspace_mode to launch an allowed request with.
+    """kind/args/cwd/backend/workspace_mode to launch an allowed request with.
 
-    With profiles they come from the matching profile, never the request.
+    They come from the matching profile, never the request.
     """
-    cfg = config()
-    if cfg["profiles"] is None:
-        return {k: request.get(k) for k in ("kind", "args", "cwd", "workspace_mode")}
-    profile, reason = _profile_for(cfg, request)
+    profile, reason = _profile_for(config(), request)
     if profile is None:
         raise ValueError(reason)
     return {"kind": profile["kind"], "args": list(profile["args"]), "cwd": profile["cwd"],
-            "workspace_mode": None}
+            "backend": profile["backend"], "workspace_mode": "shared"}
 
 
 def check_create(controller: Any, caller: Any, request: dict[str, Any]) -> str | None:
     """None if ``caller`` may create this agent, else the reason it may not."""
     cfg = config()
+    if cfg["invalid"]:
+        return f"policy invalid: {cfg['invalid']}"
     if not _is_spawner(cfg, caller):
         return f"{caller.name or caller.agent_id} is not in agent_spawners"
+    if _created_by(controller).get(caller.agent_id):
+        return f"{caller.name} was created by an agent and cannot spawn"
     kind = request.get("kind")
     if kind not in cfg["kinds"]:
         return f"kind {kind!r} is not allowed"
@@ -121,12 +175,9 @@ def check_create(controller: Any, caller: Any, request: dict[str, Any]) -> str |
         return f"name {name!r} has non-ASCII, non-printable or surrounding blank characters"
     if _fold(name) in cfg["protected"]:
         return f"name {name!r} is protected"
-    if cfg["profiles"] is not None:
-        reason = _profile_for(cfg, request)[1]
-        if reason:
-            return reason
-    elif not any(re.fullmatch(p, name) for p in cfg["name_patterns"]):
-        return f"name {name!r} does not match name_patterns"
+    reason = _profile_for(cfg, request)[1]
+    if reason:
+        return reason
     if any(_fold(h.name or "") == _fold(name) for h in controller.agents.all()):
         return f"name {name!r} is already taken"
     team = controller._team_or_none(request.get("team"))
@@ -134,6 +185,8 @@ def check_create(controller: Any, caller: Any, request: dict[str, Any]) -> str |
         return f"team {request.get('team')!r} is not allowed"
     if caller.agent_id not in team.agent_ids:
         return f"{caller.name} is not a member of team {team.name!r}"
+    if team.host or team.workspace_mode == "worktree":
+        return f"team {team.name!r} has a remote host or worktree mode"
     if live_created(controller, caller.agent_id) >= cfg["max_live"]:
         return f"max_live ({cfg['max_live']}) reached"
     return None
@@ -142,6 +195,8 @@ def check_create(controller: Any, caller: Any, request: dict[str, Any]) -> str |
 def check_stop(controller: Any, caller: Any, request: dict[str, Any]) -> str | None:
     """None if ``caller`` may stop this agent, else the reason it may not."""
     cfg = config()
+    if cfg["invalid"]:
+        return f"policy invalid: {cfg['invalid']}"
     if not _is_spawner(cfg, caller):
         return f"{caller.name or caller.agent_id} is not in agent_spawners"
     try:
@@ -155,3 +210,22 @@ def check_stop(controller: Any, caller: Any, request: dict[str, Any]) -> str | N
     if _created_by(controller).get(target.agent_id) != caller.agent_id:
         return f"{target.name or target.agent_id} was not created by {caller.name}"
     return None
+
+
+@contextlib.contextmanager
+def revive_guard(controller: Any, harness: Any) -> Iterator[None]:
+    """Hold around any revive of ``harness``: an exited agent another agent
+    created comes back only while its creator is under ``max_live``."""
+    owner = _created_by(controller).get(harness.agent_id)
+    if owner is None or _alive(harness):
+        yield
+        return
+    from .messaging import MessagingError
+
+    with LOCK:
+        limit = config()["max_live"]
+        if live_created(controller, owner) >= limit:
+            raise MessagingError(
+                f"agent spawn policy: max_live ({limit}) reached for the creator of "
+                f"{harness.name or harness.agent_id}")
+        yield

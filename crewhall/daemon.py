@@ -241,6 +241,7 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
         with open(paths.pid_path(), "w") as fh:
             fh.write(str(os.getpid()))
         log.info("daemon listening on %s", self.socket_path)
+        self._load_spawn_policy()
         # A killed/crashed daemon cannot run its cleanup: its headless Chromium
         # co-editors (and their 100s of MB) would survive forever. Now that we
         # own the singleton lock, reap anything named after a crewhall profile.
@@ -433,12 +434,50 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             roots = self.controller.agent_root_pids()
         except Exception:  # noqa: BLE001 - a broken registry is not proof
             roots = set()
-        if roots:
-            from .processes import ancestors
-
-            if set(ancestors(peer_pid)) & roots:
-                return True
+        if self._descends_from(peer_pid, roots):
+            return True
         return self._environ_has_agent_token(peer_pid)
+    @staticmethod
+    def _descends_from(peer_pid: int, roots: set[int]) -> bool:
+        """Whether ``peer_pid`` is one of ``roots`` or descends from one (``/proc``)."""
+        if not roots:
+            return False
+        from .processes import ancestors
+
+        return bool(set(ancestors(peer_pid)) & roots)
+    def _peer_binding_error(self, caller: Any, peer_pid: int | None) -> str | None:
+        """None if the calling process descends from ``caller``'s own process tree
+        (and no other agent's): a token alone never authenticates a spawn op."""
+        if not peer_pid or peer_pid == 1:
+            return "calling process unknown (no peer pid)"
+        try:
+            roots = self.controller.agent_roots()
+        except Exception:  # noqa: BLE001 - a broken registry proves nothing: deny
+            roots = {}
+        own = roots.get(caller.agent_id) or set()
+        if not self._descends_from(peer_pid, own):
+            return f"calling process is not in {caller.name or caller.agent_id}'s process tree"
+        others = set().union(*(r for a, r in roots.items() if a != caller.agent_id))
+        if self._descends_from(peer_pid, others - own):
+            return "calling process belongs to another agent's process tree"
+        return None
+    def _load_spawn_policy(self) -> None:
+        """Read the spawn policy once at start and log its SHA-256 to the audit log."""
+        from . import audit
+
+        try:
+            cfg = spawn_policy.load()
+        except Exception:  # noqa: BLE001 - a broken policy must not stop the daemon
+            log.exception("could not load the agent spawn policy")
+            return
+        invalid = cfg["invalid"]
+        log.info("agent spawn policy sha256=%s spawners=%s", cfg["sha256"], cfg["spawners"])
+        audit.record(
+            "agent_spawn_policy_loaded", actor="daemon",
+            result="invalid" if invalid else "ok",
+            summary=f"policy invalid: {invalid}" if invalid else f"sha256 {cfg['sha256']}",
+            extra={"sha256": cfg["sha256"], "spawners": len(cfg["spawners"]),
+                   "invalid": invalid or ""})
     def _environ_has_agent_token(self, pid: int) -> bool:
         try:
             tokens = set(self.controller.agent_tokens())
@@ -484,7 +523,7 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             # Only the gate sets it, after the policy allowed the request.
             request.pop("_spawn_caller", None)
             if (request.get("sender") or request.get("token")) and spawn_policy.enabled():
-                return self._guard_spawn(op, request)
+                return self._guard_spawn(op, request, peer_pid)
         if op in self.AGENT_OFFICE_OPS and request.get("sender"):
             # Agent-authenticated co-editing (``crewhall office`` inside a chat).
             if self._agent_office_allowed(request):
@@ -496,10 +535,11 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
         if not self._control_token or token != self._control_token:
             return {"ok": False, "error": "control plane requires a valid control token"}
         return None
-    def _guard_spawn(self, op: str, request: dict[str, Any]) -> dict[str, Any] | None:
-        """Agent-initiated create/stop: authenticate the caller, apply the policy, audit."""
-        from . import audit
-
+    def _guard_spawn(self, op: str, request: dict[str, Any],
+                     peer_pid: int | None) -> dict[str, Any] | None:
+        """Agent-initiated create/stop: authenticate the caller (token AND calling
+        process), apply the policy. A denial is audited here; an allowed request
+        is audited by the op, after its final check under ``spawn_policy.LOCK``."""
         target = request.get("name") if op == "agent_create" else request.get("target")
         caller = None
         who = f"unauthenticated:{request.get('sender')}"
@@ -510,17 +550,15 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             reason: str | None = "invalid agent identity/token"
         else:
             who = caller.name or caller.agent_id
-            check = spawn_policy.check_create if op == "agent_create" else spawn_policy.check_stop
-            reason = check(self.controller, caller, request)
-        audit.record(
-            "agent_spawn_policy", actor=who, result="denied" if reason else "allowed",
-            summary=f"{op} {target!r}: {reason or 'allowed'}",
-            extra={"caller": who, "request_op": op, "target": str(target),
-                   "decision": "denied" if reason else "allowed", "reason": reason or ""},
-        )
+            reason = self._peer_binding_error(caller, peer_pid)
+            if reason is None:
+                check = spawn_policy.check_create if op == "agent_create" else spawn_policy.check_stop
+                reason = check(self.controller, caller, request)
         if reason:
+            spawn_policy.audit_decision(op, who, target, reason)
             return {"ok": False, "error": f"agent spawn policy: {reason}"}
         request["_spawn_caller"] = caller.agent_id  # type: ignore[union-attr]
+        request["_actor"] = who
         return None
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         from . import audit

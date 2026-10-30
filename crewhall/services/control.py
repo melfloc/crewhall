@@ -84,6 +84,17 @@ class ServicesControl:
         self, target: str, *, fresh: bool = False, reason: str | None = None,
         by: str = "user", timeout: float = 30.0,
     ) -> dict[str, Any]:
+        from .. import spawn_policy
+
+        # A spawn-created agent that exited is revived only within its
+        # creator's max_live (spawn policy).
+        with spawn_policy.revive_guard(self, self.agents.resolve(target)):
+            return self._force_restart_agent(
+                target, fresh=fresh, reason=reason, by=by, timeout=timeout)
+
+    def _force_restart_agent(
+        self, target: str, *, fresh: bool, reason: str | None, by: str, timeout: float,
+    ) -> dict[str, Any]:
         harness = self.agents.resolve(target)
         # Restart is never gated: it is exactly what relaunches the agent on the
         # compatible binary (the version report is recalculated afterwards).

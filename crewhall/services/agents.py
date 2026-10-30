@@ -1876,8 +1876,13 @@ class ServicesAgents:
         (via ``SO_PEERCRED`` + the ``/proc`` ancestry) and lock it out of the
         control plane, whatever credentials it presents.
         """
-        pids: set[int] = set()
+        return set().union(*self.agent_roots().values())
+
+    def agent_roots(self) -> dict[str, set[int]]:
+        """Each live agent's root PIDs (its TUI, plus its v2 ``serve``), by agent id."""
+        out: dict[str, set[int]] = {}
         for harness in self.agents.all():
+            pids: set[int] = set()
             try:
                 if harness.session.status.alive and harness.session.pid:
                     pids.add(int(harness.session.pid))
@@ -1888,7 +1893,9 @@ class ServicesAgents:
             server = self._opencode_servers.get(harness.agent_id)
             if server is not None and server.poll() is None:
                 pids.add(int(server.pid))
-        return pids
+            if pids:
+                out[harness.agent_id] = pids
+        return out
 
     def agent_tokens(self) -> list[str]:
         """Live agent identity tokens (the daemon matches a caller's environ)."""

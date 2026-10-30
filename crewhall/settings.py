@@ -286,73 +286,100 @@ def _validate_host(name: Any, body: Any) -> dict[str, Any]:
 
 SPAWN_KEYS = ("agent_spawners", "agent_spawn_policy", "agent_spawn_protected")
 SPAWN_PROTECTED_DEFAULT = ("Heraldo", "Orquestador", "Ejecutor_Sonnet_1")
+SPAWN_POLICY_KEYS = {"profiles", "teams", "max_live", "kinds"}
+SPAWN_PROFILE_KEYS = {"name_pattern", "kind", "args", "cwd", "backend"}
+SPAWN_BACKENDS = ("tmux", "pty")
 
 
 def _str_list(value: Any) -> list[str]:
     return [v for v in value if isinstance(v, str) and v] if isinstance(value, list) else []
 
 
-def _spawn_profile(entry: Any) -> dict[str, Any] | None:
-    """A valid ``agent_spawn_policy.profiles`` entry, or None."""
+def spawn_default_backend() -> str:
+    """What ``auto`` resolves to on this machine (a profile's default backend)."""
+    from .backends import tmux_available
+
+    return "tmux" if tmux_available() else "pty"
+
+
+def _spawn_profile(entry: Any) -> dict[str, Any]:
+    """A validated ``agent_spawn_policy.profiles`` entry; raises SettingsError."""
     if not isinstance(entry, dict):
-        return None
+        raise SettingsError(f"profile {entry!r} is not a table")
+    unknown = set(entry) - SPAWN_PROFILE_KEYS
+    if unknown:
+        raise SettingsError(f"profile unknown keys {sorted(unknown)}")
     pattern, kind, args, cwd = (entry.get(k) for k in ("name_pattern", "kind", "args", "cwd"))
+    backend = entry.get("backend", spawn_default_backend())
     if not isinstance(pattern, str) or not pattern or kind not in ("claude", "opencode"):
-        return None
+        raise SettingsError(f"profile {pattern!r}: name_pattern and kind claude|opencode required")
     try:
         re.compile(pattern)
-    except re.error:
-        return None
+    except re.error as exc:
+        raise SettingsError(f"profile {pattern!r}: bad regex ({exc})") from None
     if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
-        return None
+        raise SettingsError(f"profile {pattern!r}: args must be a list of strings")
     if not isinstance(cwd, str) or not os.path.isabs(cwd) or os.path.normpath(cwd) != cwd:
-        return None
-    return {"name_pattern": pattern, "kind": kind, "args": list(args), "cwd": cwd}
+        raise SettingsError(f"profile {pattern!r}: cwd must be a normalized absolute path")
+    if backend not in SPAWN_BACKENDS:
+        raise SettingsError(f"profile {pattern!r}: backend must be one of {list(SPAWN_BACKENDS)}")
+    return {"name_pattern": pattern, "kind": kind, "args": list(args), "cwd": cwd,
+            "backend": backend}
+
+
+def _spawn_policy_body(data: dict[str, Any]) -> dict[str, Any]:
+    """The validated policy body; raises SettingsError (the policy then denies all)."""
+    stray = {k for k in data if k.startswith("agent_spawn") and k not in SPAWN_KEYS}
+    if stray:
+        raise SettingsError(f"unknown keys {sorted(stray)}")
+    policy = data.get("agent_spawn_policy")
+    if not isinstance(policy, dict):
+        raise SettingsError("agent_spawn_policy missing or not a table")
+    unknown = set(policy) - SPAWN_POLICY_KEYS
+    if unknown:
+        raise SettingsError(f"agent_spawn_policy unknown keys {sorted(unknown)}")
+    raw = policy.get("profiles")
+    if not isinstance(raw, list) or not raw:
+        raise SettingsError("agent_spawn_policy.profiles missing or empty")
+    max_live = policy.get("max_live", 6)
+    if not isinstance(max_live, int) or isinstance(max_live, bool) or max_live < 0:
+        raise SettingsError("agent_spawn_policy.max_live must be an integer >= 0")
+    return {
+        "profiles": [_spawn_profile(entry) for entry in raw],
+        "teams": _str_list(policy.get("teams")),
+        "max_live": max_live,
+        "kinds": _str_list(policy.get("kinds", ["claude", "opencode"])),
+    }
 
 
 def agent_spawn() -> dict[str, Any]:
     """The agent spawn policy keys (see :mod:`crewhall.spawn_policy`), validated.
 
-    Invalid parts fall back to the safe value (an empty list allows nothing);
-    an uncompilable regex is dropped.
+    Fails closed: with ``agent_spawners`` set, anything malformed (missing or
+    empty ``profiles``, an unknown key at policy or profile level, a misspelled
+    ``agent_spawn*`` key) leaves ``invalid`` set and the policy allows nothing.
     """
     data = load()
-    policy = data.get("agent_spawn_policy")
-    policy = policy if isinstance(policy, dict) else {}
-    patterns = []
-    for pattern in _str_list(policy.get("name_patterns")):
-        try:
-            re.compile(pattern)
-        except re.error:
-            log.warning("ignoring invalid agent_spawn_policy pattern %r", pattern)
-            continue
-        patterns.append(pattern)
-    max_live = policy.get("max_live", 6)
-    if not isinstance(max_live, int) or isinstance(max_live, bool) or max_live < 0:
-        max_live = 0
     protected = data.get("agent_spawn_protected")
-    profiles = None
-    if "profiles" in policy:
-        # When present it is the sole source of allowed names (and fixes each
-        # name's kind/args/cwd); an invalid entry is dropped, never relaxed.
-        raw = policy["profiles"]
-        profiles = []
-        for entry in raw if isinstance(raw, list) else []:
-            profile = _spawn_profile(entry)
-            if profile is None:
-                log.warning("ignoring invalid agent_spawn_policy profile %r", entry)
-            else:
-                profiles.append(profile)
-    return {
+    out: dict[str, Any] = {
         "spawners": _str_list(data.get("agent_spawners")),
-        "name_patterns": patterns,
-        "profiles": profiles,
-        "teams": _str_list(policy.get("teams")),
-        "max_live": max_live,
-        "kinds": _str_list(policy.get("kinds", ["claude", "opencode"])),
+        "profiles": [], "teams": [], "max_live": 0, "kinds": [],
         "protected": (list(SPAWN_PROTECTED_DEFAULT) if protected is None
                       else _str_list(protected)),
+        "invalid": None,
     }
+    if not out["spawners"]:
+        return out
+    try:
+        out.update(_spawn_policy_body(data))
+    except SettingsError as exc:
+        out["invalid"] = str(exc)
+    return out
+
+
+def spawn_policy_raw() -> dict[str, Any]:
+    """The ``agent_spawn*`` keys exactly as written in settings.json."""
+    return {k: v for k, v in load().items() if k.startswith("agent_spawn")}
 
 
 def hosts() -> dict[str, dict[str, Any]]:
@@ -386,8 +413,9 @@ def _normalize(raw: Any) -> dict[str, Any]:
             if field in node:
                 with contextlib.suppress(SettingsError):
                     data.setdefault("providers", {}).setdefault(kind, {})[field] = _provider_value(field, node[field], kind)
-    for key in SPAWN_KEYS:
-        if key in raw:
+    for key in raw:
+        # Misspelled ``agent_spawn*`` keys are kept so the policy can refuse them.
+        if isinstance(key, str) and key.startswith("agent_spawn"):
             data[key] = raw[key]
     hosts_raw = raw.get("hosts")
     if isinstance(hosts_raw, dict):

@@ -11,6 +11,16 @@ from .. import settings
 from ..harness import AgentState
 from .common import OpsBase, PERMISSION_GRACE, PERMISSION_WAIT, PERMISSION_WAIT_MAX, VIEWER_FRESH, _dim, log
 
+SPAWN_TIMEOUT_MAX = 30.0  # seconds an agent-initiated op may hold a daemon thread
+
+
+def _spawn_timeout(request: dict[str, Any]) -> float:
+    try:
+        value = float(request.get("timeout", SPAWN_TIMEOUT_MAX))
+    except (TypeError, ValueError):
+        return SPAWN_TIMEOUT_MAX
+    return min(max(value, 0.0), SPAWN_TIMEOUT_MAX) if value == value else SPAWN_TIMEOUT_MAX
+
 
 class OpsAgents(OpsBase):
 
@@ -292,6 +302,8 @@ class OpsAgents(OpsBase):
         with spawn_policy.LOCK:
             caller = self.controller.agents.resolve(creator)
             reason = spawn_policy.check_create(self.controller, caller, request)
+            spawn_policy.audit_decision(
+                "agent_create", caller.name or caller.agent_id, request.get("name"), reason)
             if reason:
                 raise MessagingError(f"agent spawn policy: {reason}")
             launch = spawn_policy.launch_values(request)
@@ -303,7 +315,7 @@ class OpsAgents(OpsBase):
                 harness = self.controller.create_agent(
                     launch["kind"],
                     name=request["name"],
-                    backend=request.get("backend"),
+                    backend=launch["backend"],
                     cwd=launch["cwd"],
                     team=request["team"],
                     cols=_dim(request.get("cols", 120), "cols"),
@@ -318,7 +330,7 @@ class OpsAgents(OpsBase):
                 raise
             self.controller.set_agent_creator(harness.agent_id, caller.agent_id)
         if request.get("wait_ready"):
-            harness.start(timeout=float(request.get("timeout", 30.0)))
+            harness.start(timeout=_spawn_timeout(request))
         return {"agent": self.controller.agent_summary(harness)}
 
     def _rollback_spawn(self, agent_id: str) -> None:
@@ -343,10 +355,12 @@ class OpsAgents(OpsBase):
             with spawn_policy.LOCK:
                 caller = self.controller.agents.resolve(str(creator))
                 reason = spawn_policy.check_stop(self.controller, caller, request)
+                spawn_policy.audit_decision(
+                    "agent_stop", caller.name or caller.agent_id, request.get("target"), reason)
                 if reason:
                     raise MessagingError(f"agent spawn policy: {reason}")
-                info = self.controller.remove_agent(
-                    request["target"], force=bool(request.get("force", False)))
+                # An agent never forces a stop (that discards a worktree).
+                info = self.controller.remove_agent(request["target"], force=False)
             return {"agent": info.to_dict()}
         info = self.controller.remove_agent(
             request["target"], force=bool(request.get("force", False))

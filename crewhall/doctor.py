@@ -7,6 +7,7 @@ optional or worth a look (for example only one of the two agent CLIs present).
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import socket
@@ -465,12 +466,38 @@ def check_agent_runtime_versions() -> list[Check]:
     return out
 
 
+def check_spawn_policy() -> Check:
+    """SHA-256 of the agent spawn policy on disk vs. the one the daemon loaded."""
+    import json as _json
+
+    from . import audit, settings, spawn_policy
+
+    cfg = settings.agent_spawn()
+    on_disk = spawn_policy.digest(settings.spawn_policy_raw())
+    loaded = None
+    with contextlib.suppress(OSError), open(audit.audit_path(), encoding="utf-8") as fh:
+        for line in fh:
+            if '"agent_spawn_policy_loaded"' in line:
+                with contextlib.suppress(ValueError):
+                    loaded = _json.loads(line).get("sha256")
+    detail = f"sha256={on_disk} daemon-loaded={loaded or '-'}"
+    if not cfg["spawners"]:
+        return _res("spawn_policy", "ok", "off (no agent_spawners) " + detail)
+    if cfg["invalid"]:
+        return _res("spawn_policy", "fail", f"policy invalid: {cfg['invalid']} " + detail,
+                    "fix settings.json; every agent create/stop is denied")
+    if loaded != on_disk:
+        return _res("spawn_policy", "warn", detail,
+                    "settings.json changed since the daemon started; it applies on restart only")
+    return _res("spawn_policy", "ok", f"spawners={cfg['spawners']} " + detail)
+
+
 CHECKS: list[Callable[[], Check | list[Check]]] = [
     check_python, check_install, check_tmux, check_agent_clis, check_agent_version_ranges,
     check_agent_runtime_versions,
     check_command_on_path, check_dirs,
     check_tmpdir, check_hooks, check_daemon, check_workers, check_memory, check_daemon_log, check_web, check_office, check_security,
-    check_agent_configs, check_systemd, check_tailscale,
+    check_agent_configs, check_systemd, check_tailscale, check_spawn_policy,
 ]
 
 
