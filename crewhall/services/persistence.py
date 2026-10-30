@@ -162,6 +162,8 @@ class ServicesPersistence:
             self._v2_config[agent_id] = dict(agent["session_config"])
         if isinstance(agent.get("launch"), dict):
             self._agent_launch[agent_id] = dict(agent["launch"])
+        if isinstance(agent.get("created_by"), str):
+            self._agent_created_by[agent_id] = agent["created_by"]
         self._agent_tokens.setdefault(agent_id, secrets.token_hex(16))
         link_info = agent.get("opencode")
         if isinstance(link_info, dict) and link_info:

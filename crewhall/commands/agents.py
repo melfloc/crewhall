@@ -203,6 +203,7 @@ def cmd_agent_create(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         args=args.args,
         host=entry.get("host"),
+        **_agent_auth_params(),
     )
     _print_agent(resp["agent"])
     return 0
@@ -414,7 +415,8 @@ def cmd_agent_wait(args: argparse.Namespace) -> int:
 
 
 def cmd_agent_stop(args: argparse.Namespace) -> int:
-    resp = common._client(args).call("agent_stop", target=args.target, force=args.force)
+    resp = common._client(args).call(
+        "agent_stop", target=args.target, force=args.force, **_agent_auth_params())
     _print_agent(resp["agent"])
     return 0
 

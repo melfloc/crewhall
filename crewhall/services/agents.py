@@ -1897,6 +1897,11 @@ class ServicesAgents:
     def register_agent(self, harness: Harness) -> None:
         self.agents.add(harness)
 
+    def set_agent_creator(self, agent_id: str, creator_id: str) -> None:
+        """Record which agent created ``agent_id`` (spawn policy) and persist it."""
+        self._agent_created_by[agent_id] = creator_id
+        self._persist()
+
     def get_agent(self, target: str) -> Harness:
         return self.agents.resolve(target)
 
@@ -2121,6 +2126,7 @@ class ServicesAgents:
         self._opencode_links.pop(agent_id, None)
         self._v2_config.pop(agent_id, None)
         self._agent_launch.pop(agent_id, None)
+        self._agent_created_by.pop(agent_id, None)
         self._mcp_cleanup(agent_id)
         self._cleanup_worktree(agent_id, force=force)
         self.interactions.forget_agent(agent_id)

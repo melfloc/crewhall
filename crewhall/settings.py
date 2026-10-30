@@ -284,6 +284,46 @@ def _validate_host(name: Any, body: Any) -> dict[str, Any]:
             "known_hosts": known_hosts, "tmux_socket": tmux_socket, "tunnel": tunnel}
 
 
+SPAWN_KEYS = ("agent_spawners", "agent_spawn_policy", "agent_spawn_protected")
+SPAWN_PROTECTED_DEFAULT = ("Heraldo", "Orquestador", "Ejecutor_Sonnet_1")
+
+
+def _str_list(value: Any) -> list[str]:
+    return [v for v in value if isinstance(v, str) and v] if isinstance(value, list) else []
+
+
+def agent_spawn() -> dict[str, Any]:
+    """The agent spawn policy keys (see :mod:`crewhall.spawn_policy`), validated.
+
+    Invalid parts fall back to the safe value (an empty list allows nothing);
+    an uncompilable regex is dropped.
+    """
+    data = load()
+    policy = data.get("agent_spawn_policy")
+    policy = policy if isinstance(policy, dict) else {}
+    patterns = []
+    for pattern in _str_list(policy.get("name_patterns")):
+        try:
+            re.compile(pattern)
+        except re.error:
+            log.warning("ignoring invalid agent_spawn_policy pattern %r", pattern)
+            continue
+        patterns.append(pattern)
+    max_live = policy.get("max_live", 6)
+    if not isinstance(max_live, int) or isinstance(max_live, bool) or max_live < 0:
+        max_live = 0
+    protected = data.get("agent_spawn_protected")
+    return {
+        "spawners": _str_list(data.get("agent_spawners")),
+        "name_patterns": patterns,
+        "teams": _str_list(policy.get("teams")),
+        "max_live": max_live,
+        "kinds": _str_list(policy.get("kinds", ["claude", "opencode"])),
+        "protected": (list(SPAWN_PROTECTED_DEFAULT) if protected is None
+                      else _str_list(protected)),
+    }
+
+
 def hosts() -> dict[str, dict[str, Any]]:
     """Validated remote hosts (empty unless explicitly configured)."""
     return {name: dict(cfg) for name, cfg in load().get("hosts", {}).items()}
@@ -315,6 +355,9 @@ def _normalize(raw: Any) -> dict[str, Any]:
             if field in node:
                 with contextlib.suppress(SettingsError):
                     data.setdefault("providers", {}).setdefault(kind, {})[field] = _provider_value(field, node[field], kind)
+    for key in SPAWN_KEYS:
+        if key in raw:
+            data[key] = raw[key]
     hosts_raw = raw.get("hosts")
     if isinstance(hosts_raw, dict):
         for name, body in hosts_raw.items():

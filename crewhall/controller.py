@@ -169,6 +169,9 @@ class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesS
         # Explicit launch record per agent (command/version/generated args/model/
         # agent/session/server) persisted without secrets: enough to rebuild.
         self._agent_launch: dict[str, dict[str, Any]] = {}
+        # Creator agent_id of agents created by an agent (spawn policy), so it
+        # may stop only its own; persisted with the agent record.
+        self._agent_created_by: dict[str, str] = {}
         # Version gate: per-agent CLI version report (kind/version/supported…).
         self._agent_versions: dict[str, dict[str, Any] | None] = {}
         # Version reported by the adopted/live server process (not the binary).

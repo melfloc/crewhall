@@ -13,7 +13,7 @@ import threading
 import time
 from typing import Any
 
-from . import paths, settings
+from . import paths, settings, spawn_policy
 from .controller import AgentNotFound, Controller, SessionNotFound
 from .chat import ConversationError
 from .terminals import TerminalError
@@ -75,6 +75,10 @@ AGENT_OPS = frozenset({
 # control token (the human's CLI/Web UI). Same special-casing as ``request_cancel``.
 _AGENT_AUTH_OPS = frozenset({"agent_status", "agent_interrupt", "agent_signal", "agent_restart",
                              "agent_effort"})
+
+# Control-plane ops an agent may call only when ``spawn_policy`` allows it
+# (``agent_spawners`` non-empty and the caller authenticated by its token).
+_AGENT_SPAWN_OPS = frozenset({"agent_create", "agent_stop"})
 
 log = logging.getLogger("crewhall.daemon")
 
@@ -476,6 +480,11 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
         )
         if allowed_for_agent:
             return None
+        if op in _AGENT_SPAWN_OPS:
+            # Only the gate sets it, after the policy allowed the request.
+            request.pop("_spawn_caller", None)
+            if (request.get("sender") or request.get("token")) and spawn_policy.enabled():
+                return self._guard_spawn(op, request)
         if op in self.AGENT_OFFICE_OPS and request.get("sender"):
             # Agent-authenticated co-editing (``crewhall office`` inside a chat).
             if self._agent_office_allowed(request):
@@ -486,6 +495,32 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
         token = request.get("_control_token")
         if not self._control_token or token != self._control_token:
             return {"ok": False, "error": "control plane requires a valid control token"}
+        return None
+    def _guard_spawn(self, op: str, request: dict[str, Any]) -> dict[str, Any] | None:
+        """Agent-initiated create/stop: authenticate the caller, apply the policy, audit."""
+        from . import audit
+
+        target = request.get("name") if op == "agent_create" else request.get("target")
+        caller = None
+        who = f"unauthenticated:{request.get('sender')}"
+        try:
+            caller = self.controller.agents.resolve(str(request.get("sender") or ""))
+            self.controller._check_token(caller.agent_id, request.get("token"))
+        except Exception:  # noqa: BLE001 - unknown sender or bad token: deny
+            reason: str | None = "invalid agent identity/token"
+        else:
+            who = caller.name or caller.agent_id
+            check = spawn_policy.check_create if op == "agent_create" else spawn_policy.check_stop
+            reason = check(self.controller, caller, request)
+        audit.record(
+            "agent_spawn_policy", actor=who, result="denied" if reason else "allowed",
+            summary=f"{op} {target!r}: {reason or 'allowed'}",
+            extra={"caller": who, "request_op": op, "target": str(target),
+                   "decision": "denied" if reason else "allowed", "reason": reason or ""},
+        )
+        if reason:
+            return {"ok": False, "error": f"agent spawn policy: {reason}"}
+        request["_spawn_caller"] = caller.agent_id  # type: ignore[union-attr]
         return None
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         from . import audit

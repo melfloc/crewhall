@@ -98,6 +98,8 @@ class StateStore:
                     # Explicit launch record (no secrets): command, version,
                     # user/generated args, effective model/agent, session/server.
                     "launch": getattr(controller, "_agent_launch", {}).get(harness.agent_id),
+                    # Creator agent_id when an agent created it (spawn policy).
+                    "created_by": getattr(controller, "_agent_created_by", {}).get(harness.agent_id),
                     # User env only as *keys*: values may be API keys and must
                     # never be written to state.json.
                     "env_keys": sorted(

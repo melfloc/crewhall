@@ -15,6 +15,9 @@ from .common import OpsBase, PERMISSION_GRACE, PERMISSION_WAIT, PERMISSION_WAIT_
 class OpsAgents(OpsBase):
 
     def _op_agent_create(self, request: dict[str, Any]) -> dict[str, Any]:
+        creator = request.get("_spawn_caller")
+        if creator:
+            return self._spawn_by_agent(str(creator), request)
         team = request.get("team")
         if request.get("conversation") and not team:
             # A chat with a crew: its lead joins the Team (isolation of its cwd is
@@ -280,7 +283,47 @@ class OpsAgents(OpsBase):
             timeout=float(request.get("timeout", 30.0)),
         )
 
+    def _spawn_by_agent(self, creator: str, request: dict[str, Any]) -> dict[str, Any]:
+        """Create allowed by the spawn policy: re-checked under its lock, then owned."""
+        from .. import spawn_policy
+        from ..messaging import MessagingError
+
+        with spawn_policy.LOCK:
+            caller = self.controller.agents.resolve(creator)
+            reason = spawn_policy.check_create(self.controller, caller, request)
+            if reason:
+                raise MessagingError(f"agent spawn policy: {reason}")
+            harness = self.controller.create_agent(
+                request["kind"],
+                name=request["name"],
+                backend=request.get("backend"),
+                cwd=request.get("cwd"),
+                team=request["team"],
+                cols=_dim(request.get("cols", 120), "cols"),
+                rows=_dim(request.get("rows", 40), "rows"),
+                wait_ready=False,
+                args=request.get("args"),
+                workspace_mode=request.get("workspace_mode"),
+            )
+            self.controller.set_agent_creator(harness.agent_id, caller.agent_id)
+        if request.get("wait_ready"):
+            harness.start(timeout=float(request.get("timeout", 30.0)))
+        return {"agent": self.controller.agent_summary(harness)}
+
     def _op_agent_stop(self, request: dict[str, Any]) -> dict[str, Any]:
+        creator = request.get("_spawn_caller")
+        if creator:
+            from .. import spawn_policy
+            from ..messaging import MessagingError
+
+            with spawn_policy.LOCK:
+                caller = self.controller.agents.resolve(str(creator))
+                reason = spawn_policy.check_stop(self.controller, caller, request)
+                if reason:
+                    raise MessagingError(f"agent spawn policy: {reason}")
+                info = self.controller.remove_agent(
+                    request["target"], force=bool(request.get("force", False)))
+            return {"agent": info.to_dict()}
         info = self.controller.remove_agent(
             request["target"], force=bool(request.get("force", False))
         )
