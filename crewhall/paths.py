@@ -165,8 +165,17 @@ def runtime_dir() -> str:
     return chosen
 
 
+def socket_dir() -> str:
+    """Private dir with only ``daemon.sock`` (stable across daemon restarts)."""
+    path = os.path.join(runtime_dir(), "socket")
+    _makedirs(path)
+    with contextlib.suppress(OSError):
+        os.chmod(path, 0o700)
+    return path
+
+
 def socket_path() -> str:
-    return os.path.join(runtime_dir(), "daemon.sock")
+    return os.path.join(socket_dir(), "daemon.sock")
 
 
 def pid_path() -> str:

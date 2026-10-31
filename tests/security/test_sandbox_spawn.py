@@ -301,26 +301,40 @@ class Yellow(AgentSpawnPolicy):
             with spawn_policy.revive_guard(self.controller, agent):
                 pass  # must not raise
 
-    # N5: doctor asks the daemon's memory, never the audit log.
-    def test_n5_a_forged_audit_line_does_not_reset_drift(self) -> None:
+    # N5: the drift hash comes from daemon memory, never from audit.jsonl.
+    def test_n5_drift_comes_from_daemon_memory_not_the_audit_log(self) -> None:
         self.server._load_spawn_policy()
+        loaded = self.server._op_spawn_policy_status({})["sha256"]
         data = json.load(open(settings.path()))
         data["agent_spawners"].append("Ejecutor_Sonnet_1")
         data["sandbox"]["agents"].append(
             {"name_pattern": "Ejecutor_Sonnet_1", "profile": "role"})
         self._settings(data, restart=False)
+        on_disk = spawn_policy.digest(settings.spawn_policy_raw())
+        self.assertNotEqual(loaded, on_disk)
         from crewhall.client import Client
 
-        with mock.patch.object(Client, "call",
-                               return_value=self.server._op_spawn_policy_status({})), \
-                mock.patch("crewhall.client.ping", return_value=True):
-            self.assertIn("warn", doctor.check_spawn_policy()["status"])
-            forged = {"ts": 0, "actor": "daemon", "op": "agent_spawn_policy_loaded",
-                      "result": "ok",
-                      "sha256": spawn_policy.digest(settings.spawn_policy_raw())}
-            with open(audit.audit_path(), "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(forged) + "\n")
-            self.assertIn("warn", doctor.check_spawn_policy()["status"])
+        def check() -> dict:
+            with mock.patch.object(
+                    Client, "call",
+                    return_value=self.server._op_spawn_policy_status({})), \
+                    mock.patch("crewhall.client.ping", return_value=True):
+                return doctor.check_spawn_policy()
+
+        # A log parser would only see this forged line and call it in sync.
+        with open(audit.audit_path(), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "ts": 0, "actor": "daemon", "op": "agent_spawn_policy_loaded",
+                "result": "ok", "sha256": on_disk}) + "\n")
+        result = check()
+        self.assertEqual(result["status"], "warn")
+        self.assertIn("changed since the daemon started", result["hint"])
+        self.assertIn(loaded, result["detail"])  # the daemon's own snapshot
+        # No log at all: memory is still the only source of the loaded hash.
+        os.unlink(audit.audit_path())
+        result = check()
+        self.assertEqual(result["status"], "warn")
+        self.assertIn(loaded, result["detail"])
 
     def test_n5b_daemon_refusal_is_reported_not_hidden(self) -> None:
         data = policy(self.cwd)

@@ -170,11 +170,11 @@ def build_argv(cfg: dict) -> list[str]:
     # Only the daemon socket from the runtime dir: not its log/pid/lock.
     if runtime and os.path.isdir(runtime):
         _tmpfs(args, runtime)
-        # The daemon socket is the only runtime entry exposed. An in-process
-        # Controller (tests, embedded UI) may not have a daemon listening; the
-        # agent then simply has no control socket, which is not a boundary hole.
-        if socket and os.path.exists(socket):
-            _bind(args, socket, socket)
+        # Bind the directory, not the socket inode: it survives a daemon restart.
+        # Read-only still allows connect (inode write) but not unlink/replace.
+        sockdir = os.path.dirname(socket) if socket else None
+        if sockdir and os.path.isdir(sockdir):
+            _bind(args, sockdir, sockdir, readonly=True)
 
     # Stage 2 profile binds: only *additional* paths. They never replace the
     # base masks above (settings refuses control-plane paths), and profile

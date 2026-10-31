@@ -11,6 +11,7 @@ Bubblewrap cannot glob: test directories are bound one by one.
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -18,6 +19,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -32,7 +34,7 @@ PY = "/usr/bin/python3"
 TEST_ROOT = os.path.join(os.path.expanduser("~"), ".cache", "crewhall-sandbox-tests")
 
 PROBE = r'''
-import json, os, socket
+import json, os, socket, subprocess
 out = os.environ["PROBE_OUT"]
 res = {}
 def read(path):
@@ -58,6 +60,13 @@ res["read_secrets"] = read(os.path.join(home, ".secrets", "token"))
 res["read_config"] = read(os.path.join(home, ".config", "crewhall", "control-token"))
 res["read_state"] = read(os.path.join(home, ".local", "state", "crewhall", "state.json"))
 res["read_heraldo_bin"] = read(os.path.join(home, ".local", "bin", "heraldo-status"))
+res["read_heraldo_notify"] = read(os.path.join(home, ".local", "bin", "heraldo-notify"))
+try:
+    r = subprocess.run([os.path.join(home, ".local", "bin", "heraldo-notify")],
+                       capture_output=True, text=True, timeout=5)
+    res["exec_heraldo_notify"] = "ok:%s" % r.stdout.strip()[:40]
+except OSError as exc:
+    res["exec_heraldo_notify"] = "ERR:%s" % exc.errno
 res["daemon_socket"] = "no"
 try:
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -76,6 +85,36 @@ res["tmux_env"] = os.environ.get("TMUX")
 res["tmux_dir"] = os.path.exists("/tmp/tmux-%d" % os.getuid())
 with open(out, "w") as fh:
     json.dump(res, fh)
+'''
+
+RECONNECT_PROBE = r'''
+import os, socket, time
+sock = os.environ["PROBE_SOCKET"]
+out = os.environ["PROBE_OUT"]
+tamper = os.environ["PROBE_TAMPER"]
+try:
+    os.unlink(sock)
+    with open(tamper, "w") as fh:
+        fh.write("UNLINKED")
+except OSError as exc:
+    with open(tamper, "w") as fh:
+        fh.write("ERR:%s" % exc.errno)
+deadline = time.time() + 10
+while time.time() < deadline:
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(sock)
+        s.sendall(b'{"op":"ping"}\n')
+        data = s.recv(64)
+        s.close()
+    except OSError:
+        time.sleep(0.05)
+        continue
+    with open(out, "a") as fh:
+        fh.write(data.decode("utf-8", "replace").strip() + "\n")
+        fh.flush()
+    time.sleep(0.2)
 '''
 
 
@@ -136,7 +175,10 @@ def role_profiles(home: str) -> dict[str, dict]:
         ("/var/run/postgresql", "ro"),
     )
     backend_extra[-1]["optional"] = True
+    # Heraldo's own CLI must stay visible *only* to the heraldo profile.
+    heraldo_deny = [p for p in deny if not p.endswith("/heraldo-*")]
     return {
+        "heraldo": profile([], deny=heraldo_deny),
         "backend": profile(backend_extra),
         "frontend": profile(_binds(home,
             ("Projects/indexion-frontend", "rw"),
@@ -165,6 +207,7 @@ def sandbox_section(home: str) -> dict:
     return {
         "profiles": profiles,
         "agents": [
+            {"name_pattern": "Heraldo", "profile": "heraldo"},
             {"name_pattern": "Ejecutor_Backend_Sonnet_[0-9]+", "profile": "backend"},
             {"name_pattern": "Ejecutor_DeepSeekV4Flash_[0-9]+", "profile": "backend"},
             {"name_pattern": "Ejecutor_Frontend_Sonnet_[0-9]+", "profile": "frontend"},
@@ -200,6 +243,7 @@ class RoleSandbox(unittest.TestCase):
             "deploy/secret": "DEPLOY-SECRET",
             ".secrets/token": "TOKEN",
             ".local/bin/heraldo-status": "HERALDO",
+            ".local/bin/heraldo-notify": "#!/bin/sh\necho HERALDO-NOTIFY-OK\n",
             ".local/bin/uv": "uv",
             ".local/share/mise/installs/x": "mise",
             ".config/opencode/opencode.json": "{}",
@@ -223,6 +267,7 @@ class RoleSandbox(unittest.TestCase):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(body)
+        os.chmod(os.path.join(self.home, ".local/bin/heraldo-notify"), 0o755)
         os.makedirs(os.path.join(self.home, "Projects/indexion-project/.venv"))
         settings._CACHE.update(stamp=None, data=None)
         self.addCleanup(settings._CACHE.update, stamp=None, data=None)
@@ -231,17 +276,24 @@ class RoleSandbox(unittest.TestCase):
         with open(self.probe, "w", encoding="utf-8") as fh:
             fh.write(PROBE)
         self.out = os.path.join(self.home, "Projects", "session", "probe.json")
-        # A daemon socket the sandbox must still reach.
-        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.server.bind(paths.socket_path())
-        self.server.listen(4)
-        self.stop = threading.Event()
+        # A daemon socket the sandbox must still reach; the restart test
+        # replaces it with a fresh inode, like a real daemon restart.
+        self._servers: list[tuple[threading.Event, socket.socket]] = []
+        self.start_server()
+        self.addCleanup(self._cleanup)
+
+    def start_server(self) -> None:
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(paths.socket_path())
+        server.listen(4)
+        server.settimeout(0.2)
+        stop = threading.Event()
+        self._servers.append((stop, server))
 
         def serve():
-            self.server.settimeout(0.2)
-            while not self.stop.is_set():
+            while not stop.is_set():
                 try:
-                    conn, _ = self.server.accept()
+                    conn, _ = server.accept()
                 except (TimeoutError, OSError):
                     continue
                 with conn:
@@ -249,12 +301,22 @@ class RoleSandbox(unittest.TestCase):
                     conn.sendall(b'{"ok":true}\n')
 
         threading.Thread(target=serve, daemon=True).start()
-        self.addCleanup(self._cleanup)
+
+    def stop_server(self) -> None:
+        stop, server = self._servers.pop()
+        stop.set()
+        with __import__("contextlib").suppress(OSError):
+            server.close()
+        with __import__("contextlib").suppress(OSError):
+            os.unlink(paths.socket_path())
+
+    def restart_server(self) -> None:
+        self.stop_server()
+        self.start_server()
 
     def _cleanup(self) -> None:
-        self.stop.set()
-        with __import__("contextlib").suppress(OSError):
-            self.server.close()
+        while self._servers:
+            self.stop_server()
 
     def write_settings(self, data: dict) -> None:
         os.makedirs(settings.config_dir(), mode=0o700, exist_ok=True)
@@ -288,24 +350,40 @@ class RoleSandbox(unittest.TestCase):
         with open(self.out, encoding="utf-8") as fh:
             return json.load(fh)
 
-    def check_common(self, res: dict) -> None:
+    def check_common(self, res: dict, heraldo_hidden: bool = True) -> None:
         self.assertEqual(res["home"], self.home)
         self.assertEqual(res["read_claude"], "{}")
         for key in ("read_ssh", "read_deploy", "read_secrets", "read_config", "read_state"):
             self.assertTrue(res[key].startswith("ERR:"), f"{key}={res[key]}")
-        self.assertTrue(res["read_heraldo_bin"].startswith("ERR:"),
-                        f"heraldo binary visible: {res['read_heraldo_bin']}")
+        if heraldo_hidden:
+            self.assertTrue(res["read_heraldo_bin"].startswith("ERR:"),
+                            f"heraldo binary visible: {res['read_heraldo_bin']}")
+            self.assertTrue(res["read_heraldo_notify"].startswith("ERR:"),
+                            f"heraldo-notify visible: {res['read_heraldo_notify']}")
+            self.assertTrue(res["exec_heraldo_notify"].startswith("ERR:"),
+                            f"heraldo-notify executable: {res['exec_heraldo_notify']}")
+        else:
+            self.assertEqual(res["read_heraldo_bin"], "HERALDO")
+            self.assertIn("HERALDO-NOTIFY-OK", res["read_heraldo_notify"])
+            self.assertEqual(res["exec_heraldo_notify"], "ok:HERALDO-NOTIFY-OK")
         self.assertEqual(res["daemon_socket"], "connected")
         self.assertTrue(res["create_ok_prod"].startswith("ERR:"),
                         "Projects/.ok-prod is creatable")
         self.assertIsNone(res["tmux_env"])
         self.assertFalse(res["tmux_dir"])
 
-    def check_role(self, res: dict) -> None:
-        self.check_common(res)
+    def check_role(self, res: dict, heraldo_hidden: bool = True) -> None:
+        self.check_common(res, heraldo_hidden=heraldo_hidden)
         self.assertEqual(res["write_allowed"], "ok", res["write_allowed"])
         self.assertTrue(res["write_forbidden"].startswith("ERR:"),
                         f"wrote outside its rw set: {res['write_forbidden']}")
+
+    def test_heraldo_sees_its_own_cli(self) -> None:
+        res = self.run_probe(
+            "Heraldo",
+            os.path.join(self.home, "Projects/session/heraldo.md"),
+            os.path.join(self.home, "Projects/indexion-project/new.py"))
+        self.check_role(res, heraldo_hidden=False)
 
     def test_backend(self) -> None:
         res = self.run_probe(
@@ -342,6 +420,48 @@ class RoleSandbox(unittest.TestCase):
             os.path.join(self.home, "Projects/session/report.md"),
             os.path.join(self.home, "Projects/indexion-project/app.py"))
         self.check_role(res)
+
+    def test_socket_reconnects_after_a_daemon_restart(self) -> None:
+        probe = os.path.join(self.home, "reconnect.py")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write(RECONNECT_PROBE)
+        out = os.path.join(self.home, "Projects", "session", "reconnect.log")
+        tamper = os.path.join(self.home, "Projects", "session", "tamper.txt")
+        spec = SessionSpec(
+            command=[PY, probe],
+            cwd=os.path.join(self.home, "Projects"),
+            env={"PROBE_SOCKET": paths.socket_path(), "PROBE_OUT": out,
+                 "PROBE_TAMPER": tamper},
+            name="Heraldo", sandboxed=True,
+            sandbox_agent_id="sess_reconnect", sandbox_profile=None,
+        )
+        proc = subprocess.Popen(
+            sandbox.command_for_spec(spec), env={**os.environ, **spec.env},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        self.assertTrue(self._wait_lines(out, 1),
+                        "the sandboxed client never connected")
+        with open(tamper, encoding="utf-8") as fh:
+            # EROFS, not merely EBUSY on a mountpoint: the dir is read-only.
+            self.assertEqual(fh.read().strip(), f"ERR:{errno.EROFS}",
+                             "the agent could replace the daemon socket")
+        # Same directory, new inode: what `daemon restart` does.
+        self.restart_server()
+        self.assertTrue(self._wait_lines(out, 2),
+                        "the sandboxed client did not reconnect after the restart")
+
+    def _wait_lines(self, path: str, count: int, timeout: float = 10.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    if len(fh.read().splitlines()) >= count:
+                        return True
+            except OSError:
+                pass
+            time.sleep(0.05)
+        return False
 
     # -- mutation: remove one rule and the named check fails -----------------
     def test_mutation_without_backend_rw_bind_cannot_write_the_repo(self) -> None:
