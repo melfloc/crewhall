@@ -114,6 +114,7 @@ class ServicesControl:
             if kind == "opencode" and not host:
                 self._isolate_opencode_tabs(
                     env, agent_id, link, api=self._opencode_api(kind))
+                self._apply_opencode_guard(env)
             if link:
                 env["OPENCODE_SERVER_PASSWORD"] = link.password
             args = self._v2_serve_fallback(kind, args, link, agent_id)
@@ -157,6 +158,8 @@ class ServicesControl:
                 rows=spec.rows,
                 name=harness.name,
                 host=host,
+                sandboxed=not host,
+                sandbox_agent_id=agent_id,
             )
             session = InteractiveSession(
                 self._backend_for(backend_name, host), new_spec, session_id=agent_id)

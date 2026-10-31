@@ -42,6 +42,10 @@ class SessionSpec:
     readonly: bool = False
     title: str | None = None
     owner: str | None = None
+    # Local agent sessions are wrapped in the OS sandbox (crewhall.sandbox).
+    # Control-plane sessions and remote agents leave this off.
+    sandboxed: bool = False
+    sandbox_agent_id: str | None = None
 
     def argv(self) -> list[str]:
         if isinstance(self.command, str):
@@ -69,6 +73,7 @@ class SessionSpec:
             "readonly": self.readonly,
             "title": self.title,
             "owner": self.owner,
+            "sandboxed": self.sandboxed,
         }
 
 

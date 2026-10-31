@@ -36,11 +36,17 @@ class PtyBackend(Backend):
         self._acc_max = 2_000_000
 
     def start(self, spec: SessionSpec) -> None:
+        from .. import sandbox
+
         argv = spec.argv()
+        if getattr(spec, "sandboxed", False):
+            argv = sandbox.command_for_spec(spec)
         cwd = spec.cwd or os.getcwd()
         env = dict(os.environ)
         if spec.env:
             env.update(spec.env)
+        if getattr(spec, "sandboxed", False):
+            sandbox.sanitize_env(env)
 
         master, slave = pty.openpty()
         self._set_winsize_fd(master, spec.cols, spec.rows)

@@ -295,14 +295,25 @@ def _follow_log(path: str, agent: str | None) -> int:
 
 
 def _run_foreground(args: argparse.Namespace) -> int:
-    controller = Controller(adopt=True)
-    server = Server(controller, args.socket or paths.socket_path())
-    print(f"crewhall daemon on {server.socket_path}", flush=True)
+    # R2b: read providers.* once for this daemon's lifetime, and snapshot the
+    # sandbox launcher before any agent can be started.
+    from .. import sandbox, settings as settings_mod
+
+    settings_mod.freeze_providers()
+    sandbox.prepare_launcher()
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        server.stop()
-    return 0
+        controller = Controller(adopt=True)
+        server = Server(controller, args.socket or paths.socket_path())
+        print(f"crewhall daemon on {server.socket_path}", flush=True)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            server.stop()
+        return 0
+    finally:
+        # The snapshot lives for this daemon run only; in-process callers (the
+        # CLI tests, embedded UI) must not inherit it.
+        settings_mod.reset_provider_snapshot()
 
 
 def cmd_ui(args: argparse.Namespace) -> int:

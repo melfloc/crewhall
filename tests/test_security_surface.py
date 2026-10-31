@@ -34,6 +34,10 @@ class ClaudeSandbox(unittest.TestCase):
         self.assertIn(f"Edit(/{token})", deny)
         for rule in deny:
             tool, _, rest = rule.partition("(")
+            if tool == "Bash":
+                # N1 defence in depth: shell escapes that drive/inspect panes.
+                self.assertTrue(rule.startswith("Bash(") and rule.endswith(":*)"), rule)
+                continue
             self.assertIn(tool, ("Read", "Edit"), rule)  # Write(path) is ignored by Claude
             self.assertTrue(rest.startswith("//"), rule)
 

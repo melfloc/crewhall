@@ -199,6 +199,42 @@ class ServicesAgents:
             current = os.environ.get("OPENCODE_CLI_CONFIG_CONTENT")
         env["OPENCODE_CLI_CONFIG_CONTENT"] = self._v2_tabs_off_content(current)
 
+    @staticmethod
+    def _opencode_guard_content(existing: str | None) -> str:
+        """Merge the shell-tool deny rules into an OpenCode config document.
+
+        This is defence in depth, not the boundary: the OS sandbox is what makes
+        the tmux/docker sockets unreachable. The rules stop an agent that only
+        follows its own permission prompt from trying in the first place.
+        """
+        import json
+
+        data: dict[str, Any] = {}
+        if existing:
+            try:
+                parsed = json.loads(existing)
+                if isinstance(parsed, dict):
+                    data = parsed
+            except ValueError:
+                pass
+        permission = data.get("permission")
+        if not isinstance(permission, dict):
+            permission = {}
+        bash = permission.get("bash")
+        if not isinstance(bash, dict):
+            bash = {}
+        for pattern in ("tmux *", "screen *", "gdb *", "strace *"):
+            bash[pattern] = "deny"
+        permission["bash"] = bash
+        data["permission"] = permission
+        return json.dumps(data, separators=(",", ":"), sort_keys=True)
+
+    def _apply_opencode_guard(self, env: dict[str, str]) -> None:
+        current = env.get("OPENCODE_CLI_CONFIG_CONTENT")
+        if current is None:
+            current = os.environ.get("OPENCODE_CLI_CONFIG_CONTENT")
+        env["OPENCODE_CLI_CONFIG_CONTENT"] = self._opencode_guard_content(current)
+
     def _isolate_opencode_tabs(
         self, env: dict[str, str], agent_id: str, link: Any, api: str | None = None,
     ) -> None:
@@ -1749,6 +1785,7 @@ class ServicesAgents:
             # inherit the user's tab strip or prompt history.
             self._isolate_opencode_tabs(
                 agent_env, session_id, link, api=self._opencode_api(kind))
+            self._apply_opencode_guard(agent_env)
         if link:
             agent_env["OPENCODE_SERVER_PASSWORD"] = link.password
         spec = SessionSpec(
@@ -1765,6 +1802,8 @@ class ServicesAgents:
             rows=rows,
             name=name,
             host=host,
+            sandboxed=not host,
+            sandbox_agent_id=session_id,
         )
         session = InteractiveSession(
             self._backend_for(backend, host), spec, session_id=session_id

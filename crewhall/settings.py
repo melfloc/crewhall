@@ -70,6 +70,11 @@ def provider_defaults(kind: str) -> dict[str, Any]:
 
 _LOCK = threading.RLock()
 _CACHE: dict[str, Any] = {"stamp": None, "data": None}
+# R2b: providers.* decide *which binary and flags* an agent launch runs. A
+# plain same-uid file write must not change them while the daemon is running.
+# The daemon freezes this snapshot at start; only a control-plane settings
+# write refreshes it (``reload_providers``).
+_PROVIDER_SNAPSHOT: dict[str, dict[str, Any]] | None = None
 
 
 def _validate(item: dict[str, Any], value: Any) -> Any:
@@ -393,7 +398,39 @@ def get(key: str, default: Any = None) -> Any:
     return item["default"] if value is None else value
 
 
+def freeze_providers() -> None:
+    """Read providers.* once (daemon start) and use only that snapshot."""
+    global _PROVIDER_SNAPSHOT
+    with _LOCK:
+        stored = load().get("providers", {})
+        _PROVIDER_SNAPSHOT = {
+            kind: {**provider_defaults(kind), **stored.get(kind, {})}
+            for kind in _kinds()
+        }
+
+
+def reload_providers() -> None:
+    """Refresh the snapshot after a *control-plane* settings write."""
+    with _LOCK:
+        if _PROVIDER_SNAPSHOT is not None:
+            freeze_providers()
+
+
+def reset_provider_snapshot() -> None:
+    """Drop the snapshot (tests and process teardown only)."""
+    global _PROVIDER_SNAPSHOT
+    with _LOCK:
+        _PROVIDER_SNAPSHOT = None
+
+
+def providers_frozen() -> bool:
+    return _PROVIDER_SNAPSHOT is not None
+
+
 def provider(kind: str) -> dict[str, Any]:
+    snapshot = _PROVIDER_SNAPSHOT
+    if snapshot is not None and kind in snapshot:
+        return dict(snapshot[kind])
     return {**provider_defaults(kind), **load().get("providers", {}).get(kind, {})}
 
 
@@ -656,6 +693,7 @@ def patch(changes: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
         if default_kind and default_kind not in enabled:
             raise SettingsError(f"the default provider {default_kind!r} is disabled")
         _write(data)
+        reload_providers()
     return describe()
 
 
@@ -672,6 +710,7 @@ def reset(prefix: str | None = None) -> dict[str, Any]:
                 node = node.get(p, {})
             node.pop(parts[-1], None)
         _write(data)
+        reload_providers()
     return describe()
 
 

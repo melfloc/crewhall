@@ -636,6 +636,13 @@ def main(argv: list[str] | None = None) -> int:
         log.info("daemon starting (pid=%s): another daemon already holds the lock; "
                  "exiting", os.getpid())
         return 0
+    # R2b: providers.* are read once at daemon start. A same-uid file write
+    # cannot change the binary/flags the next launch runs.
+    settings.freeze_providers()
+    # Copy and hash the sandbox launcher before any agent can be adopted/started.
+    from . import sandbox
+
+    sandbox.prepare_launcher()
     controller = Controller(adopt=True, persist=True)
     controller.restore()
     _start_tmpdir_janitor(controller.workers)

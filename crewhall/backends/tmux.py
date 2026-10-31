@@ -63,6 +63,7 @@ class TmuxBackend(Backend):
         self.socket = socket or socket_name()
         self.tmux_name: str | None = None
         self.pane_id: str | None = None
+        self._exit_code: int | None = None
         self._stop = threading.Event()
         self._reader: threading.Thread | None = None
 
@@ -97,12 +98,15 @@ class TmuxBackend(Backend):
 
     def start(self, spec: SessionSpec) -> None:
         from ..terminals import is_terminal
+        from .. import sandbox
 
         argv = spec.argv()
         # The tmux server may have an older, narrower PATH than this process
         # (see paths.extend_provider_path): launch by absolute path.
         if argv and "/" not in argv[0] and (found := shutil.which(argv[0])):
             argv = [found, *argv[1:]]
+        if getattr(spec, "sandboxed", False):
+            argv = sandbox.command_for_spec(spec)
         terminal = is_terminal(spec)
         cwd = spec.cwd or os.getcwd()
         assert self.session is not None
@@ -116,6 +120,11 @@ class TmuxBackend(Backend):
             if key and value is not None
         ]
         command = shlex.join(argv)
+        # N1: a pane must never inherit the tmux socket that controls its
+        # siblings. The sandbox also masks /tmp, but unsetting these before the
+        # exec keeps a plain `tmux` from finding the server even if the mask
+        # fails open (defence in depth).
+        unset = "unset TMUX TMUX_PANE DOCKER_HOST SSH_AUTH_SOCK DBUS_SESSION_BUS_ADDRESS;"
         if prefix:
             # Secrets (e.g. the agent token) must not appear in `ps`: hand the
             # environment over through a private file that the launcher sources
@@ -125,8 +134,15 @@ class TmuxBackend(Backend):
                 for item in prefix:
                     key, _, value = item.partition("=")
                     fh.write(f"export {key}={shlex.quote(value)}\n")
+            script = '. "$0" && rm -f "$0";'
+            if getattr(spec, "sandboxed", False):
+                script += f" {unset}"
             command = shlex.join(
-                ["/bin/sh", "-c", '. "$0" && rm -f "$0" && exec "$@"', env_file, *argv]
+                ["/bin/sh", "-c", f'{script} exec "$@"', env_file, *argv]
+            )
+        elif getattr(spec, "sandboxed", False):
+            command = shlex.join(
+                ["/bin/sh", "-c", f'{unset} exec "$@"', "crewhall-sandbox", *argv]
             )
 
         new_args = [
@@ -173,6 +189,7 @@ class TmuxBackend(Backend):
     def adopt(self, name: str) -> None:
         self.tmux_name = name
         self.pane_id = self._first_pane()
+        self._exit_code = None
         self._stop.clear()
         self._reader = threading.Thread(
             target=self._read_loop, name=f"tmux-reader-{name}", daemon=True
@@ -247,6 +264,10 @@ class TmuxBackend(Backend):
             if code is not None:
                 if self.session is not None:
                     self.session._emit_exit(code)
+                # N3: the exit is now recorded. Do not leave a revivable dead
+                # pane on the shared socket for another same-uid process.
+                if self.tmux_name:
+                    self._run("kill-session", "-t", self.tmux_name)
                 return
             time.sleep(0.2)
 
@@ -332,6 +353,8 @@ class TmuxBackend(Backend):
     def poll(self) -> int | None:
         if not self.tmux_name:
             return None
+        if self._exit_code is not None:
+            return self._exit_code
         if not self._exists():
             return 0
         proc = self._run(
@@ -349,9 +372,10 @@ class TmuxBackend(Backend):
         if parts[0] == "1":
             status = parts[1] if len(parts) > 1 else "0"
             try:
-                return int(status)
+                self._exit_code = int(status)
             except ValueError:
-                return 0
+                self._exit_code = 0
+            return self._exit_code
         return None
 
     def _exists(self) -> bool:

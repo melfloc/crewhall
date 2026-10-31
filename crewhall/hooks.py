@@ -15,7 +15,7 @@ import sys
 import tempfile
 from typing import Any
 
-from . import paths
+from . import brand, paths
 
 EVENTS = ("session_start", "prompt_submit", "stop")
 # SessionStart also fires after ``/clear`` and ``/resume``: its payload carries the
@@ -41,6 +41,15 @@ def hook_command(event: str, remote: bool = False) -> str:
 # Upper bound Claude gives the permission hook; the daemon answers (or gives
 # up, letting Claude show its own dialog) well before that.
 PERMISSION_HOOK_TIMEOUT = 600
+
+# N1 defence in depth: even before the OS sandbox, an agent's Bash tool must not
+# be able to drive another pane, inspect another process, or debug one.
+BASH_DENY = (
+    "Bash(tmux:*)",
+    "Bash(screen:*)",
+    "Bash(gdb:*)",
+    "Bash(strace:*)",
+)
 
 
 def permission_hook_command(remote: bool = False) -> str:
@@ -91,17 +100,21 @@ def claude_settings(remote: bool = False) -> dict:
     deny = settings.setdefault("permissions", {}).setdefault("deny", [])
     state = paths.state_dir().rstrip("/")
     runtime = paths.runtime_dir().rstrip("/")
-    for target in claude_deny_targets(state, runtime):
+    config = brand.config_dir().rstrip("/")
+    for target in claude_deny_targets(state, runtime, config):
         for tool in ("Read", "Edit"):
             rule = f"{tool}(/{target})"
             if rule not in deny:
                 deny.append(rule)
+    for rule in BASH_DENY:
+        if rule not in deny:
+            deny.append(rule)
     return settings
 
 
-def claude_deny_targets(state: str, runtime: str) -> list[str]:
+def claude_deny_targets(state: str, runtime: str, config: str | None = None) -> list[str]:
     """Absolute paths (or globs) an agent's file tools must not touch (D1)."""
-    return [
+    targets = [
         f"{state}/control-token",
         f"{state}/*.json",
         f"{state}/*.jsonl",
@@ -111,6 +124,9 @@ def claude_deny_targets(state: str, runtime: str) -> list[str]:
         f"{state}/launch/**",
         f"{runtime}/**",
     ]
+    if config:
+        targets.append(f"{config}/**")
+    return targets
 
 
 def remote_claude_settings_json() -> str:
