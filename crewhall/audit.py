@@ -25,7 +25,17 @@ MAX_LINE = 4000
 MAX_FIELD = 256  # each ``extra`` value (often request-controlled)
 MAX_RECORD = 4096  # bytes per audit line
 
+# N6: unauthenticated denials are rate-limited, so a local process cannot flush
+# the history in minutes. At most one line per DENIED_WINDOW; the rest are
+# counted and reported on the next emitted line.
+DENIED_WINDOW = 10.0
+HARD_MAX_BYTES = MAX_BYTES * 2
+
 _LOCK = threading.Lock()
+_AUTH_BYTES = 0          # authenticated bytes since the last rotation
+_DENIED = {"start": 0.0, "suppressed": 0}
+_LAST_PRUNE = 0.0
+_PRUNE_EVERY = 600.0
 
 # Operations worth an audit line (never the high-frequency read-only polls).
 AUDITED = {
@@ -63,12 +73,29 @@ def _short_hash(value: Any) -> str:
     return "sha256:" + digest[:12]
 
 
+def reset_rate_limit() -> None:
+    """Clear in-process audit counters (tests / a new audit directory)."""
+    global _AUTH_BYTES, _LAST_PRUNE
+    with _LOCK:
+        _AUTH_BYTES = 0
+        _LAST_PRUNE = 0.0
+        _DENIED["start"] = 0.0
+        _DENIED["suppressed"] = 0
+
+
 def _rotate_locked() -> None:
+    global _AUTH_BYTES
     path = audit_path()
     try:
-        if os.path.getsize(path) < MAX_BYTES:
-            return
+        size = os.path.getsize(path)
     except OSError:
+        return
+    # Only authenticated traffic counts toward the normal rotation point. A
+    # flood of unauthenticated denials can rotate early only at a hard ceiling,
+    # so it can neither flush the history quickly nor grow the disk unbounded.
+    if size < MAX_BYTES:
+        return
+    if _AUTH_BYTES < MAX_BYTES and size < HARD_MAX_BYTES:
         return
     for index in range(KEEP - 1, 0, -1):
         src, dst = f"{path}.{index}", f"{path}.{index + 1}"
@@ -77,10 +104,20 @@ def _rotate_locked() -> None:
                 os.replace(src, dst)
     with contextlib.suppress(OSError):
         os.replace(path, f"{path}.1")
+    _AUTH_BYTES = 0
 
 
 def _prune_locked() -> None:
-    """Drop entries older than ``audit.retention_days`` (0 = keep forever)."""
+    """Drop entries older than ``audit.retention_days`` (0 = keep forever).
+
+    Runs at most every ``_PRUNE_EVERY`` seconds: re-parsing a full 5 MB file on
+    every record made the log a denial-of-service amplifier (N6).
+    """
+    global _LAST_PRUNE
+    now = time.monotonic()
+    if now - _LAST_PRUNE < _PRUNE_EVERY:
+        return
+    _LAST_PRUNE = now
     try:
         from . import settings
 
@@ -123,8 +160,26 @@ def _prune_locked() -> None:
 
 
 def record(op: str, *, actor: str = "local", result: str = "ok", summary: str = "",
-           extra: dict[str, Any] | None = None) -> None:
-    """Append one event. Never raises: auditing must not break an operation."""
+           extra: dict[str, Any] | None = None, unauthenticated: bool = False) -> None:
+    """Append one event. Never raises: auditing must not break an operation.
+
+    ``unauthenticated`` marks a denial for a caller that presented no valid
+    identity (e.g. a forged spawn request): those lines are rate-limited and
+    never trigger a normal rotation (N6).
+    """
+    global _AUTH_BYTES
+    suppressed = 0
+    if unauthenticated:
+        # Drop the flood *before* serializing request-controlled strings (a
+        # 4 MB denied request must not cost 4 MB of work to be discarded).
+        with _LOCK:
+            now = time.monotonic()
+            if now - _DENIED["start"] < DENIED_WINDOW:
+                _DENIED["suppressed"] += 1
+                return
+            _DENIED["start"] = now
+            suppressed = _DENIED["suppressed"]
+            _DENIED["suppressed"] = 0
     entry: dict[str, Any] = {
         "ts": round(time.time(), 3),
         "actor": str(actor)[:120] or "local",
@@ -132,6 +187,8 @@ def record(op: str, *, actor: str = "local", result: str = "ok", summary: str = 
         "result": str(result)[:40],
         "summary": str(summary)[:MAX_LINE],
     }
+    if suppressed:
+        entry["suppressed"] = suppressed
     truncated = False
     if extra:
         for key, value in extra.items():
@@ -154,7 +211,10 @@ def record(op: str, *, actor: str = "local", result: str = "ok", summary: str = 
             _prune_locked()
             fd = os.open(audit_path(), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
-                os.write(fd, (line + "\n").encode("utf-8"))
+                data = (line + "\n").encode("utf-8")
+                os.write(fd, data)
+                if not unauthenticated:
+                    _AUTH_BYTES += len(data)
             finally:
                 os.close(fd)
     except OSError:

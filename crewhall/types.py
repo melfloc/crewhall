@@ -46,6 +46,8 @@ class SessionSpec:
     # Control-plane sessions and remote agents leave this off.
     sandboxed: bool = False
     sandbox_agent_id: str | None = None
+    # Stage 2: the named profile from settings.json ``sandbox.profiles``.
+    sandbox_profile: str | None = None
 
     def argv(self) -> list[str]:
         if isinstance(self.command, str):

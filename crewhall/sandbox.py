@@ -19,20 +19,26 @@ setting that disables the boundary; a missing bwrap is a hard failure.
 from __future__ import annotations
 
 import contextlib
+import glob
 import hashlib
 import json
+import logging
 import os
 import shutil
 import stat
 import sys
 import tempfile
 import threading
+from typing import Any
 
 from . import paths
+
+log = logging.getLogger("crewhall.sandbox")
 
 LAUNCHER_NAME = "agent-sandbox-launcher.py"
 _LAUNCHER: tuple[str, str] | None = None  # (state_dir, sha256)
 _LOCK = threading.RLock()
+_LOGGED: set[str] = set()
 
 SENSITIVE_ENV = (
     "TMUX",
@@ -159,6 +165,97 @@ def sanitize_env(env: dict[str, str]) -> dict[str, str]:
     return env
 
 
+def _log_once(reason: str) -> None:
+    with _LOCK:
+        if reason in _LOGGED:
+            return
+        _LOGGED.add(reason)
+    log.error("sandbox configuration: %s", reason)
+
+
+def decision_from(cfg: dict[str, Any], name: str | None) -> tuple[str | None, str | None]:
+    """Pure form of :func:`decision_for` against an already-read config."""
+    if not name:
+        return None, None
+    if not cfg["agents"] and not cfg["invalid"]:
+        return None, None
+    if cfg["poison_all"]:
+        reason = "; ".join(cfg["poison_all"])
+        _log_once(reason)
+        return None, f"invalid sandbox configuration: {reason}"
+    for entry in cfg["agents"]:
+        if entry["regex"] is not None and entry["regex"].fullmatch(name):
+            profile = entry["profile"]
+            if profile not in cfg["profiles"]:
+                detail = "; ".join(cfg["invalid"]) or f"unknown profile {profile!r}"
+                reason = (f"agent {name!r} matches {entry['name_pattern']!r} but its "
+                          f"sandbox profile is unusable: {detail}")
+                _log_once(reason)
+                return None, reason
+            return profile, None
+    if cfg["invalid"]:
+        reason = "; ".join(cfg["invalid"])
+        _log_once(reason)
+        return None, f"invalid sandbox configuration: {reason}"
+    return None, None
+
+
+def decision_for(name: str | None) -> tuple[str | None, str | None]:
+    """``(profile_name, None)``, ``(None, None)`` if unsandboxed, or an error.
+
+    An agent is sandboxed only when its name fully matches an ``agents[]``
+    pattern. Any invalid section fails closed: a malformed entry could have
+    been meant for any name, so no local agent is launched until it is fixed.
+    """
+    from . import settings
+
+    return decision_from(settings.sandbox_config(), name)
+
+
+def profile_for(name: str | None) -> dict | None:
+    """The validated sandbox profile for an agent name, or None when unsandboxed.
+
+    Raises :class:`SandboxError` when the name is sandboxed but the config is
+    invalid: callers never launch such an agent unsandboxed.
+    """
+    profile, error = decision_for(name)
+    if error:
+        raise SandboxError(error)
+    if profile is None:
+        return None
+    from . import settings
+
+    return settings.sandbox_config()["profiles"].get(profile)
+
+
+def _expand_deny(entries: list[str]) -> list[str]:
+    out: list[str] = []
+    for entry in entries:
+        if "*" in entry:
+            out.extend(sorted(glob.glob(entry)))
+        elif os.path.lexists(entry):
+            out.append(entry)
+    return out
+
+
+def launch_values(name: str | None) -> dict[str, Any]:
+    """What the launch path needs for ``name``: sandboxed flag and profile name.
+
+    Raises :class:`SandboxError` for a name the (invalid) config cannot place:
+    it is never launched unsandboxed *and* never launched sandboxed with a
+    guessed profile.
+    """
+    from . import settings
+
+    profile, error = decision_for(name)
+    if error:
+        raise SandboxError(error)
+    if profile is None:
+        return {"sandboxed": False, "sandbox_profile": None}
+    return {"sandboxed": True,
+            "sandbox_profile": settings.sandbox_config()["profiles"][profile]["name"]}
+
+
 def _inside(path: str, parent: str) -> bool:
     path = os.path.normpath(path)
     parent = os.path.normpath(parent)
@@ -194,6 +291,15 @@ def command_for_spec(spec) -> list[str]:
     agent_id = getattr(spec, "sandbox_agent_id", None) or getattr(spec, "session_id", "") or "agent"
     from . import settings
 
+    name = getattr(spec, "name", None)
+    profile = profile_for(name)
+    if profile is None:
+        raise SandboxError(
+            f"{name or agent_id!r} is marked sandboxed but matches no sandbox profile")
+    declared = getattr(spec, "sandbox_profile", None)
+    if declared and declared != profile["name"]:
+        raise SandboxError(
+            f"{name!r} is sandboxed with profile {profile['name']!r}, not {declared!r}")
     bwrap = _bwrap()
     launcher = _verify_launcher()
     env = dict(spec.env or {})
@@ -202,8 +308,10 @@ def command_for_spec(spec) -> list[str]:
     runtime = os.path.normpath(paths.runtime_dir())
     socket = os.path.normpath(paths.socket_path())
     home = os.path.normpath(os.path.expanduser("~"))
-    workspace = _validate_workspace(
-        spec.cwd or os.getcwd(), home, state, config, runtime)
+    workspace = os.path.normpath(spec.cwd or os.getcwd())
+    if profile["workspace"] == "rw":
+        workspace = _validate_workspace(
+            spec.cwd or os.getcwd(), home, state, config, runtime)
     tmpdir = os.path.normpath(env.get("TMPDIR") or paths.tmpdir_root())
     os.makedirs(tmpdir, mode=0o700, exist_ok=True)
     os.chmod(tmpdir, 0o700)
@@ -249,6 +357,10 @@ def command_for_spec(spec) -> list[str]:
         "container_sockets": container_sockets,
         "bwrap": bwrap,
         "launcher": launcher,
+        # Stage 2: per-role binds/env/network/denies. The launcher re-checks
+        # every destination; the daemon never lets a profile replace the base
+        # masks (state/config/runtime/tmux/docker/credentials).
+        "profile": {**profile, "deny": _expand_deny(profile["deny"])},
     }
     # Keep the JSON compact: it travels through tmux's command queue and must
     # never approach the argv limit. It contains paths, never secrets.

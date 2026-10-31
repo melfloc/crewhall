@@ -278,7 +278,7 @@ class OpsAgents(OpsBase):
             return self.controller.force_restart_agent(
                 request["target"], fresh=bool(request.get("fresh")),
                 reason=request.get("reason"), by=sender_h.agent_id,
-                timeout=float(request.get("timeout", 30.0)),
+                timeout=_spawn_timeout(request),
             )
         if not request.get("forced"):
             harness = self.controller.restart_agent(request["target"])
@@ -324,6 +324,7 @@ class OpsAgents(OpsBase):
                     agent_id=agent_id,
                     args=launch["args"],
                     workspace_mode=launch["workspace_mode"],
+                    sandbox_profile=launch["sandbox"],
                 )
             except BaseException:
                 self._rollback_spawn(agent_id)

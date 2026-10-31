@@ -7,7 +7,6 @@ optional or worth a look (for example only one of the two agent CLIs present).
 """
 from __future__ import annotations
 
-import contextlib
 import os
 import shutil
 import socket
@@ -467,25 +466,41 @@ def check_agent_runtime_versions() -> list[Check]:
 
 
 def check_spawn_policy() -> Check:
-    """SHA-256 of the agent spawn policy on disk vs. the one the daemon loaded."""
-    import json as _json
+    """SHA-256 on disk vs. the snapshot the *running daemon* holds in memory.
 
-    from . import audit, settings, spawn_policy
+    Never parsed from ``audit.jsonl``: that file is same-uid writable, so a
+    forged ``agent_spawn_policy_loaded`` line must not turn this check green.
+    """
+    from . import settings, spawn_policy
+    from .client import Client, ping
 
     cfg = settings.agent_spawn()
     on_disk = spawn_policy.digest(settings.spawn_policy_raw())
     loaded = None
-    with contextlib.suppress(OSError), open(audit.audit_path(), encoding="utf-8") as fh:
-        for line in fh:
-            if '"agent_spawn_policy_loaded"' in line:
-                with contextlib.suppress(ValueError):
-                    loaded = _json.loads(line).get("sha256")
-    detail = f"sha256={on_disk} daemon-loaded={loaded or '-'}"
+    daemon_invalid = None
+    daemon_note = ""
+    try:
+        if ping():
+            status = Client(autostart=False).call("spawn_policy_status")
+            loaded = status.get("sha256")
+            daemon_invalid = status.get("invalid")
+        else:
+            daemon_note = " (daemon not running: drift cannot be verified)"
+    except Exception as exc:  # noqa: BLE001 - diagnostics must not crash
+        daemon_note = f" (daemon: {exc})"
+    detail = f"sha256={on_disk} daemon-loaded={loaded or '-'}{daemon_note}"
     if not cfg["spawners"]:
         return _res("spawn_policy", "ok", "off (no agent_spawners) " + detail)
     if cfg["invalid"]:
         return _res("spawn_policy", "fail", f"policy invalid: {cfg['invalid']} " + detail,
                     "fix settings.json; every agent create/stop is denied")
+    if daemon_invalid:
+        return _res("spawn_policy", "fail", f"daemon refused the policy: {daemon_invalid} "
+                    + detail,
+                    "fix settings.json and restart the daemon; every agent create/stop is denied")
+    if loaded is None:
+        return _res("spawn_policy", "warn", detail,
+                    "Start the daemon to verify which policy it loaded.")
     if loaded != on_disk:
         return _res("spawn_policy", "warn", detail,
                     "settings.json changed since the daemon started; it applies on restart only")

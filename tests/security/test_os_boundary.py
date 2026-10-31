@@ -160,7 +160,17 @@ class BoundaryBase(unittest.TestCase):
         settings._CACHE.update(stamp=None, data=None)
 
     def write_settings(self, command: str, default_args: str = "") -> None:
-        data = {"providers": {"claude": {"command": command, "default_args": default_args}}}
+        data = {
+            "providers": {"claude": {"command": command, "default_args": default_args}},
+            # Stage 2 opt-in: these tests exercise the sandboxed launch path.
+            "sandbox": {
+                "profiles": {"probe": {
+                    "binds": [], "env": {}, "network": "host", "deny": [],
+                    "workspace": "rw",
+                }},
+                "agents": [{"name_pattern": ".*", "profile": "probe"}],
+            },
+        }
         with open(settings.path(), "w") as fh:
             json.dump(data, fh)
 

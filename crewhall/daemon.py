@@ -131,6 +131,42 @@ def _peer_pid(conn: socket.socket) -> int | None:
     return pid or None
 
 
+def _proc_starttime(pid: int) -> int | None:
+    """Field 22 of ``/proc/<pid>/stat``: distinguishes a pid from its reuse."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="ascii", errors="replace") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    tail = raw.rsplit(")", 1)[-1].split()
+    try:
+        return int(tail[19])
+    except (IndexError, ValueError):
+        return None
+
+
+def _peer_identity(conn: socket.socket) -> tuple[int, int | None] | None:
+    """``(pid, starttime)`` captured at accept, before the connection is served.
+
+    N2: SO_PEERCRED only gives a pid. Recording its starttime binds the port to
+    *this* process, so a connection whose opener exits cannot be judged later
+    by whoever inherits that pid.
+    """
+    pid = _peer_pid(conn)
+    if not pid:
+        return None
+    return pid, _proc_starttime(pid)
+
+
+def _split_peer(peer: Any) -> tuple[int | None, int | None, bool]:
+    """Normalize an int (tests/legacy) or ``(pid, starttime)`` peer identity."""
+    if isinstance(peer, tuple):
+        pid, starttime = peer[0], peer[1] if len(peer) > 1 else None
+        return (int(pid) if pid else None,
+                int(starttime) if isinstance(starttime, int) else None, True)
+    return (int(peer) if isinstance(peer, int) else None, None, False)
+
+
 def take_singleton_lock() -> Any:
     """Take the daemon's exclusive lock; the open file, or None if another holds it.
 
@@ -394,7 +430,7 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             with contextlib.suppress(OSError):
                 self._sock.close()
     def _handle(self, conn: socket.socket) -> None:
-        peer_pid = _peer_pid(conn)
+        peer = _peer_identity(conn)
         try:
             f = conn.makefile("rwb")
             for raw in f:
@@ -405,7 +441,7 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
                 except json.JSONDecodeError as exc:
                     response = {"ok": False, "error": f"bad json: {exc}"}
                 else:
-                    denied = self._guard_origin(request, peer_pid)
+                    denied = self._guard_origin(request, peer)
                     response = denied if denied is not None else self.dispatch(request)
                 f.write((json.dumps(response) + "\n").encode("utf-8"))
                 f.flush()
@@ -445,11 +481,21 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
         from .processes import ancestors
 
         return bool(set(ancestors(peer_pid)) & roots)
-    def _peer_binding_error(self, caller: Any, peer_pid: int | None) -> str | None:
+    def _peer_binding_error(self, caller: Any, peer: Any) -> str | None:
         """None if the calling process descends from ``caller``'s own process tree
-        (and no other agent's): a token alone never authenticates a spawn op."""
+        (and no other agent's): a token alone never authenticates a spawn op.
+
+        ``peer`` is the identity captured at accept (N2): the recorded starttime
+        must still match, or a connection whose opener exited would be judged by
+        whoever later receives that pid.
+        """
+        peer_pid, recorded_start, bound = _split_peer(peer)
         if not peer_pid or peer_pid == 1:
             return "calling process unknown (no peer pid)"
+        if bound:
+            current = _proc_starttime(peer_pid)
+            if recorded_start is None or current != recorded_start:
+                return "calling process is gone or its pid was reused"
         try:
             roots = self.controller.agent_roots()
         except Exception:  # noqa: BLE001 - a broken registry proves nothing: deny
@@ -478,6 +524,14 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             summary=f"policy invalid: {invalid}" if invalid else f"sha256 {cfg['sha256']}",
             extra={"sha256": cfg["sha256"], "spawners": len(cfg["spawners"]),
                    "invalid": invalid or ""})
+
+    def _op_spawn_policy_status(self, request: dict[str, Any]) -> dict[str, Any]:
+        """In-memory spawn policy snapshot (for ``crewhall doctor``; never the log).
+
+        Read-only and control-plane only: agents cannot call it (it is not in
+        ``AGENT_OPS``), so a same-uid file write cannot forge the drift check.
+        """
+        return spawn_policy.status()
     def _environ_has_agent_token(self, pid: int) -> bool:
         try:
             tokens = set(self.controller.agent_tokens())
@@ -507,9 +561,10 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
                 str(sender), request.get("token"), str(conversation_id))
         except Exception:  # noqa: BLE001 - bad identity/conversation: deny
             return False
-    def _guard_origin(self, request: dict[str, Any], peer_pid: int | None) -> dict[str, Any] | None:
+    def _guard_origin(self, request: dict[str, Any], peer: Any) -> dict[str, Any] | None:
         """Return a refusal, or None to let the request reach the dispatcher."""
         op = request.get("op")
+        peer_pid, _peer_start, _bound = _split_peer(peer)
         if not isinstance(op, str):
             return None  # unknown op is reported by the dispatcher
         allowed_for_agent = op in AGENT_OPS and not (
@@ -523,7 +578,7 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             # Only the gate sets it, after the policy allowed the request.
             request.pop("_spawn_caller", None)
             if (request.get("sender") or request.get("token")) and spawn_policy.enabled():
-                return self._guard_spawn(op, request, peer_pid)
+                return self._guard_spawn(op, request, peer)
         if op in self.AGENT_OFFICE_OPS and request.get("sender"):
             # Agent-authenticated co-editing (``crewhall office`` inside a chat).
             if self._agent_office_allowed(request):
@@ -536,7 +591,7 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             return {"ok": False, "error": "control plane requires a valid control token"}
         return None
     def _guard_spawn(self, op: str, request: dict[str, Any],
-                     peer_pid: int | None) -> dict[str, Any] | None:
+                     peer: Any) -> dict[str, Any] | None:
         """Agent-initiated create/stop: authenticate the caller (token AND calling
         process), apply the policy. A denial is audited here; an allowed request
         is audited by the op, after its final check under ``spawn_policy.LOCK``."""
@@ -550,12 +605,12 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             reason: str | None = "invalid agent identity/token"
         else:
             who = caller.name or caller.agent_id
-            reason = self._peer_binding_error(caller, peer_pid)
+            reason = self._peer_binding_error(caller, peer)
             if reason is None:
                 check = spawn_policy.check_create if op == "agent_create" else spawn_policy.check_stop
                 reason = check(self.controller, caller, request)
         if reason:
-            spawn_policy.audit_decision(op, who, target, reason)
+            spawn_policy.audit_decision(op, who, target, reason, authenticated=caller is not None)
             return {"ok": False, "error": f"agent spawn policy: {reason}"}
         request["_spawn_caller"] = caller.agent_id  # type: ignore[union-attr]
         request["_actor"] = who

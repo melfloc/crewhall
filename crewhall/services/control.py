@@ -156,6 +156,9 @@ class ServicesControl:
                 v2_session = report.get("session_id") or resume_id
                 if v2_session and not resume_id:
                     new_conv = v2_session
+            from .. import sandbox as sandbox_mod
+
+            sandbox_values = sandbox_mod.launch_values(harness.name)
             new_spec = SessionSpec(
                 command=self._launch_command(
                     kind, args, new_conv, link.port if link else None, host=host,
@@ -169,8 +172,9 @@ class ServicesControl:
                 rows=spec.rows,
                 name=harness.name,
                 host=host,
-                sandboxed=not host,
+                sandboxed=sandbox_values["sandboxed"],
                 sandbox_agent_id=agent_id,
+                sandbox_profile=sandbox_values["sandbox_profile"],
             )
             session = InteractiveSession(
                 self._backend_for(backend_name, host), new_spec, session_id=agent_id)

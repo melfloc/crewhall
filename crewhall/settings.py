@@ -287,7 +287,7 @@ def _validate_host(name: Any, body: Any) -> dict[str, Any]:
 SPAWN_KEYS = ("agent_spawners", "agent_spawn_policy", "agent_spawn_protected")
 SPAWN_PROTECTED_DEFAULT = ("Heraldo", "Orquestador", "Ejecutor_Sonnet_1")
 SPAWN_POLICY_KEYS = {"profiles", "teams", "max_live", "kinds"}
-SPAWN_PROFILE_KEYS = {"name_pattern", "kind", "args", "cwd", "backend"}
+SPAWN_PROFILE_KEYS = {"name_pattern", "kind", "args", "cwd", "backend", "sandbox"}
 SPAWN_BACKENDS = ("tmux", "pty")
 
 
@@ -311,6 +311,7 @@ def _spawn_profile(entry: Any) -> dict[str, Any]:
         raise SettingsError(f"profile unknown keys {sorted(unknown)}")
     pattern, kind, args, cwd = (entry.get(k) for k in ("name_pattern", "kind", "args", "cwd"))
     backend = entry.get("backend", spawn_default_backend())
+    sandbox = entry.get("sandbox")
     if not isinstance(pattern, str) or not pattern or kind not in ("claude", "opencode"):
         raise SettingsError(f"profile {pattern!r}: name_pattern and kind claude|opencode required")
     try:
@@ -323,8 +324,11 @@ def _spawn_profile(entry: Any) -> dict[str, Any]:
         raise SettingsError(f"profile {pattern!r}: cwd must be a normalized absolute path")
     if backend not in SPAWN_BACKENDS:
         raise SettingsError(f"profile {pattern!r}: backend must be one of {list(SPAWN_BACKENDS)}")
+    if not isinstance(sandbox, str) or not sandbox:
+        raise SettingsError(
+            f"profile {pattern!r}: sandbox (a settings.json sandbox profile name) is required")
     return {"name_pattern": pattern, "kind": kind, "args": list(args), "cwd": cwd,
-            "backend": backend}
+            "backend": backend, "sandbox": sandbox}
 
 
 def _spawn_policy_body(data: dict[str, Any]) -> dict[str, Any]:
@@ -394,6 +398,191 @@ def host(name: str) -> dict[str, Any]:
     return {**cfg, "name": name}
 
 
+# -- sandbox profiles (Stage 2) -------------------------------------------------
+# ``sandbox`` is edited by hand (never through the settings API, which is
+# control plane). An agent is sandboxed only when its name fully matches an
+# ``agents[].name_pattern``; absent/empty means every launch is byte-identical
+# to an unsandboxed one.
+SANDBOX_KEYS = {"profiles", "agents"}
+SANDBOX_PROFILE_KEYS = {"binds", "env", "network", "deny", "workspace"}
+SANDBOX_BIND_KEYS = {"path", "mode", "optional"}
+SANDBOX_MODES = ("ro", "rw")
+SANDBOX_NETWORKS = ("host", "none")
+SANDBOX_WORKSPACES = ("rw", "ro", "none")
+SANDBOX_ENV_FORBIDDEN = {
+    "CREWHALL_TOKEN", "CREWHALL_AGENT_ID", "CREWHALL_AGENT_NAME",
+    "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "BASH_ENV", "ENV",
+    "PYTHONSTARTUP", "PYTHONPATH", "PERL5OPT", "RUBYOPT",
+}
+_SYSTEM_RW_FORBIDDEN = ("/", "/home", "/root", "/etc", "/usr", "/bin", "/sbin",
+                        "/lib", "/lib64", "/boot", "/dev", "/proc", "/sys",
+                        "/var", "/run", "/opt", "/srv", "/mnt", "/media")
+
+
+def _sandbox_path(value: Any, what: str) -> str:
+    """Absolute, normalized path with ``~`` and ``$HOME`` expanded."""
+    if not isinstance(value, str) or not value or "\0" in value or "\n" in value:
+        raise SettingsError(f"sandbox {what}: a single path is required")
+    home = os.path.expanduser("~")
+    path = value.replace("${HOME}", home).replace("$HOME", home)
+    path = os.path.expanduser(path)
+    if not os.path.isabs(path):
+        raise SettingsError(f"sandbox {what}: {value!r} is not absolute")
+    if os.path.normpath(path) != path:
+        raise SettingsError(f"sandbox {what}: {value!r} is not normalized")
+    return path
+
+
+def _sandbox_inside(path: str, parent: str) -> bool:
+    path, parent = os.path.normpath(path), os.path.normpath(parent)
+    return path == parent or path.startswith(parent.rstrip("/") + "/")
+
+
+def _sandbox_bind(entry: Any, profile: str) -> dict[str, Any]:
+    if not isinstance(entry, dict):
+        raise SettingsError(f"sandbox profile {profile!r}: each bind is a table")
+    unknown = set(entry) - SANDBOX_BIND_KEYS
+    if unknown:
+        raise SettingsError(f"sandbox profile {profile!r}: bind unknown keys {sorted(unknown)}")
+    path = _sandbox_path(entry.get("path"), f"profile {profile!r} bind")
+    mode = entry.get("mode", "ro")
+    if mode not in SANDBOX_MODES:
+        raise SettingsError(f"sandbox profile {profile!r}: bind mode must be ro|rw")
+    optional = entry.get("optional", False)
+    if not isinstance(optional, bool):
+        raise SettingsError(f"sandbox profile {profile!r}: bind optional must be true|false")
+    if mode == "rw":
+        home = os.path.normpath(os.path.expanduser("~"))
+        if os.path.normpath(path) in _SYSTEM_RW_FORBIDDEN or os.path.normpath(path) == home:
+            raise SettingsError(f"sandbox profile {profile!r}: refusing to bind {path!r} rw")
+        if not (_sandbox_inside(path, home) or _sandbox_inside(path, "/tmp")):
+            raise SettingsError(
+                f"sandbox profile {profile!r}: rw bind {path!r} must be under $HOME or /tmp")
+    from . import paths as _paths
+
+    for forbidden in (_paths.state_dir(), config_dir(), _paths.runtime_dir()):
+        if _sandbox_inside(path, forbidden) or _sandbox_inside(forbidden, path):
+            raise SettingsError(
+                f"sandbox profile {profile!r}: bind {path!r} overlaps {forbidden!r}")
+    if not optional and not os.path.exists(path):
+        raise SettingsError(f"sandbox profile {profile!r}: bind source {path!r} does not exist")
+    return {"path": path, "mode": mode, "optional": optional}
+
+
+def _sandbox_profile(name: Any, body: Any) -> dict[str, Any]:
+    if not isinstance(name, str) or not name or not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        raise SettingsError(f"sandbox: invalid profile name {name!r}")
+    if not isinstance(body, dict):
+        raise SettingsError(f"sandbox profile {name!r}: a table is required")
+    unknown = set(body) - SANDBOX_PROFILE_KEYS
+    if unknown:
+        raise SettingsError(f"sandbox profile {name!r}: unknown keys {sorted(unknown)}")
+    binds = body.get("binds", [])
+    if not isinstance(binds, list):
+        raise SettingsError(f"sandbox profile {name!r}: binds must be a list")
+    deny = body.get("deny", [])
+    if not isinstance(deny, list):
+        raise SettingsError(f"sandbox profile {name!r}: deny must be a list")
+    deny_paths = []
+    for item in deny:
+        path = _sandbox_path(item, f"profile {name!r} deny")
+        if "*" in path and not re.fullmatch(r"[^*]*\*[^/]*", os.path.basename(path)):
+            raise SettingsError(
+                f"sandbox profile {name!r}: deny globs are only allowed in the last component")
+        deny_paths.append(path)
+    env = body.get("env", {})
+    if not isinstance(env, dict):
+        raise SettingsError(f"sandbox profile {name!r}: env must be a table")
+    clean_env: dict[str, str] = {}
+    for key, value in env.items():
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise SettingsError(f"sandbox profile {name!r}: invalid env name {key!r}")
+        if key in SANDBOX_ENV_FORBIDDEN:
+            raise SettingsError(f"sandbox profile {name!r}: env {key} is managed by crewhall")
+        if not isinstance(value, str) or "\0" in value:
+            raise SettingsError(f"sandbox profile {name!r}: env {key} must be a string")
+        clean_env[key] = value.replace("${HOME}", os.path.expanduser("~")).replace(
+            "$HOME", os.path.expanduser("~"))
+    network = body.get("network", "host")
+    if network not in SANDBOX_NETWORKS:
+        raise SettingsError(f"sandbox profile {name!r}: network must be host|none")
+    workspace = body.get("workspace", "rw")
+    if workspace not in SANDBOX_WORKSPACES:
+        raise SettingsError(f"sandbox profile {name!r}: workspace must be rw|ro|none")
+    return {"name": name, "binds": [_sandbox_bind(e, name) for e in binds],
+            "deny": deny_paths, "env": clean_env, "network": network,
+            "workspace": workspace}
+
+
+def sandbox_config() -> dict[str, Any]:
+    """The validated ``sandbox`` section, fail-closed.
+
+    Returns ``profiles`` (valid ones), ``agents`` entries and ``invalid``
+    reasons. An entry that names a missing/invalid profile, or any structural
+    error, makes :func:`crewhall.sandbox.decision_for` refuse every local agent:
+    the daemon never guesses which names the owner meant to sandbox.
+    """
+    data = load()
+    out: dict[str, Any] = {"profiles": {}, "agents": [], "invalid": [],
+                           "poison_all": []}
+    raw = data.get("sandbox")
+    if raw is None:
+        return out
+    if not isinstance(raw, dict):
+        out["invalid"].append("sandbox: a table is required")
+        out["poison_all"].append("sandbox: a table is required")
+        return out
+    unknown = set(raw) - SANDBOX_KEYS
+    if unknown:
+        reason = f"sandbox: unknown keys {sorted(unknown)}"
+        out["invalid"].append(reason)
+        out["poison_all"].append(reason)
+    profiles = raw.get("profiles", {})
+    if not isinstance(profiles, dict):
+        out["invalid"].append("sandbox.profiles: a table is required")
+        out["poison_all"].append("sandbox.profiles: a table is required")
+        profiles = {}
+    for name, body in profiles.items():
+        try:
+            out["profiles"][name] = _sandbox_profile(name, body)
+        except SettingsError as exc:
+            out["invalid"].append(str(exc))
+    agents = raw.get("agents", [])
+    if not isinstance(agents, list):
+        out["invalid"].append("sandbox.agents: a list is required")
+        out["poison_all"].append("sandbox.agents: a list is required")
+        agents = []
+    for entry in agents:
+        if not isinstance(entry, dict):
+            reason = "sandbox.agents: each entry is a table"
+            out["invalid"].append(reason)
+            out["poison_all"].append(reason)
+            continue
+        extra = set(entry) - {"name_pattern", "profile"}
+        pattern = entry.get("name_pattern")
+        profile = entry.get("profile")
+        regex = None
+        error = None
+        if extra:
+            error = f"unknown keys {sorted(extra)}"
+        if not isinstance(pattern, str) or not pattern:
+            error = error or "name_pattern is required"
+        else:
+            try:
+                regex = re.compile(pattern)
+            except re.error as exc:
+                error = error or f"bad regex: {exc}"
+        if not isinstance(profile, str) or not profile:
+            error = error or "profile is required"
+        if error:
+            out["invalid"].append(f"sandbox.agents[{pattern!r}]: {error}")
+            out["poison_all"].append(f"sandbox.agents[{pattern!r}]: {error}")
+        out["agents"].append({"name_pattern": pattern if isinstance(pattern, str) else "",
+                              "profile": profile if isinstance(profile, str) else None,
+                              "regex": regex, "error": error})
+    return out
+
+
 def _normalize(raw: Any) -> dict[str, Any]:
     """Valid values only; anything unknown or out of range falls back to its default."""
     data: dict[str, Any] = {}
@@ -417,6 +606,10 @@ def _normalize(raw: Any) -> dict[str, Any]:
         # Misspelled ``agent_spawn*`` keys are kept so the policy can refuse them.
         if isinstance(key, str) and key.startswith("agent_spawn"):
             data[key] = raw[key]
+    # ``sandbox`` is hand-edited and validated by ``sandbox_config()``; keep it
+    # verbatim so an invalid section is refused instead of silently dropped.
+    if "sandbox" in raw:
+        data["sandbox"] = raw["sandbox"]
     hosts_raw = raw.get("hosts")
     if isinstance(hosts_raw, dict):
         for name, body in hosts_raw.items():

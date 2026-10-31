@@ -102,6 +102,7 @@ def build_argv(cfg: dict) -> list[str]:
     socket = cfg.get("socket")
     workspace = cfg.get("workspace") or cfg.get("cwd") or "/"
     home = cfg.get("home") or ""
+    profile = cfg.get("profile") or {}
 
     args = [
         bwrap,
@@ -113,6 +114,11 @@ def build_argv(cfg: dict) -> list[str]:
         "--die-with-parent", "--new-session", "--cap-drop", "ALL",
         "--hostname", "crewhall-" + str(cfg.get("agent_id") or "agent")[:8],
     ]
+    # Stage 2 network policy. ``host`` (the default for coding agents) keeps
+    # the host namespace because the agent CLIs need API egress; ``none`` gets
+    # an empty network namespace (no egress, no loopback service reachable).
+    if profile.get("network", "host") == "none":
+        args += ["--unshare-net"]
     # A private /dev/shm: POSIX shared memory is another cross-agent channel.
     _tmpfs(args, "/dev/shm")
     # Private temp filesystems, before any path below them is re-exposed.
@@ -170,11 +176,30 @@ def build_argv(cfg: dict) -> list[str]:
         if socket and os.path.exists(socket):
             _bind(args, socket, socket)
 
-    # The workspace is the one user tree the agent may modify.
-    if not _unsafe_workspace(workspace, cfg):
-        _bind(args, workspace, workspace)
-    else:
-        raise LaunchError(f"refusing to bind {workspace!r} read-write")
+    # Stage 2 profile binds: only *additional* paths. They never replace the
+    # base masks above (settings refuses control-plane paths), and profile
+    # denies below always win.
+    for bind in profile.get("binds") or []:
+        source = bind["path"]
+        if not _exists(source):
+            if bind.get("optional"):
+                continue
+            raise LaunchError(f"missing bind source: {source}")
+        _bind(args, source, source, readonly=bind.get("mode", "ro") == "ro")
+
+    # Explicit denies, applied after binds so they cannot be re-exposed.
+    for path in profile.get("deny") or []:
+        _mask(args, path)
+
+    # The workspace bind follows the profile: rw (default), ro, or none when
+    # every writable tree is an explicit bind above.
+    workspace_mode = profile.get("workspace", "rw")
+    if workspace_mode != "none" or _inside(workspace, state or ""):
+        if _unsafe_workspace(workspace, cfg):
+            raise LaunchError(f"refusing to bind {workspace!r} read-write")
+        if not _exists(workspace):
+            raise LaunchError(f"missing workspace: {workspace}")
+        _bind(args, workspace, workspace, readonly=workspace_mode == "ro")
 
     args += ["--chdir", cfg.get("cwd") or workspace]
     args += ["--", *cfg["argv"]]
@@ -192,6 +217,9 @@ def main(argv: list[str] | None = None) -> int:
         env = dict(os.environ)
         for key in SENSITIVE_ENV:
             env.pop(key, None)
+        profile = cfg.get("profile") or {}
+        for key, value in (profile.get("env") or {}).items():
+            env[str(key)] = str(value)
         cache_dir = cfg.get("cache_dir")
         if cache_dir:
             # HOME is read-only inside the sandbox; give the CLI a writable,

@@ -63,6 +63,9 @@ class SpawnFindings(base.AgentSpawnPolicy):
         data = json.load(open(settings.path()))
         data["agent_spawners"].append("Ejecutor_Sonnet_1")
         data["agent_spawn_policy"]["max_live"] = 99
+        # A spawner must itself be sandboxed (Stage 2), so the same edit opts it in.
+        data["sandbox"]["agents"].append(
+            {"name_pattern": "Ejecutor_Sonnet_1", "profile": "role"})
         self._settings(data, restart=False)   # what the agent's Edit tool would do
         self.assertDenied(self.create("Ejecutor_Backend_Sonnet_1", sender="Ejecutor_Sonnet_1"),
                           "not in agent_spawners")
@@ -76,11 +79,17 @@ class SpawnFindings(base.AgentSpawnPolicy):
         [row] = self.audit_rows("agent_spawn_policy_loaded")
         expected = spawn_policy.digest(settings.spawn_policy_raw())
         self.assertEqual((row["result"], row["sha256"]), ("ok", expected))
-        check = doctor.check_spawn_policy()
-        self.assertEqual(check["status"], "ok")
-        self.assertIn(f"sha256={expected} daemon-loaded={expected}", check["detail"])
-        self._settings(policy(self.cwd, max_live=9), restart=False)
-        self.assertEqual(doctor.check_spawn_policy()["status"], "warn")
+        from unittest import mock
+
+        from crewhall.client import Client
+        with mock.patch.object(Client, "call",
+                               return_value=self.server._op_spawn_policy_status({})), \
+                mock.patch("crewhall.client.ping", return_value=True):
+            check = doctor.check_spawn_policy()
+            self.assertEqual(check["status"], "ok")
+            self.assertIn(f"sha256={expected} daemon-loaded={expected}", check["detail"])
+            self._settings(policy(self.cwd, max_live=9), restart=False)
+            self.assertEqual(doctor.check_spawn_policy()["status"], "warn")
 
     # R3: max_live holds across restarts of spawn-created agents ---------------
     def _fake_revive(self) -> None:

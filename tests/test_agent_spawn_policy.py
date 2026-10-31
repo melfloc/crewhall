@@ -32,22 +32,41 @@ BACKEND_ARGS = ["--agent", "ejecutor-backend", SKIP]
 def profiles(cwd: str) -> list[dict]:
     """The dev machine's profiles (cwd = its ``$HOME/Projects``)."""
     sonnet = [{"name_pattern": f"Ejecutor_{role}_Sonnet_[1-9][0-9]?", "kind": "claude",
-               "args": ["--agent", agent, SKIP], "cwd": cwd, "backend": "tmux"}
+               "args": ["--agent", agent, SKIP], "cwd": cwd, "backend": "tmux",
+               "sandbox": "role"}
               for role, agent in (("Backend", "ejecutor-backend"), ("Frontend", "ejecutor-frontend"),
                                   ("Sonda", "sonda"), ("Redactor", "redactor"))]
     return [*sonnet,
             {"name_pattern": "Ejecutor_DeepSeekV4Flash_[1-9][0-9]?", "kind": "opencode",
-             "args": ["--agent", "ejecutor"], "cwd": cwd, "backend": "tmux"},
+             "args": ["--agent", "ejecutor"], "cwd": cwd, "backend": "tmux",
+             "sandbox": "role"},
             {"name_pattern": "Auditor", "kind": "claude",
-             "args": ["--agent", "auditor", SKIP], "cwd": cwd, "backend": "tmux"},
+             "args": ["--agent", "auditor", SKIP], "cwd": cwd, "backend": "tmux",
+             "sandbox": "role"},
             {"name_pattern": "Investigador_Claude", "kind": "claude",
-             "args": ["--agent", "investigador", SKIP], "cwd": cwd, "backend": "tmux"},
+             "args": ["--agent", "investigador", SKIP], "cwd": cwd, "backend": "tmux",
+             "sandbox": "role"},
             {"name_pattern": "Investigador_DeepSeek", "kind": "opencode",
-             "args": ["--agent", "investigador_deepseek"], "cwd": cwd, "backend": "tmux"}]
+             "args": ["--agent", "investigador_deepseek"], "cwd": cwd, "backend": "tmux",
+             "sandbox": "role"}]
+
+
+def sandbox_section(cwd: str) -> dict:
+    """Stage 2: Heraldo and every spawn-profile name are opted in."""
+    profile = {"binds": [{"path": cwd, "mode": "rw"}], "env": {},
+               "network": "host", "deny": [], "workspace": "rw"}
+    return {
+        "profiles": {"role": profile, "heraldo": profile},
+        "agents": [{"name_pattern": "Heraldo", "profile": "heraldo"},
+                   {"name_pattern": "Auditor", "profile": "role"},
+                   *[{"name_pattern": p["name_pattern"], "profile": "role"}
+                     for p in profiles(cwd)]],
+    }
 
 
 def policy(cwd: str, **body) -> dict:
     return {"agent_spawners": ["Heraldo"],
+            "sandbox": sandbox_section(cwd),
             "agent_spawn_policy": {"profiles": profiles(cwd), "teams": ["Conciliare", "Otro"],
                                    "max_live": 6, "kinds": ["claude", "opencode"], **body}}
 
@@ -89,6 +108,7 @@ class AgentSpawnPolicy(unittest.TestCase):
         c.create_team("Otro", [ids["Auditor"]], workspace=self.root)
         # Requests come from inside Heraldo's process tree unless a test says otherwise.
         self.agent_pid = self.roots["Heraldo"]
+        audit.reset_rate_limit()
         self._settings(policy(self.cwd))
 
     def spawn_root(self) -> int:

@@ -75,6 +75,10 @@ class StateStore:
             )
         agents = []
         for harness in controller.agents.all():
+            try:
+                harness.session.poll()
+            except Exception:  # noqa: BLE001 - persist the last known status
+                log.debug("status poll failed before persist", exc_info=True)
             spec = harness.session.spec
             agents.append(
                 {
@@ -100,6 +104,10 @@ class StateStore:
                     "launch": getattr(controller, "_agent_launch", {}).get(harness.agent_id),
                     # Creator agent_id when an agent created it (spawn policy).
                     "created_by": getattr(controller, "_agent_created_by", {}).get(harness.agent_id),
+                    # N3: whether the process was alive when this record was
+                    # written. A live pane for an agent persisted as EXITED is
+                    # a respawn and must not be adopted after a daemon restart.
+                    "status": harness.session.status.value,
                     # User env only as *keys*: values may be API keys and must
                     # never be written to state.json.
                     "env_keys": sorted(

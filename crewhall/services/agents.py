@@ -1666,6 +1666,7 @@ class ServicesAgents:
         workspace_mode: str | None = None,
         host: str | None = None,
         conversation: str | None = None,
+        sandbox_profile: str | None = None,
     ) -> Harness:
         harness_cls = get_harness(kind)
         if not settings.provider_enabled(kind):
@@ -1722,6 +1723,18 @@ class ServicesAgents:
             workspace_mode = "shared"
         session_id = agent_id or new_session_id()
         agent_name = name or session_id
+        # Refuse a name the sandbox config cannot place *before* creating a
+        # worktree, an OpenCode server or a token.
+        sandbox_values = {"sandboxed": False, "sandbox_profile": None}
+        if not host:
+            from .. import sandbox as sandbox_mod
+
+            sandbox_values = sandbox_mod.launch_values(agent_name)
+            if sandbox_profile and sandbox_values["sandbox_profile"] != sandbox_profile:
+                raise sandbox_mod.SandboxError(
+                    f"agent {agent_name!r} must launch with sandbox profile "
+                    f"{sandbox_profile!r}, but settings.json resolves it to "
+                    f"{sandbox_values['sandbox_profile']!r}")
         mode = workspace_mode
         if mode is None and team:
             try:
@@ -1802,8 +1815,9 @@ class ServicesAgents:
             rows=rows,
             name=name,
             host=host,
-            sandboxed=not host,
+            sandboxed=sandbox_values["sandboxed"],
             sandbox_agent_id=session_id,
+            sandbox_profile=sandbox_values["sandbox_profile"],
         )
         session = InteractiveSession(
             self._backend_for(backend, host), spec, session_id=session_id

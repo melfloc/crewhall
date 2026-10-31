@@ -3,6 +3,7 @@ from __future__ import annotations
 
 # ruff: noqa: F401
 # mypy: disable-error-code="attr-defined"
+import contextlib
 import os
 import secrets
 import threading
@@ -128,9 +129,31 @@ class ServicesPersistence:
         # ``_adopt_tmux``). Reuse that live session so the agent keeps running
         # instead of being reconstructed as EXITED and losing its work.
         session = self._live_adopted(agent_id)
+        owner = agent.get("created_by")
+        if session is not None:
+            from .. import spawn_policy
+
+            reason = spawn_policy.adoption_error(
+                self, owner if isinstance(owner, str) else None, agent_id,
+                agent.get("status"))
+            if reason:
+                log.warning("refusing to adopt %s (%s): %s",
+                            agent.get("name") or agent_id, agent_id, reason)
+                with contextlib.suppress(Exception):
+                    session.terminate()
+                with contextlib.suppress(Exception):
+                    self.registry.remove(session.session_id)
+                session = None
         if session is not None:
             self._overlay_persisted(session, agent)
         else:
+            from .. import sandbox as sandbox_mod
+
+            try:
+                sandbox_values = sandbox_mod.launch_values(agent.get("name"))
+            except sandbox_mod.SandboxError as exc:
+                log.error("agent %s cannot be launched: %s", agent_id, exc)
+                sandbox_values = {"sandboxed": True, "sandbox_profile": "__invalid__"}
             spec = SessionSpec(
                 command=self._launch_command(agent["kind"], extra_args, host=host, enforce=False),
                 cwd=agent.get("cwd") or (None if host else os.getcwd()),
@@ -139,8 +162,9 @@ class ServicesPersistence:
                 rows=int(agent.get("rows", 40)),
                 name=agent.get("name"),
                 host=host,
-                sandboxed=not host,
+                sandboxed=sandbox_values["sandboxed"],
                 sandbox_agent_id=agent_id,
+                sandbox_profile=sandbox_values["sandbox_profile"],
             )
             session = InteractiveSession(
                 self._backend_for(agent.get("backend"), host), spec, session_id=agent_id
@@ -349,6 +373,9 @@ class ServicesPersistence:
                 self._opencode_links[agent_id] = {
                     "port": link.port, "password": link.password, "api": link.api,
                 }
+            from .. import sandbox as sandbox_mod
+
+            sandbox_values = sandbox_mod.launch_values(harness.name)
             new_spec = SessionSpec(
                 command=self._launch_command(
                     kind,
@@ -366,8 +393,9 @@ class ServicesPersistence:
                 rows=spec.rows,
                 name=harness.name,
                 host=host,
-                sandboxed=not host,
+                sandboxed=sandbox_values["sandboxed"],
                 sandbox_agent_id=agent_id,
+                sandbox_profile=sandbox_values["sandbox_profile"],
             )
             session = InteractiveSession(
                 self._backend_for(backend_name, host), new_spec, session_id=agent_id
