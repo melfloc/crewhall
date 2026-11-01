@@ -9,8 +9,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install ruff
@@ -19,8 +19,8 @@ jobs:
   typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install mypy
@@ -31,8 +31,8 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y tmux
@@ -59,8 +59,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - run: sudo apt-get update && sudo apt-get install -y tmux
@@ -71,14 +71,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install build twine
       - run: python -m build
       - run: twine check dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -86,10 +86,10 @@ jobs:
   privacy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # the scan also walks the git history
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python scripts/privacy_scan.py
@@ -100,7 +100,7 @@ jobs:
     if: github.event_name == 'schedule' && vars.REAL_AGENT_RUNNER != ''
     runs-on: ${{ vars.REAL_AGENT_RUNNER }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: AT_RUN_CLAUDE=1 AT_RUN_OPENCODE=1 AT_RUN_CODEX=1 python -m unittest discover
       # Fase F1: the end-to-end smoke with real agents (two OpenCode agents,
       # human draft, queue across a restart, denied control plane, chat publish).
@@ -113,8 +113,8 @@ jobs:
     if: github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'browser-tests')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y tmux
