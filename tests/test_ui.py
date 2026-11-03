@@ -761,6 +761,45 @@ class AsyncInput(UiBase):
         self.assertLess(elapsed, 0.15)
 
 
+class AsyncRefresh(UiBase):
+    def test_refresh_async_does_not_block_and_applies(self):
+        class SlowControl(FakeControl):
+            def list_agents(self):
+                time.sleep(0.25)
+                return super().list_agents()
+
+        control = SlowControl(Controller(adopt=False))
+        model = AppModel(control, cwd="/tmp", async_ops=False)
+        model.refresh()
+        control.create_agent("opencode", "worker")
+        started = time.monotonic()
+        model.refresh_async()
+        self.assertLess(time.monotonic() - started, 0.1)
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            model.poll_refresh()
+            if model.agents:
+                break
+            time.sleep(0.01)
+        self.assertEqual([a["name"] for a in model.agents], ["worker"])
+
+    def test_refresh_async_error_marks_disconnected(self):
+        class BadControl(FakeControl):
+            def list_agents(self):
+                raise RuntimeError("down")
+
+        model = AppModel(BadControl(Controller(adopt=False)), cwd="/tmp", async_ops=False)
+        model.refresh_async()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            model.poll_refresh()
+            if not model.connected:
+                break
+            time.sleep(0.01)
+        self.assertFalse(model.connected)
+        self.assertIn("daemon unavailable", model.status)
+
+
 class InteractiveEcho(UiBase):
     def test_live_capture_interval_depends_on_backend_and_focus(self):
         from crewhall.ui.app import LIVE_CAPTURE_LOCAL, LIVE_CAPTURE_REMOTE, _live_interval

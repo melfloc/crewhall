@@ -159,11 +159,17 @@ def run(
         last_live = 0.0
         live_for: str | None = None
         while not model.should_quit:
+            # Apply a snapshot fetched by refresh_async, if one is ready.
+            model.poll_refresh()
             now = time.monotonic()
             if now - last_refresh >= refresh_interval:
-                # The fast capture below already owns the selected screen while
-                # in Interactive Focus; do not capture it twice per poll.
-                model.refresh(capture=model.focus != "interactive")
+                if model.focus == "interactive":
+                    # Polling every agent/team can take ~100 ms with a few
+                    # agents; fetch it off-thread so typing never waits for it.
+                    # The live capture below keeps the selected screen current.
+                    model.refresh_async()
+                else:
+                    model.refresh()
                 last_refresh = now
             live = _live_interval(model)
             agent = model.selected_agent()

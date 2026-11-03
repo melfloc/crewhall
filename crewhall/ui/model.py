@@ -208,6 +208,10 @@ class AppModel(UiModals, UiPalette):
         self._pending_select: tuple[str, str] | None = None
         self._pending_focus: str | None = None
         self._last_resize: tuple[str, int, int] | None = None
+        # Periodic snapshot fetched off the UI thread (Interactive Focus).
+        self._refresh_results: queue.Queue = queue.Queue()
+        self._refresh_inflight = False
+        self._refresh_seq = 0
 
     # ---------------------------------------------------------------- lookups
     def agent_names(self) -> list[str]:
@@ -433,10 +437,69 @@ class AppModel(UiModals, UiPalette):
                 self.status_kind = "success"
             self._apply_pending_select()
             self._check_interactive_focus()
+            self._refresh_seq += 1
         except Exception as exc:  # noqa: BLE001
             self.connected = False
             self.status = f"daemon unavailable: {exc}"
             self.status_kind = "error"
+
+    def refresh_async(self) -> None:
+        """Fetch the periodic snapshot without blocking the keyboard.
+
+        ``list_agents`` + ``list_teams`` + ``message_history`` cost ~100 ms with
+        a few agents and teams; doing that on the UI thread every 0.8 s made
+        keys typed during the poll wait for it. One fetch at a time; the result
+        is applied by :meth:`poll_refresh` on the UI thread.
+        """
+        if self._refresh_inflight:
+            return
+        self._refresh_inflight = True
+        seq = self._refresh_seq
+        need_meta = not self.meta.get("harnesses")
+
+        def work() -> None:
+            try:
+                meta = self.control.meta() if need_meta else None
+                agents = self.control.list_agents()
+                teams = self.control.list_teams()
+                activity = self.control.message_history(limit=self.activity_limit)
+            except Exception as exc:  # noqa: BLE001 - applied as a status bar error
+                self._refresh_results.put((seq, None, None, None, None, str(exc)))
+                return
+            self._refresh_results.put((seq, meta, agents, teams, activity, None))
+
+        threading.Thread(target=work, name="crewhall-ui-refresh", daemon=True).start()
+
+    def poll_refresh(self) -> None:
+        while True:
+            try:
+                seq, meta, agents, teams, activity, error = (
+                    self._refresh_results.get_nowait()
+                )
+            except queue.Empty:
+                return
+            self._refresh_inflight = False
+            if error is not None:
+                if self.connected:
+                    self.connected = False
+                    self.status = f"daemon unavailable: {error}"
+                    self.status_kind = "error"
+                continue
+            if seq != self._refresh_seq or agents is None or teams is None or activity is None:
+                # A synchronous refresh already produced newer data.
+                continue
+            self._refresh_seq += 1
+            if meta is not None:
+                self.meta = meta
+            self.agents = agents
+            self.teams = teams
+            self.activity = activity
+            if not self.connected:
+                self.connected = True
+                self.status = "reconnected"
+                self.status_kind = "success"
+            self._apply_pending_select()
+            self._check_interactive_focus()
 
     def _capture_selected(self) -> None:
         agent = self.selected_agent()
