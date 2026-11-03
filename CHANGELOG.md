@@ -7,6 +7,17 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- Corregido: el input de la TUI (sobre todo en Interactive Focus y a través de SSH) ya no espera
+  al daemon por cada tecla. `agent_write`/`agent_key`/`agent_resize` responden sin resumir el
+  agente (el resumen sondeaba la sesión y capturaba la pantalla dos veces: ~38 ms por tecla con
+  un pane grande, y una cadena de comandos SSH con `ssh-tmux`). La TUI reenvía las teclas en un
+  hilo que agrupa ráfagas de texto y el bucle lee el teclado en cuanto llega, sin dormir 20 ms por
+  tecla. En foco interactivo el eco del agente se refresca cada 40–120 ms (0,6 s para agentes
+  remotos) en vez de esperar al refresco completo de 0,8 s; `agent_capture --recent` pide solo la
+  cola al tmux (sin arrastrar todo el scrollback) y ya no captura la pantalla dos veces ni calcula
+  un resumen que el cliente descarta. Además, el poll de la TUI pide una lista breve de agentes y
+  ya no calcula uso/actividad que solo usa el Web UI.
+
 ## [0.86.0] — 2026-10-29
 
 - Corregido: el daemon ya no acumula sin límite la salida de cada sesión. El buffer de

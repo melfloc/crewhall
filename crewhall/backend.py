@@ -35,6 +35,16 @@ class Backend(ABC):
     @abstractmethod
     def capture(self, escapes: bool = False) -> str: ...
 
+    def capture_recent(self, max_lines: int) -> str:
+        """Last ``max_lines`` lines of the screen/history.
+
+        Backends that can ask their terminal for just a tail (tmux, ssh-tmux)
+        override this; capturing the whole scrollback and slicing it is the
+        fallback and can be expensive for a long-running session.
+        """
+        lines = self.capture().splitlines()
+        return "\n".join(lines[-max(1, int(max_lines)):])
+
     @abstractmethod
     def resize(self, cols: int, rows: int) -> None: ...
 

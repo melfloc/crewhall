@@ -71,7 +71,9 @@ class OpsAgents(OpsBase):
         # they never show up in the agents sidebar, teams or mission control.
         from .. import chat as conversations
 
-        agents = self.controller.list_agents()
+        # ``brief`` is the TUI's poll: it only needs id/name/state/backend, so
+        # the daemon skips the Web UI-only usage/activity work (screen captures).
+        agents = self.controller.list_agents(brief=bool(request.get("brief", False)))
         scope = request.get("scope") or "cowork"
         if scope != "all":
             chat_ids = conversations.agent_ids()
@@ -93,17 +95,33 @@ class OpsAgents(OpsBase):
     def _op_agent_write(self, request: dict[str, Any]) -> dict[str, Any]:
         harness = self.controller.get_agent(request["target"])
         harness.write_raw(request["text"])
-        return {"agent": self.controller.agent_summary(harness)}
+        return self._input_response(harness, request)
 
     def _op_agent_key(self, request: dict[str, Any]) -> dict[str, Any]:
         harness = self.controller.get_agent(request["target"])
         harness.send_key(request["key"])
-        return {"agent": self.controller.agent_summary(harness)}
+        return self._input_response(harness, request)
 
     def _op_agent_resize(self, request: dict[str, Any]) -> dict[str, Any]:
         harness = self.controller.get_agent(request["target"])
         harness.resize(_dim(request["cols"], "cols"), _dim(request["rows"], "rows"))
-        return {"agent": self.controller.agent_summary(harness)}
+        return self._input_response(harness, request)
+
+    def _input_response(self, harness: Any, request: dict[str, Any]) -> dict[str, Any]:
+        """Cheap answer for the per-keystroke input path.
+
+        ``agent_write``/``agent_key`` are called once per typed character by the
+        TUI. Summarising the agent after each one polls its session, captures
+        the pane (twice: state detection and usage) and scans its processes:
+        tens of milliseconds locally and a chain of SSH commands for an
+        ``ssh-tmux`` agent, all of it on the UI's input path. Callers that need
+        the state ask for it explicitly with ``summary`` (or with
+        ``agent_state``); the TUI does not use the summary at all.
+        """
+        response: dict[str, Any] = {"agent_id": harness.agent_id}
+        if request.get("summary"):
+            response["agent"] = self.controller.agent_summary(harness)
+        return response
 
     def _op_agent_interrupt(self, request: dict[str, Any]) -> dict[str, Any]:
         """Stop the current turn (any teammate from an agent; control plane too)."""
@@ -233,10 +251,17 @@ class OpsAgents(OpsBase):
 
     def _op_agent_capture(self, request: dict[str, Any]) -> dict[str, Any]:
         harness = self.controller.get_agent(request["target"])
-        output = harness.capture()
-        if request.get("recent"):
-            output = harness.capture_recent(int(request.get("max_lines", 40)))
-        return {"output": output, "agent": self.controller.agent_summary(harness)}
+        # ``recent`` is the TUI's echo poll (several times a second): capture the
+        # tail once and never build a full summary just to discard it.
+        output = (
+            harness.capture_recent(int(request.get("max_lines", 40)))
+            if request.get("recent")
+            else harness.capture()
+        )
+        response: dict[str, Any] = {"output": output}
+        if request.get("summary"):
+            response["agent"] = self.controller.agent_summary(harness)
+        return response
 
     def _op_agent_transcript(self, request: dict[str, Any]) -> dict[str, Any]:
         """Capture with the agent's own input area removed (for Web UIs that

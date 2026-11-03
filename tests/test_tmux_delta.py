@@ -39,6 +39,19 @@ class Delta(unittest.TestCase):
         self.assertEqual(args[0], "capture-pane")
         self.assertEqual(args[-2:], ("-S", f"-{TmuxBackend.READ_TAIL_LINES}"))
 
+    def test_capture_recent_asks_for_a_bounded_tail(self):
+        backend = TmuxBackend(socket="test")
+        backend.tmux_name = "sess"
+        backend.pane_id = "%1"
+        backend.session = mock.Mock(rows=40)
+        history = "\n".join(f"line {i}" for i in range(500)) + "\n"
+        with mock.patch.object(backend, "_run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout=history)
+            recent = backend.capture_recent(100)
+        self.assertEqual(recent.splitlines(), [f"line {i}" for i in range(400, 500)])
+        # 100 requested + one screen to survive scrolling; never the whole pane.
+        self.assertEqual(run.call_args.args[-2:], ("-S", "-140"))
+
 
 if __name__ == "__main__":
     unittest.main()

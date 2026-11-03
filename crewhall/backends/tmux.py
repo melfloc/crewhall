@@ -333,6 +333,21 @@ class TmuxBackend(Backend):
             return ""
         return proc.stdout
 
+    def capture_recent(self, max_lines: int) -> str:
+        """Capture only the tail: do not ship the whole scrollback over SSH."""
+        if not self.tmux_name:
+            return ""
+        want = max(1, int(max_lines))
+        rows = int(getattr(self.session, "rows", 0) or 0) if self.session is not None else 0
+        # ``-S -N`` starts N lines above the visible top, so N + one screen
+        # holds the requested tail even after it scrolls.
+        proc = self._run(
+            "capture-pane", "-p", "-t", self._target(), "-S", f"-{want + rows}"
+        )
+        if proc.returncode != 0:
+            return ""
+        return "\n".join(proc.stdout.splitlines()[-want:])
+
     def resize(self, cols: int, rows: int) -> None:
         if self.tmux_name:
             self._check(
