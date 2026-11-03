@@ -91,7 +91,9 @@ class DaemonControl:
         return self.client.call("terminal_list")["terminals"]
 
     def list_agents(self) -> list[dict[str, Any]]:
-        return self.client.call("agent_list")["agents"]
+        # The TUI never shows usage/activity/interactions; asking for a brief
+        # list keeps the 0.8 s poll from capturing every agent's screen.
+        return self.client.call("agent_list", brief=True)["agents"]
 
     def list_teams(self) -> list[dict[str, Any]]:
         return self.client.call("team_list")["teams"]
@@ -171,7 +173,7 @@ class LocalControl:
         return self.controller.list_terminals()
 
     def list_agents(self) -> list[dict[str, Any]]:
-        return self.controller.list_agents()
+        return self.controller.list_agents(brief=True)
 
     def list_teams(self) -> list[dict[str, Any]]:
         return self.controller.list_teams()

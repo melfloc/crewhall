@@ -278,6 +278,14 @@ class InteractiveSession:
         with self._lock:
             return self._buffer_bytes
 
+    def capture_recent(self, max_lines: int) -> str:
+        """Tail of the screen/history, asking the backend for only that much."""
+        fn = getattr(self.backend, "capture_recent", None)
+        if callable(fn):
+            return fn(max_lines)
+        lines = self.capture().splitlines()
+        return "\n".join(lines[-max(1, int(max_lines)):])
+
     def info(self) -> SessionInfo:
         with self._lock:
             meta = self.backend.meta()

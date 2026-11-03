@@ -521,8 +521,11 @@ class Harness(ABC):
         return self.session.capture()
 
     def capture_recent(self, max_lines: int = 40) -> str:
+        fn = getattr(self.session, "capture_recent", None)
+        if callable(fn):
+            return fn(max_lines)
         lines = self.session.capture().splitlines()
-        return "\n".join(lines[-max_lines:])
+        return "\n".join(lines[-max(1, int(max_lines)):])
 
     def transcript(self) -> str:
         """Captured output with the agent's *own* input area removed.

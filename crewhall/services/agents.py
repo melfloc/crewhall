@@ -1861,10 +1861,19 @@ class ServicesAgents:
     def get_agent(self, target: str) -> Harness:
         return self.agents.resolve(target)
 
-    def list_agents(self) -> list[dict[str, Any]]:
-        return [self.agent_summary(harness) for harness in self.agents.all()]
+    def list_agents(self, brief: bool = False) -> list[dict[str, Any]]:
+        return [self.agent_summary(harness, brief=brief) for harness in self.agents.all()]
 
-    def agent_summary(self, harness: Harness) -> dict[str, Any]:
+    def agent_summary(self, harness: Harness, *, brief: bool = False) -> dict[str, Any]:
+        """Agent state as the UIs see it.
+
+        ``brief`` skips the fields only the Web UI uses (usage read from the
+        screen, activity, pending interactions). The TUI polls this list twice a
+        second and each skipped capture is a subprocess (or an SSH round trip
+        for ``ssh-tmux``), on top of the input path.
+        """
+        # Keep the (throttled) interaction recovery even for brief callers: it
+        # is what recovers a missed OpenCode question event.
         self._maybe_sync_interactions(harness)
         summary = harness.info().to_dict()
         summary["args"] = list(self._agent_args.get(harness.agent_id, []))
@@ -1886,18 +1895,21 @@ class ServicesAgents:
             summary["session_title"] = harness.session_title
         if getattr(harness, "legacy", False):
             summary["legacy"] = True
-        summary["interactions"] = [
-            i.to_dict() for i in self.interactions.pending(harness.agent_id)
-        ]
-        # Best-effort usage from what the TUI shows; absent fields stay n/d.
-        summary["usage"] = parse_usage(harness)
-        summary["activity"] = self._activity(harness, summary)
+        activity: dict[str, Any] | None = None
+        if not brief:
+            summary["interactions"] = [
+                i.to_dict() for i in self.interactions.pending(harness.agent_id)
+            ]
+            # Best-effort usage from what the TUI shows; absent fields stay n/d.
+            summary["usage"] = parse_usage(harness)
+            activity = self._activity(harness, summary)
+            summary["activity"] = activity
         # OpenCode v2: which model/agent crewhall asked for and which is running
         # (the TUI footer, when the API could not be read back). Never silent.
         config = dict(self._v2_config.get(harness.agent_id) or {})
         if config:
             if not config.get("running_model"):
-                config["running_model"] = (summary["activity"] or {}).get("model")
+                config["running_model"] = (activity or {}).get("model")
             summary["session_config"] = config
         wt = self._worktrees.get(harness.agent_id)
         if wt:

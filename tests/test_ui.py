@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import time
 import unittest
 
 from crewhall import Controller, Status
+from crewhall.daemon import Server
 from crewhall.ui import (
     AppModel,
     LocalControl,
@@ -707,6 +709,170 @@ class ErrorHandling(UiBase):
         model.control = self.control
         model.retry()
         self.assertTrue(model.connected)
+
+
+class AsyncInput(UiBase):
+    """Interactive Focus must not wait for one daemon round trip per key."""
+
+    def _async_model(self, control=None):
+        control = control or FakeControl(Controller(adopt=False))
+        # Create directly: with async_ops the model would queue the create too,
+        # and this test is about input, not about the create task runner.
+        control.create_agent("opencode", "worker")
+        model = AppModel(control, cwd="/tmp", async_ops=True)
+        model.refresh()
+        return control, model
+
+    def test_typed_run_is_coalesced_and_ordered(self):
+        _, model = self._async_model()
+        harness = model.control.controller.get_agent("worker")
+        self.assertIn("worker", {a["name"] for a in model.agents})
+        model.focus = "nav"
+        for index, row in enumerate(model.rows()):
+            if row.get("label") == "worker":
+                model.cursor = index
+                break
+        model.handle_key("enter")
+        self.assertEqual(model.focus, "interactive")
+        for char in "hello":
+            model.handle_key(char)
+        model.handle_key("enter")
+        model.close()
+        self.assertEqual("".join(harness.session.writes), "hello")
+        self.assertEqual(harness.session.keys[-1], "ENTER")
+
+    def test_key_handling_does_not_block_on_the_daemon(self):
+        class SlowWrite(FakeControl):
+            def send_text(self, target, text):
+                time.sleep(0.25)
+                super().send_text(target, text)
+
+        _, model = self._async_model(SlowWrite(Controller(adopt=False)))
+        for index, row in enumerate(model.rows()):
+            if row.get("label") == "worker":
+                model.cursor = index
+                break
+        model.handle_key("enter")
+        started = time.monotonic()
+        for char in "abc":
+            model.handle_key(char)
+        elapsed = time.monotonic() - started
+        model.close()
+        self.assertLess(elapsed, 0.15)
+
+
+class InteractiveEcho(UiBase):
+    def test_live_capture_interval_depends_on_backend_and_focus(self):
+        from crewhall.ui.app import LIVE_CAPTURE_LOCAL, LIVE_CAPTURE_REMOTE, _live_interval
+
+        self._add_agent("worker")
+        self._select("worker")
+        self.model.focus = "nav"
+        self.assertIsNone(_live_interval(self.model))
+        self.model.focus = "interactive"
+        self.assertEqual(_live_interval(self.model), LIVE_CAPTURE_LOCAL)
+        agent = self.model.selected_agent()
+        agent["backend"] = "ssh-tmux"
+        self.assertEqual(_live_interval(self.model), LIVE_CAPTURE_REMOTE)
+        agent["backend"] = "tmux"
+        agent["state"] = "exited"
+        self.assertIsNone(_live_interval(self.model))
+
+    def test_refresh_capture_only_touches_the_selected_agent(self):
+        calls = []
+
+        class CountingControl(FakeControl):
+            def capture(self, target, recent=True, max_lines=200):
+                calls.append(target)
+                return super().capture(target, recent=recent, max_lines=max_lines)
+
+        control = CountingControl(Controller(adopt=False))
+        model = AppModel(control, cwd="/tmp", async_ops=False)
+        model.create_agent("worker", "opencode")
+        model.refresh()
+        model.focus = "nav"
+        for index, row in enumerate(model.rows()):
+            if row.get("label") == "worker":
+                model.cursor = index
+                break
+        calls.clear()
+        model.refresh_capture()
+        self.assertEqual(calls, [model.selected_agent()["agent_id"]])
+
+
+class BriefAgentList(unittest.TestCase):
+    def test_brief_skips_web_only_work(self):
+        from unittest import mock
+
+        controller = Controller(adopt=False)
+        harness = FakeHarness("worker")
+        controller.register_agent(harness)
+        with mock.patch("crewhall.services.agents.parse_usage",
+                        side_effect=AssertionError("usage parsed in brief mode")):
+            brief = controller.list_agents(brief=True)
+        self.assertNotIn("usage", brief[0])
+        self.assertNotIn("activity", brief[0])
+        self.assertNotIn("interactions", brief[0])
+        self.assertEqual(brief[0]["state"], "ready")
+        self.assertEqual(brief[0]["name"], "worker")
+
+
+class CheapInputOps(unittest.TestCase):
+    def test_write_key_and_resize_do_not_summarise_by_default(self):
+        from unittest import mock
+
+        controller = Controller(adopt=False)
+        harness = FakeHarness("worker")
+        controller.register_agent(harness)
+        server = object.__new__(Server)
+        server.controller = controller
+        with mock.patch.object(controller, "agent_summary",
+                               side_effect=AssertionError("summarised")):
+            for op, request in (
+                ("agent_write", {"target": harness.agent_id, "text": "x"}),
+                ("agent_key", {"target": harness.agent_id, "key": "ENTER"}),
+                ("agent_resize", {"target": harness.agent_id, "cols": 100, "rows": 30}),
+            ):
+                response = server._dispatch({"op": op, **request}, op)
+                self.assertTrue(response["ok"], response)
+                self.assertEqual(response["agent_id"], harness.agent_id)
+
+    def test_summary_is_opt_in(self):
+        controller = Controller(adopt=False)
+        harness = FakeHarness("worker")
+        controller.register_agent(harness)
+        server = object.__new__(Server)
+        server.controller = controller
+        response = server._dispatch(
+            {"op": "agent_write", "target": harness.agent_id, "text": "x",
+             "summary": True},
+            "agent_write",
+        )
+        self.assertTrue(response["ok"], response)
+        self.assertEqual(response["agent"]["agent_id"], harness.agent_id)
+
+    def test_recent_capture_is_one_bounded_tail_without_a_summary(self):
+        from unittest import mock
+
+        controller = Controller(adopt=False)
+        harness = FakeHarness("worker")
+        controller.register_agent(harness)
+        server = object.__new__(Server)
+        server.controller = controller
+        with mock.patch.object(harness, "capture",
+                               side_effect=AssertionError("full capture")), \
+                mock.patch.object(harness, "capture_recent",
+                                  return_value="tail") as recent, \
+                mock.patch.object(controller, "agent_summary",
+                                  side_effect=AssertionError("summarised")):
+            response = server._dispatch(
+                {"op": "agent_capture", "target": harness.agent_id,
+                 "recent": True, "max_lines": 50},
+                "agent_capture",
+            )
+        self.assertEqual(response["output"], "tail")
+        self.assertNotIn("agent", response)
+        recent.assert_called_once_with(50)
 
 
 if __name__ == "__main__":

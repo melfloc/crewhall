@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from .control import ControlPort
-from .model import AppModel, translate_sequence
+from .model import TERMINAL_STATES, AppModel, translate_sequence
 from .view import render, session_viewport
 import contextlib
 
@@ -80,6 +80,24 @@ def _init_colors() -> dict[str, int]:
     return attrs
 
 
+# Interactive Focus repolls the agent's screen so what was typed shows up now
+# instead of on the next full refresh. A local pane is cheap to capture; an
+# ``ssh-tmux`` agent pays an SSH round trip, so it keeps the slower cadence.
+LIVE_CAPTURE_LOCAL = 0.12
+LIVE_CAPTURE_REMOTE = 0.6
+# After a keystroke, refresh the echo if the last capture is older than this.
+LIVE_CAPTURE_AFTER_INPUT = 0.04
+
+
+def _live_interval(model: AppModel) -> float | None:
+    if model.focus != "interactive":
+        return None
+    agent = model.selected_agent()
+    if agent is None or agent["state"] in TERMINAL_STATES:
+        return None
+    return LIVE_CAPTURE_REMOTE if agent.get("backend") == "ssh-tmux" else LIVE_CAPTURE_LOCAL
+
+
 def run(
     control: ControlPort,
     *,
@@ -89,55 +107,93 @@ def run(
 ) -> int:
     import curses
 
+    model = AppModel(control, cwd=cwd, async_ops=async_ops)
+
+    def _draw(stdscr, attrs) -> tuple[int, int]:
+        height, width = stdscr.getmaxyx()
+        stdscr.erase()
+        for index, line in enumerate(render(model, width, height)):
+            if index >= height:
+                break
+            column = 0
+            for text, style in line:
+                if column >= width - 1:
+                    break
+                chunk = text[: width - 1 - column]
+                with contextlib.suppress(curses.error):
+                    stdscr.addstr(index, column, chunk, attrs.get(style, 0))
+                column += len(chunk)
+        stdscr.refresh()
+        return width, height
+
+    def _handle_key(stdscr, key: int) -> None:
+        if key != 27:
+            mapped_key = _map_key(key)
+            if mapped_key:
+                model.handle_key(mapped_key)
+            return
+        # Read an escape sequence (Alt/Ctrl+Alt+<key>); Ctrl+Alt+B is the exit
+        # combination, everything else is forwarded verbatim.
+        seq = bytearray([27])
+        stdscr.timeout(25)
+        while len(seq) < 6:
+            nxt = stdscr.getch()
+            if nxt == -1:
+                break
+            if 0 <= nxt < 256:
+                seq.append(nxt)
+            else:
+                break
+        stdscr.timeout(0)  # back to draining whatever else is buffered
+        for mapped in translate_sequence(bytes(seq)):
+            model.handle_key(mapped)
+
     def _loop(stdscr) -> None:
         curses.curs_set(0)
         curses.raw()  # keep Ctrl+C/D as keys so the agent can receive them
         stdscr.nodelay(True)
         stdscr.keypad(True)
         attrs = _init_colors()
-        model = AppModel(control, cwd=cwd, async_ops=async_ops)
         model.refresh()
         last_refresh = time.monotonic()
+        last_live = 0.0
+        live_for: str | None = None
         while not model.should_quit:
-            height, width = stdscr.getmaxyx()
-            stdscr.erase()
-            for index, line in enumerate(render(model, width, height)):
-                if index >= height:
-                    break
-                column = 0
-                for text, style in line:
-                    if column >= width - 1:
-                        break
-                    chunk = text[: width - 1 - column]
-                    with contextlib.suppress(curses.error):
-                        stdscr.addstr(index, column, chunk, attrs.get(style, 0))
-                    column += len(chunk)
-            stdscr.refresh()
+            now = time.monotonic()
+            if now - last_refresh >= refresh_interval:
+                # The fast capture below already owns the selected screen while
+                # in Interactive Focus; do not capture it twice per poll.
+                model.refresh(capture=model.focus != "interactive")
+                last_refresh = now
+            live = _live_interval(model)
+            agent = model.selected_agent()
+            agent_key = agent["agent_id"] if live is not None and agent else None
+            now = time.monotonic()
+            if live is not None and (agent_key != live_for or now - last_live >= live):
+                model.refresh_capture()
+                last_live = time.monotonic()
+                live_for = agent_key
+            elif live is None:
+                live_for = None
 
+            width, height = _draw(stdscr, attrs)
+
+            # Block until a key arrives or the next poll is due. The old loop
+            # slept 20 ms between keys and forwarded each one with a blocking
+            # RPC: typing could not go faster than the daemon's per-key work.
+            now = time.monotonic()
+            due = last_refresh + refresh_interval
+            if live is not None:
+                due = min(due, last_live + live)
+            wait = max(0.001, min(0.25, due - now))
+            stdscr.timeout(max(1, int(wait * 1000)))
             key = stdscr.getch()
-            if key != -1:
-                if key == 27:
-                    # Read an escape sequence (Alt/Ctrl+Alt+<key>); Ctrl+Alt+B
-                    # is the exit combination, everything else is forwarded.
-                    seq = bytearray([27])
-                    stdscr.timeout(25)
-                    while len(seq) < 6:
-                        nxt = stdscr.getch()
-                        if nxt == -1:
-                            break
-                        if 0 <= nxt < 256:
-                            seq.append(nxt)
-                        else:
-                            break
-                    stdscr.nodelay(True)
-                    for mapped in translate_sequence(bytes(seq)):
-                        model.handle_key(mapped)
-                else:
-                    mapped_key = _map_key(key)
-                    if mapped_key == "quit":
-                        break
-                    if mapped_key:
-                        model.handle_key(mapped_key)
+            if key == -1:
+                continue
+            stdscr.timeout(0)
+            while key != -1 and not model.should_quit:
+                _handle_key(stdscr, key)
+                key = stdscr.getch()
 
             # Propagate the real session viewport to the focused agent's TUI
             # (also covers KEY_RESIZE: dimensions change -> resize is sent).
@@ -145,17 +201,22 @@ def run(
             if cols >= 10 and rows >= 2:
                 model.sync_viewport(cols, rows)
 
-            now = time.monotonic()
-            if now - last_refresh >= refresh_interval:
-                model.refresh()
-                last_refresh = now
-            time.sleep(0.02)
+            # A keystroke should be visible as soon as the agent echoes it.
+            if model.focus == "interactive":
+                local = _live_interval(model) == LIVE_CAPTURE_LOCAL
+                if local and time.monotonic() - last_live >= LIVE_CAPTURE_AFTER_INPUT:
+                    model.refresh_capture()
+                    last_live = time.monotonic()
+                    current = model.selected_agent()
+                    live_for = current["agent_id"] if current else None
 
     try:
         curses.wrapper(_loop)
     except KeyboardInterrupt:
         # Ctrl+C is a valid way to quit; exit cleanly (curses already restored).
         return 0
+    finally:
+        model.close()
     return 0
 
 

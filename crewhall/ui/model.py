@@ -76,6 +76,98 @@ class TaskRunner:
                 return out
 
 
+class InputForwarder:
+    """Send Interactive Focus input off the UI thread, coalescing typed runs.
+
+    Forwarding one blocking RPC per keystroke made the UI wait for the daemon
+    before it could read the next key. Over SSH (or with an ``ssh-tmux`` agent)
+    that round trip is exactly what makes typing feel slow. A worker keeps the
+    order of what was typed, batches adjacent printable characters into a
+    single ``agent_write``, and reports failures back without blocking the UI.
+    """
+
+    _STOP = object()
+
+    def __init__(self, control: ControlPort) -> None:
+        self.control = control
+        self._items: queue.Queue = queue.Queue()
+        self._results: queue.Queue = queue.Queue()
+        self._closed = False
+        self._thread = threading.Thread(
+            target=self._run, name="crewhall-ui-input", daemon=True
+        )
+        self._thread.start()
+
+    def text(self, target: str, text: str) -> None:
+        self._items.put((target, "text", text))
+
+    def key(self, target: str, key: str) -> None:
+        self._items.put((target, "key", key))
+
+    def drain_errors(self) -> list[str]:
+        out: list[str] = []
+        while True:
+            try:
+                out.append(self._results.get_nowait())
+            except queue.Empty:
+                return out
+
+    def _run(self) -> None:
+        while True:
+            item = self._items.get()
+            if item is self._STOP:
+                return
+            batch = [item]
+            stop = False
+            # Only coalesce what is already queued: a lone key is sent at once,
+            # a burst becomes one write.
+            while True:
+                try:
+                    nxt = self._items.get_nowait()
+                except queue.Empty:
+                    break
+                if nxt is self._STOP:
+                    stop = True
+                    break
+                batch.append(nxt)
+            self._flush(batch)
+            if stop:
+                return
+
+    def _flush(self, batch: list[tuple[str, str, str]]) -> None:
+        index = 0
+        while index < len(batch):
+            target, kind, value = batch[index]
+            if kind == "text":
+                parts = [value]
+                index += 1
+                while (
+                    index < len(batch)
+                    and batch[index][0] == target
+                    and batch[index][1] == "text"
+                ):
+                    parts.append(batch[index][2])
+                    index += 1
+                try:
+                    self.control.send_text(target, "".join(parts))
+                except Exception as exc:  # noqa: BLE001 - surface it in the status bar
+                    self._results.put(f"input failed: {exc}")
+                continue
+            try:
+                self.control.send_key(target, value)
+            except Exception as exc:  # noqa: BLE001 - surface it in the status bar
+                self._results.put(f"input failed: {exc}")
+            index += 1
+
+    def close(self, timeout: float = 2.0) -> None:
+        """Flush what is still queued, then stop the worker (bounded wait)."""
+        if self._closed:
+            return
+        self._closed = True
+        self._items.put(self._STOP)
+        self._thread.join(timeout)
+
+
 class AppModel(UiModals, UiPalette):
     """Headless application state and behaviour on top of a ControlPort."""
 
@@ -92,6 +184,8 @@ class AppModel(UiModals, UiPalette):
         self.async_ops = async_ops
         self.activity_limit = activity_limit
         self.tasks = TaskRunner()
+        # Interactive Focus must never wait for a daemon round trip per key.
+        self.forwarder = InputForwarder(control) if async_ops else None
 
         self.meta: dict[str, Any] = {"harnesses": [], "backends": []}
         self.agents: list[dict[str, Any]] = []
@@ -318,8 +412,12 @@ class AppModel(UiModals, UiPalette):
             else:
                 self.status = f"{label} ok"
                 self.status_kind = "success"
+        if self.forwarder is not None:
+            for error in self.forwarder.drain_errors():
+                self.status = error
+                self.status_kind = "error"
 
-    def refresh(self) -> None:
+    def refresh(self, *, capture: bool = True) -> None:
         self.poll_tasks()
         try:
             if not self.meta.get("harnesses"):
@@ -327,12 +425,8 @@ class AppModel(UiModals, UiPalette):
             self.agents = self.control.list_agents()
             self.teams = self.control.list_teams()
             self.activity = self.control.message_history(limit=self.activity_limit)
-            agent = self.selected_agent()
-            self.capture_cache = (
-                self.control.capture(agent["agent_id"], recent=True, max_lines=400)
-                if agent is not None
-                else ""
-            )
+            if capture:
+                self._capture_selected()
             if not self.connected:
                 self.connected = True
                 self.status = "reconnected"
@@ -343,6 +437,35 @@ class AppModel(UiModals, UiPalette):
             self.connected = False
             self.status = f"daemon unavailable: {exc}"
             self.status_kind = "error"
+
+    def _capture_selected(self) -> None:
+        agent = self.selected_agent()
+        self.capture_cache = (
+            self.control.capture(agent["agent_id"], recent=True, max_lines=400)
+            if agent is not None
+            else ""
+        )
+
+    def refresh_capture(self) -> None:
+        """Refresh only the selected agent's screen (Interactive Focus echo).
+
+        The full ``refresh`` polls every agent and the activity log; doing that
+        at typing speed would be wasteful. This is one cheap capture, so the
+        agent's echo appears within a frame instead of on the next 0.8 s poll.
+        """
+        self.poll_tasks()
+        try:
+            self._capture_selected()
+        except Exception as exc:  # noqa: BLE001 - same contract as refresh()
+            if self.connected:
+                self.connected = False
+                self.status = f"daemon unavailable: {exc}"
+                self.status_kind = "error"
+
+    def close(self) -> None:
+        """Flush queued input and stop the UI worker threads."""
+        if self.forwarder is not None:
+            self.forwarder.close()
 
     def _check_interactive_focus(self) -> None:
         """Leave Interactive Focus if the selected agent can no longer take input."""
@@ -611,9 +734,16 @@ class AppModel(UiModals, UiPalette):
         target = agent["agent_id"]
         try:
             if key in KEY_FORWARD:
-                self.control.send_key(target, KEY_FORWARD[key])
+                mapped = KEY_FORWARD[key]
+                if self.forwarder is not None:
+                    self.forwarder.key(target, mapped)
+                else:
+                    self.control.send_key(target, mapped)
             elif len(key) == 1 and key.isprintable():
-                self.control.send_text(target, key)
+                if self.forwarder is not None:
+                    self.forwarder.text(target, key)
+                else:
+                    self.control.send_text(target, key)
         except Exception as exc:  # noqa: BLE001
             self.status = f"input failed: {exc}"
             self.status_kind = "error"
