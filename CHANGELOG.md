@@ -7,6 +7,8 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.86.1] — 2026-11-03
+
 - Corregido: el input de la TUI (sobre todo en Interactive Focus y a través de SSH) ya no espera
   al daemon por cada tecla. `agent_write`/`agent_key`/`agent_resize` responden sin resumir el
   agente (el resumen sondeaba la sesión y capturaba la pantalla dos veces: ~38 ms por tecla con
