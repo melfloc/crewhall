@@ -7,6 +7,15 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.86.2] — 2026-11-03
+
+- Corregido: el refresco periódico de la TUI ya no bloquea el teclado. Con varios agentes o
+  equipos, `list_agents` + `list_teams` + `message_history` podía tardar ~100 ms y se ejecutaba
+  en el hilo de la UI cada 0,8 s (las teclas que llegaban en ese intervalo esperaban). En
+  Interactive Focus ese snapshot se descarga en un hilo, de uno en uno, y se aplica al llegar;
+  el eco del agente sigue actualizándose cada 40–120 ms. En el navegador se mantiene el refresco
+  síncrono para que al salir del foco la pantalla quede al día de inmediato.
+
 ## [0.86.1] — 2026-11-03
 
 - Corregido: el input de la TUI (sobre todo en Interactive Focus y a través de SSH) ya no espera
