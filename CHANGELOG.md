@@ -7,6 +7,11 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- Corregido: `POST /api/op` con un cuerpo JSON que no sea un objeto (`[1]`, `null`, `"x"`,
+  `true`, `42`) ya no cierra la conexión sin respuesta. Ahora responde 400 con
+  `{"ok": false, "error": "body must be a JSON object"}` en vez de dejar que la excepción
+  llegue a `handle_error`.
+
 ## [0.86.2] — 2026-11-03
 
 - Corregido: el refresco periódico de la TUI ya no bloquea el teclado. Con varios agentes o
