@@ -11,6 +11,9 @@ to run without it and ships these notes with the release.
   `/api/terminal-ticket`, `/api/webauthn/*`, `/api/totp/*` y `/api/office/callback`) rechazan
   cuerpos que no sean objetos con un 400 `body must be a JSON object`, igual que `/api/op`.
   Antes un `[1]`, `null` o un número llegaba a `payload.get(...)` y rompía el handler.
+- Endurecido también el WebSocket principal, el socket RPC del daemon y `clientDataJSON`
+  de WebAuthn: un mensaje JSON que no sea objeto se descarta o se rechaza con un error,
+  en vez de romper el hilo de la conexión.
 
 ## [0.86.3] — 2026-11-04
 

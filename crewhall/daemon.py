@@ -400,8 +400,11 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
                 except json.JSONDecodeError as exc:
                     response = {"ok": False, "error": f"bad json: {exc}"}
                 else:
-                    denied = self._guard_origin(request, peer_pid)
-                    response = denied if denied is not None else self.dispatch(request)
+                    if not isinstance(request, dict):
+                        response = {"ok": False, "error": "request must be a JSON object"}
+                    else:
+                        denied = self._guard_origin(request, peer_pid)
+                        response = denied if denied is not None else self.dispatch(request)
                 f.write((json.dumps(response) + "\n").encode("utf-8"))
                 f.flush()
         except OSError:

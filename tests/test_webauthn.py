@@ -103,6 +103,12 @@ class WebAuthnUnitTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             webauthn.verify_client_data(data, "webauthn.get", challenge, "http://localhost")
 
+    def test_rejects_non_object_client_data(self):
+        challenge = os.urandom(32)
+        data = base64.urlsafe_b64encode(b"[1]").rstrip(b"=").decode()
+        with self.assertRaises(ValueError):
+            webauthn.verify_client_data(data, "webauthn.get", challenge, "http://localhost")
+
 
 def _free_port() -> int:
     s = socket.socket()
