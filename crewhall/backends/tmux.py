@@ -129,7 +129,11 @@ class TmuxBackend(Backend):
                 ["/bin/sh", "-c", '. "$0" && rm -f "$0" && exec "$@"', env_file, *argv]
             )
 
+        # Set the global option *before* new-session in the same queue: a
+        # command that exits at once can otherwise destroy the session before
+        # the per-session set-option below runs, losing pane_dead_status.
         new_args = [
+            "set-option", "-g", "remain-on-exit", "on", ";",
             "new-session", "-d", "-s", name, "-x", str(spec.cols), "-y", str(spec.rows),
         ]
         if cwd:
@@ -138,8 +142,6 @@ class TmuxBackend(Backend):
         # chosen shell, passed as a single argv element).
         if not (terminal and not argv):
             new_args.append(command)
-        # Same tmux command queue as new-session: a command that exits at once
-        # must leave a dead pane (with its exit status), not a vanished session.
         new_args += [";", "set-option", "-t", name, "remain-on-exit", "on"]
         if terminal:
             # The size is fixed by `resize-window`, not by any attaching client.
