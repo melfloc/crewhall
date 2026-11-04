@@ -7,6 +7,8 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.86.3] — 2026-11-04
+
 - Corregido: `POST /api/op` con un cuerpo JSON que no sea un objeto (`[1]`, `null`, `"x"`,
   `true`, `42`) ya no cierra la conexión sin respuesta. Ahora responde 400 con
   `{"ok": false, "error": "body must be a JSON object"}` en vez de dejar que la excepción
