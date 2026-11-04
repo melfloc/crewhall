@@ -23,7 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install mypy
+      # Pin it: a new mypy release must not turn main red without a code change.
+      - run: pip install mypy==2.4.1
       # Non-strict for the package; strict for messaging/team/requests/
       # persistence/harness (see [tool.mypy] in pyproject.toml).
       - run: mypy

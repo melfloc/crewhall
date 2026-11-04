@@ -521,7 +521,7 @@ class Harness(ABC):
         return self.session.capture()
 
     def capture_recent(self, max_lines: int = 40) -> str:
-        fn = getattr(self.session, "capture_recent", None)
+        fn: Callable[[int], str] | None = getattr(self.session, "capture_recent", None)
         if callable(fn):
             return fn(max_lines)
         lines = self.session.capture().splitlines()
