@@ -1,5 +1,8 @@
 # crewhall
 
+> **Documento original en español.** Conserva notas de diseño históricas; la
+> referencia actual y mantenida del proyecto es [README.md](README.md).
+
 > **Instalar en otro equipo:** ver [INSTALL.md](INSTALL.md) (`scripts/release.sh` → release firmada;
 > `scripts/deploy.sh`; `crewhall update`; `doctor`; `selftest`; `bundle export/import`). Política de versiones y
 > actualizaciones: [RELEASING.md](RELEASING.md); historial: [CHANGELOG.md](CHANGELOG.md).

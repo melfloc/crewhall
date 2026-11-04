@@ -24,9 +24,12 @@ The rules below are the project's contract; they are enforced by review and CI.
   in `pyproject.toml` (`E`, `F`, `W`, `B` bugbear, `UP`, `BLE` blind-except,
   `SIM`). A new blind `except Exception` needs an explicit `# noqa: BLE001`
   with a reason.
-- Types: `mypy` runs in CI (`python -m pip install mypy`); the strict scope is
+- Types: `mypy` runs in CI (`python -m pip install mypy==2.4.1`); the strict scope is
   `messaging`, `team`, `requests`, `harness/*` and `persistence`, the rest of
   the package is checked non-strict.
+- CI: `.github/workflows/ci.yml` runs on every pull request (one run per commit);
+  `push` runs only on `main` and `v*` tags. The nightly run also enables the
+  real-agent tests when configured.
 - Coverage: `coverage run -m unittest discover && coverage report` (CI enforces
   the thresholds in `.github/workflows/ci.yml`; `python -m pip install coverage`).
 - Agents/adapters: read `ADAPTERS.md`; a new adapter is not done until the

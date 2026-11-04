@@ -307,6 +307,11 @@ tested. Python 3.11–3.14.
 
 - Tests: `python -m unittest discover` **from the repository root**.
 - Lint: `ruff check crewhall tests scripts`.
+- Types: `mypy` (CI pins `mypy==2.4.1`; see `pyproject.toml` for the strict scope).
+- Coverage: `coverage run -m unittest discover && coverage report`.
+- CI: lint, typecheck, tests on Python 3.11–3.14, coverage, build and privacy.
+  Feature branches run through their pull request (one run per commit); `push`
+  runs only on `main` and `v*` tags. See `.github/workflows/ci.yml`.
 - One atomic commit per change; version in `pyproject.toml`,
   `crewhall/__init__.py` and `CHANGELOG.md`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
