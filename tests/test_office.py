@@ -33,8 +33,12 @@ class Jwt(_Base):
     def test_roundtrip_and_tamper(self):
         token = office.jwt_encode({"a": 1}, ttl=60)
         self.assertEqual(office.jwt_decode(token)["a"], 1)
+        # Tamper the first signature char: changing the last one can be a no-op
+        # because base64 decoders ignore its trailing padding bits.
+        head, _, sig = token.rpartition(".")
+        tampered = f"{head}.{'A' if sig[0] != 'A' else 'B'}{sig[1:]}"
         with self.assertRaises(office.OfficeError):
-            office.jwt_decode(token[:-2] + "xx")
+            office.jwt_decode(tampered)
 
     def test_expiry(self):
         token = office.jwt_encode({"a": 1}, ttl=-1)
