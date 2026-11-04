@@ -257,6 +257,27 @@ class Handler(
             return None
         return self.rfile.read(length) if length else b"{}"
 
+    def _json_object_body(self) -> dict[str, Any] | None:
+        """Read a JSON object body; reply 400 and return None otherwise.
+
+        Arrays, strings, numbers and ``null`` are valid JSON but cannot carry an
+        operation or its parameters. Handling them here keeps every route from
+        crashing on the first ``payload.get``/``pop`` and gives clients a
+        consistent 400 instead of a dropped connection.
+        """
+        raw = self._read_body()
+        if raw is None:
+            return None
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            self._error(f"bad json: {exc}")
+            return None
+        if not isinstance(payload, dict):
+            self._error("body must be a JSON object")
+            return None
+        return payload
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path
@@ -325,15 +346,9 @@ class Handler(
             return self._error("not found", 404)
         if not self._guard():
             return
-        raw = self._read_body()
-        if raw is None:
+        payload = self._json_object_body()
+        if payload is None:
             return
-        try:
-            payload = json.loads(raw.decode("utf-8") or "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            return self._error(f"bad json: {exc}")
-        if not isinstance(payload, dict):
-            return self._error("body must be a JSON object")
         op = payload.pop("op", None)
         if op in ("web_sessions", "web_session_revoke", "web_token_status",
                   "web_token_revoke", "web_token_rotate", "audit_list",

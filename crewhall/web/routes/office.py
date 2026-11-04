@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # mypy: disable-error-code="attr-defined"
-import json
 import os
 from typing import Any
 
@@ -49,13 +48,9 @@ class OfficeRoutes:
 
         if not office.enabled() or not self._host_ok():
             return self._error("not found", 404)
-        raw = self._read_body()
-        if raw is None:
+        body = self._json_object_body()
+        if body is None:
             return
-        try:
-            body = json.loads(raw.decode("utf-8") or "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return self._error("bad json")
         if not self._office_token_ok(body):
             return self._error("invalid OnlyOffice token", 403)
         status = body.get("status")

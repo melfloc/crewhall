@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # mypy: disable-error-code="attr-defined"
-import json
 from typing import Any
 
 from .. import auth, terminal_tokens
@@ -107,13 +106,9 @@ class AuthRoutes:
                          summary="rate limited")
             return self._error("too many attempts; try again later", 429,
                                extra=[("Retry-After", str(int(retry) + 1))])
-        raw = self._read_body()
-        if raw is None:
+        payload = self._json_object_body()
+        if payload is None:
             return
-        try:
-            payload = json.loads(raw.decode("utf-8") or "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return self._error("bad json")
         if not auth.verify_token(payload.get("token")):
             # Never log the attempted token.
             auth.note_login_failure(ip)
