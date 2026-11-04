@@ -364,10 +364,13 @@ class V2Wiring(unittest.TestCase):
         self.controller = Controller(adopt=False)
 
     def test_launch_command_drops_flags_and_uses_the_session(self):
-        command = self.controller._launch_command(
-            "opencode", ["--model", "acme/fast", "--agent", "b"], None, 4242,
-            server_url="http://127.0.0.1:4242", resume="ses_created1",
-        )
+        # The gate is the resolved CLI API: pin it so this does not depend on
+        # an `opencode` binary being installed on the test runner.
+        with mock.patch.object(self.controller, "_opencode_api", return_value="v2"):
+            command = self.controller._launch_command(
+                "opencode", ["--model", "acme/fast", "--agent", "b"], None, 4242,
+                server_url="http://127.0.0.1:4242", resume="ses_created1",
+            )
         joined = " ".join(command)
         self.assertNotIn("--model", joined)
         self.assertNotIn("--agent", joined)
