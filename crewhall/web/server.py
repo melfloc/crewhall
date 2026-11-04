@@ -332,6 +332,8 @@ class Handler(
             payload = json.loads(raw.decode("utf-8") or "{}")
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             return self._error(f"bad json: {exc}")
+        if not isinstance(payload, dict):
+            return self._error("body must be a JSON object")
         op = payload.pop("op", None)
         if op in ("web_sessions", "web_session_revoke", "web_token_status",
                   "web_token_revoke", "web_token_rotate", "audit_list",

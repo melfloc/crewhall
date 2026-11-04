@@ -538,6 +538,21 @@ class WebServerTest(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertIn("not allowed", r["error"])
 
+    def test_non_object_json_body_is_rejected(self):
+        for body in (b"[1]", b"null", b'"x"', b"true", b"42"):
+            with self.subTest(body=body):
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{self.port}/api/op", data=body,
+                    headers={"Content-Type": "application/json"},
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(req, timeout=5)
+                self.assertEqual(ctx.exception.code, 400)
+                reply = json.loads(ctx.exception.read())
+                ctx.exception.close()
+                self.assertFalse(reply["ok"])
+                self.assertIn("JSON object", reply["error"])
+
     def test_websocket_handshake(self):
         key = "dGhlIHNhbXBsZSBub25jZQ=="
         sock = socket.create_connection(("127.0.0.1", self.port), timeout=5)
