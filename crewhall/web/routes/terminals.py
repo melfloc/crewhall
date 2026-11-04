@@ -50,13 +50,9 @@ class TerminalRoutes:
 
         if not self._host_ok() or not self._origin_ok():
             return self._error("request not allowed", 403)
-        raw = self._read_body()
-        if raw is None:
+        payload = self._json_object_body()
+        if payload is None:
             return
-        try:
-            payload = json.loads(raw.decode("utf-8") or "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return self._error("bad json")
         ip = "tt:" + self._client_label()
         retry = auth.login_retry_after(ip)
         if retry > 0:
@@ -96,13 +92,9 @@ class TerminalRoutes:
             return self._error("not found", 404)
         if not self._host_ok() or not self._origin_ok():
             return self._error("request not allowed", 403)
-        raw = self._read_body()
-        if raw is None:
+        payload = self._json_object_body()
+        if payload is None:
             return
-        try:
-            payload = json.loads(raw.decode("utf-8") or "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return self._error("bad json")
         terminal_id = payload.get("id")
         mode = "write" if payload.get("mode") == "write" else "read"
         session, extra = self._session_or_new()

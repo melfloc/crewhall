@@ -3,7 +3,6 @@ from __future__ import annotations
 
 # mypy: disable-error-code="attr-defined"
 import hashlib
-import json
 import secrets
 import time
 from typing import Any
@@ -51,13 +50,9 @@ class WebAuthnRoutes:
 
         if not self._host_ok() or not self._origin_ok():
             return self._error("request not allowed", 403)
-        raw = self._read_body()
-        if raw is None:
+        payload = self._json_object_body()
+        if payload is None:
             return
-        try:
-            payload = json.loads(raw.decode("utf-8") or "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return self._error("bad json")
         rp_id, origin = self._webauthn_rp()
         try:
             if action == "register/begin":

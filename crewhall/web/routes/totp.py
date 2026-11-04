@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # mypy: disable-error-code="attr-defined"
-import json
 import secrets
 import time
 
@@ -15,13 +14,9 @@ class TotpRoutes:
 
         if not self._host_ok() or not self._origin_ok():
             return self._error("request not allowed", 403)
-        raw = self._read_body()
-        if raw is None:
+        payload = self._json_object_body()
+        if payload is None:
             return
-        try:
-            payload = json.loads(raw.decode("utf-8") or "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return self._error("bad json")
         if action == "begin":
             if not self._guard():
                 return

@@ -553,6 +553,46 @@ class WebServerTest(unittest.TestCase):
                 self.assertFalse(reply["ok"])
                 self.assertIn("JSON object", reply["error"])
 
+    def test_non_object_json_body_is_rejected_on_every_json_route(self):
+        # /api/op has its own regression test above; these are the other POST
+        # routes that parse a JSON body before doing any work.
+        for path in ("/login", "/api/terminal-unlock",
+                     "/api/webauthn/credentials", "/api/totp/list"):
+            for body in (b"[1]", b"null", b'"x"', b"true", b"42"):
+                with self.subTest(path=path, body=body):
+                    req = urllib.request.Request(
+                        f"http://127.0.0.1:{self.port}{path}", data=body,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with self.assertRaises(urllib.error.HTTPError) as ctx:
+                        urllib.request.urlopen(req, timeout=5)
+                    self.assertEqual(ctx.exception.code, 400)
+                    reply = json.loads(ctx.exception.read())
+                    ctx.exception.close()
+                    self.assertFalse(reply["ok"])
+                    self.assertIn("JSON object", reply["error"])
+
+    def test_non_object_json_body_is_rejected_when_gated_routes_are_enabled(self):
+        from unittest import mock
+
+        cases = (
+            ("/api/terminal-ticket", mock.patch("crewhall.settings.get", return_value=True)),
+            ("/api/office/callback", mock.patch("crewhall.office.enabled", return_value=True)),
+        )
+        for path, patcher in cases:
+            with self.subTest(path=path), patcher:
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{self.port}{path}", data=b"[1]",
+                    headers={"Content-Type": "application/json"},
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(req, timeout=5)
+                self.assertEqual(ctx.exception.code, 400)
+                reply = json.loads(ctx.exception.read())
+                ctx.exception.close()
+                self.assertFalse(reply["ok"])
+                self.assertIn("JSON object", reply["error"])
+
     def test_websocket_handshake(self):
         key = "dGhlIHNhbXBsZSBub25jZQ=="
         sock = socket.create_connection(("127.0.0.1", self.port), timeout=5)

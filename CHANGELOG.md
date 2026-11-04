@@ -7,6 +7,11 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+- Endurecido: todas las rutas POST que leen JSON (`/api/login`, `/api/terminal-unlock`,
+  `/api/terminal-ticket`, `/api/webauthn/*`, `/api/totp/*` y `/api/office/callback`) rechazan
+  cuerpos que no sean objetos con un 400 `body must be a JSON object`, igual que `/api/op`.
+  Antes un `[1]`, `null` o un número llegaba a `payload.get(...)` y rompía el handler.
+
 ## [0.86.3] — 2026-11-04
 
 - Corregido: `POST /api/op` con un cuerpo JSON que no sea un objeto (`[1]`, `null`, `"x"`,
