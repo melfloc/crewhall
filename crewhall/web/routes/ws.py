@@ -88,8 +88,9 @@ class WsRoutes:
                     try:
                         msg = json.loads(payload.decode("utf-8"))
                     except (ValueError, UnicodeDecodeError):
-                        msg = {}
-                    if msg.get("type") == "focus" and isinstance(msg.get("agent_id"), str):
+                        msg = None
+                    if isinstance(msg, dict) and msg.get("type") == "focus" \
+                            and isinstance(msg.get("agent_id"), str):
                         focus = msg["agent_id"]
                         last_output.pop(focus, None)  # force an immediate push
                         if not push_output(focus):

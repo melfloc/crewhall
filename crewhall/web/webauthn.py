@@ -257,6 +257,8 @@ def verify_client_data(client_data_b64: str, expected_type: str, challenge: byte
                        expected_origin: str) -> dict[str, Any]:
     raw = b64u_decode(client_data_b64)
     data = json.loads(raw.decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("clientData must be a JSON object")
     if data.get("type") != expected_type:
         raise ValueError("unexpected clientData type")
     if not hmac.compare_digest(b64u_decode(str(data.get("challenge", ""))), challenge):

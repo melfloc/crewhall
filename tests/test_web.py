@@ -141,6 +141,37 @@ class WebSocketEvents(unittest.TestCase):
         finally:
             s.close()
 
+    def test_non_object_text_frame_does_not_kill_the_loop(self):
+        s = self._ws()
+        try:
+            payload = b"[1]"
+            mask = b"\x01\x02\x03\x04"
+            frame = bytes([0x81, 0x80 | len(payload)]) + mask + bytes(
+                b ^ mask[i % 4] for i, b in enumerate(payload))
+            s.sendall(frame)
+            # Change the snapshot so a surviving loop has a reason to push a
+            # new state frame; the initial one is only sent once.
+            from crewhall.client import Client
+
+            Client().call("team_create", name="ws-probe", agent_ids=[])
+            deadline = time.monotonic() + 5
+            got = None
+            while time.monotonic() < deadline:
+                m = self._recv(s)
+                if m and m.get("type") == "state" and any(
+                        t.get("name") == "ws-probe" for t in m.get("teams", [])):
+                    got = m
+                    break
+            self.assertIsNotNone(got, "websocket loop died on a non-object message")
+        finally:
+            s.close()
+            try:
+                from crewhall.client import Client
+
+                Client().call("team_remove", target="ws-probe")
+            except Exception:
+                pass
+
     @unittest.skipUnless(
         os.environ.get("AT_RUN_OPENCODE") == "1" and shutil.which("opencode"),
         "set AT_RUN_OPENCODE=1 with opencode installed and credentials configured",
