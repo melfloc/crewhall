@@ -187,6 +187,10 @@ class SshTmuxBackend(TmuxBackend):
             head += ["-c", cwd]
         # Remote terminals always use the remote login shell: no command.
         start_command = None if (terminal and not argv) else shlex.join(argv)
+        # Set the global option before new-session in the same remote queue: a
+        # command that exits at once can otherwise destroy the session before
+        # the per-session set-option below runs, losing pane_dead_status.
+        prefix = ["set-option", "-g", "remain-on-exit", "on", ";"]
         tail = [";", "set-option", "-t", name, "remain-on-exit", "on"]
         if terminal:
             tail += [";", "set-option", "-t", name, "window-size", "manual"]
@@ -204,13 +208,13 @@ class SshTmuxBackend(TmuxBackend):
                 'c="/bin/sh -c \'. \\"\\$0\\" && rm -f \\"\\$0\\" && exec \\"\\$@\\"\' $f "'
                 + shlex.quote(shlex.join(argv))
                 + "; exec "
-                + shlex.join([*tmux, *head])
+                + shlex.join([*tmux, *prefix, *head])
                 + ' "$c" '
                 + shlex.join(tail)
             )
             proc = self._ssh_run(remote, input=env_data)
         else:
-            args = list(head)
+            args = [*prefix, *head]
             if start_command is not None:
                 args.append(start_command)
             args += tail
