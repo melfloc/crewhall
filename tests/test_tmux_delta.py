@@ -52,6 +52,24 @@ class Delta(unittest.TestCase):
         # 100 requested + one screen to survive scrolling; never the whole pane.
         self.assertEqual(run.call_args.args[-2:], ("-S", "-140"))
 
+    def test_cursor_reads_tmux_and_respects_the_visible_flag(self):
+        backend = TmuxBackend(socket="test")
+        backend.tmux_name = "sess"
+        backend.pane_id = "%1"
+        with mock.patch.object(backend, "_run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="12 7 1\n")
+            self.assertEqual(backend.cursor(), (12, 7))
+        self.assertEqual(run.call_args.args[0], "display-message")
+        self.assertIn("#{cursor_x} #{cursor_y} #{cursor_flag}", run.call_args.args)
+
+        with mock.patch.object(backend, "_run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="12 7 0\n")
+            self.assertIsNone(backend.cursor())
+
+        with mock.patch.object(backend, "_run") as run:
+            run.return_value = mock.Mock(returncode=1, stdout="")
+            self.assertIsNone(backend.cursor())
+
 
 if __name__ == "__main__":
     unittest.main()

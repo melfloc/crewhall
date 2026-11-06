@@ -22,13 +22,17 @@ FILENAME = "audit.jsonl"
 MAX_BYTES = 5 * 1024 * 1024
 KEEP = 3
 MAX_LINE = 4000
+AGENT_DENIAL_RATE_LIMIT = 20
+AGENT_DENIAL_RATE_WINDOW = 60.0
 
 _LOCK = threading.Lock()
+_AGENT_DENIAL_WINDOWS: dict[str, tuple[float, int, int]] = {}
 
 # Operations worth an audit line (never the high-frequency read-only polls).
 AUDITED = {
     "agent_create", "agent_stop", "agent_send", "message_send", "team_send",
-    "team_create", "team_up", "team_set_workspace", "team_add_member",
+    "team_create", "team_up", "team_set_workspace", "team_set_spawner",
+    "team_approve_agent_profiles", "team_add_member",
     "team_remove_member", "team_remove",
     "request_create", "request_reply", "request_cancel", "worktree_discard",
     "interaction_respond", "agent_process_signal", "agent_new_session", "team_new_session",
@@ -120,31 +124,53 @@ def _prune_locked() -> None:
         os.replace(tmp, path)
 
 
+def _append_locked(entry: dict[str, Any]) -> None:
+    line = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+    directory = os.path.dirname(audit_path())
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    _rotate_locked()
+    _prune_locked()
+    fd = os.open(audit_path(), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        os.write(fd, (line + "\n").encode("utf-8"))
+    finally:
+        os.close(fd)
+
+
 def record(op: str, *, actor: str = "local", result: str = "ok", summary: str = "",
-           extra: dict[str, Any] | None = None) -> None:
+           extra: dict[str, Any] | None = None, rate_limit_agent_denial: bool = False) -> None:
     """Append one event. Never raises: auditing must not break an operation."""
+    now = time.time()
+    op = str(op)[:80]
     entry: dict[str, Any] = {
-        "ts": round(time.time(), 3),
+        "ts": round(now, 3),
         "actor": str(actor)[:120] or "local",
-        "op": str(op)[:80],
+        "op": op,
         "result": str(result)[:40],
         "summary": str(summary)[:MAX_LINE],
     }
     if extra:
         for key, value in extra.items():
             entry[str(key)[:40]] = value
-    line = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
     try:
         with _LOCK:
-            directory = os.path.dirname(audit_path())
-            os.makedirs(directory, mode=0o700, exist_ok=True)
-            _rotate_locked()
-            _prune_locked()
-            fd = os.open(audit_path(), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            try:
-                os.write(fd, (line + "\n").encode("utf-8"))
-            finally:
-                os.close(fd)
+            if rate_limit_agent_denial:
+                state = _AGENT_DENIAL_WINDOWS.get(op)
+                if state is None or now - state[0] >= AGENT_DENIAL_RATE_WINDOW:
+                    if state is not None and state[2]:
+                        _append_locked({
+                            "ts": round(now, 3),
+                            "actor": "crewhall",
+                            "op": op,
+                            "result": "throttled",
+                            "summary": f"{state[2]} similar agent denial(s) suppressed in the previous window",
+                        })
+                    state = (now, 0, 0)
+                if state[1] >= AGENT_DENIAL_RATE_LIMIT:
+                    _AGENT_DENIAL_WINDOWS[op] = (state[0], state[1], state[2] + 1)
+                    return
+                _AGENT_DENIAL_WINDOWS[op] = (state[0], state[1] + 1, state[2])
+            _append_locked(entry)
     except OSError:
         pass
 
@@ -208,7 +234,19 @@ def summarize(op: str, request: dict[str, Any], result: dict[str, Any] | None = 
     if op == "provider_check":
         return f"kind={request.get('kind') or 'all'}"
     if op == "agent_create":
-        return f"kind={request.get('kind')} name={request.get('name')} team={request.get('team')}"
+        profile = f" profile={request['profile']}" if request.get("profile") else ""
+        digest = str(request.get("profile_sha256") or "")
+        manifest = f" manifest=sha256:{digest}" if digest else ""
+        spawner = (f" spawner_for={request['spawner_for_team']}"
+                   if request.get("spawner_for_team") else "")
+        return (f"kind={request.get('kind')} name={request.get('name')} "
+                f"team={request.get('team')}{profile}{manifest}{spawner}")
+    if op == "team_set_spawner":
+        action = request.get("children_action") or "none"
+        return (f"team={request.get('target')} spawner={request.get('agent') or 'none'} "
+                f"children_action={action}")
+    if op == "team_approve_agent_profiles":
+        return f"team={request.get('target')}"
     if op in ("agent_stop", "agent_info", "agent_state"):
         return f"target={request.get('target')}"
     if op == "agent_set_model":

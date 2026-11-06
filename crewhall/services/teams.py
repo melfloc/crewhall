@@ -4,11 +4,13 @@ from __future__ import annotations
 # ruff: noqa: F401
 # mypy: disable-error-code="attr-defined"
 import time
+import os
 from typing import Any
 from .. import settings
 from ..backends import ssh_tmux as ssh_tmux_backend
 from ..harness import Harness
 from ..messaging import MessagingError
+from ..project_agents import ensure_team_guide, project_agent_catalog
 from ..team import Team, TeamError
 from ..controller import _shq, _ssh_hint
 
@@ -21,6 +23,8 @@ class ServicesTeams:
         if kwargs.get("host"):
             settings.host(kwargs["host"])  # an unknown host is rejected up front
         team = self.teams.create(name, agent_ids, **kwargs)
+        if not team.host and getattr(team, "workspace_mode", None) != "worktree":
+            ensure_team_guide(team.workspace)
         self._persist()
         return team
 
@@ -83,6 +87,18 @@ class ServicesTeams:
         if kwargs.get("host"):
             settings.host(kwargs["host"])
         updated = self.teams.set_workspace(team, workspace, **kwargs)
+        if not updated.host and getattr(updated, "workspace_mode", None) != "worktree":
+            ensure_team_guide(updated.workspace)
+            if updated.spawner_id:
+                spawner = self.agents.resolve(updated.spawner_id)
+                catalog = project_agent_catalog(
+                    self._agent_spawn_policy._workspace(updated, spawner))
+                if catalog["error"]:
+                    raise TeamError(catalog["error"])
+                updated = self.teams.set_spawner(
+                    updated.team_id, updated.spawner_id,
+                    catalog_sha256=catalog["sha256"],
+                )
         self._persist()
         return updated
 
@@ -118,9 +134,17 @@ class ServicesTeams:
         return [info.to_dict() for info in self.teams.members(self.teams.get(target))]
 
     def remove_team(self, target: str) -> Team:
-        team = self.teams.remove(target)
-        self._persist()
-        return team
+        policy = self._agent_spawn_policy
+        with policy.lock, self.teams._lock:
+            team = self.teams.get(target)
+            if team.spawner_id and policy.child_ids(self, team.spawner_id):
+                raise TeamError(
+                    "this team still has agents created by its spawner; transfer them "
+                    "to another spawner or stop and remove them first"
+                )
+            removed = self.teams.remove(team.team_id)
+            self._persist()
+            return removed
 
     def add_team_member(self, team: str, agent: str) -> Team:
         result = self.teams.add_member(team, agent)
@@ -128,9 +152,127 @@ class ServicesTeams:
         return result
 
     def remove_team_member(self, team: str, agent: str) -> Team:
-        result = self.teams.remove_member(team, agent)
-        self._persist()
-        return result
+        policy = self._agent_spawn_policy
+        with policy.lock, self.teams._lock:
+            team_obj = self.teams.get(team)
+            try:
+                agent_id = self.agents.resolve(agent).agent_id
+            except KeyError:
+                agent_id = str(agent)
+            if team_obj.spawner_id == agent_id:
+                if policy.child_ids(self, agent_id):
+                    raise TeamError(
+                        "this spawner still owns worker agents; assign a replacement "
+                        "and transfer them, or stop and remove them first"
+                    )
+                raise TeamError("assign a replacement spawner before removing this team member")
+            result = self.teams.remove_member(team_obj.team_id, agent_id)
+            self._persist()
+            return result
+
+    def set_team_spawner(
+        self, team: str, agent: str | None, *, children_action: str | None = None
+    ) -> Team:
+        """Assign or replace a Team's spawner.
+
+        Existing children must either be transferred to the new member or
+        explicitly stopped and unregistered before the old spawner can leave.
+        An assigned Team cannot return to a no-spawner state; choose a replacement.
+        """
+        policy = self._agent_spawn_policy
+        with policy.lock, self.teams._lock:
+            team_obj = self.teams.get(team)
+            new_id: str | None = None
+            if agent:
+                new_id = self.agents.resolve(agent).agent_id
+                if new_id not in team_obj.agent_ids:
+                    raise TeamError("the spawner must already belong to this team")
+                if team_obj.host or getattr(team_obj, "workspace_mode", None) == "worktree":
+                    raise TeamError("spawners require a local team with a shared workspace")
+                if self._agent_hosts.get(new_id):
+                    raise TeamError("the team spawner must run on this machine")
+                current_owner = self._agent_creators.get(new_id)
+                if (current_owner and current_owner != team_obj.spawner_id
+                        and new_id != team_obj.spawner_id):
+                    raise TeamError(
+                        "this worker is still owned by another spawner; transfer or remove it first"
+                    )
+                for other in self.teams.list():
+                    if other.team_id != team_obj.team_id and other.spawner_id == new_id:
+                        raise TeamError("an agent can be the spawner for only one team")
+
+            catalog_sha256 = None
+            if new_id:
+                spawner_harness = self.agents.resolve(new_id)
+                catalog = project_agent_catalog(policy._workspace(team_obj, spawner_harness))
+                if catalog["error"]:
+                    raise TeamError(catalog["error"])
+                catalog_sha256 = catalog["sha256"]
+
+            old_id = team_obj.spawner_id
+            if old_id == new_id:
+                return team_obj
+            if old_id and not new_id:
+                raise TeamError("this team must keep a spawner; choose a replacement first")
+            children = policy.child_ids(self, old_id) if old_id else []
+            if children:
+                if children_action == "transfer" and new_id:
+                    for child_id in children:
+                        if child_id == new_id:
+                            # A worker promoted to spawner is no longer its own child.
+                            self._agent_creators.pop(child_id, None)
+                        else:
+                            self._agent_creators[child_id] = new_id
+                elif children_action == "stop":
+                    to_remove = [child_id for child_id in children if child_id != new_id]
+                    protected = [
+                        child_id for child_id in to_remove
+                        if any(other.spawner_id == child_id for other in self.teams.list())
+                    ]
+                    if protected:
+                        raise TeamError(
+                            "some worker(s) are also another team's spawner; replace those "
+                            "roles before stopping them"
+                        )
+                    for child_id in to_remove:
+                        self.remove_agent(child_id, force=True)
+                    if new_id in children:
+                        self._agent_creators.pop(new_id, None)
+                else:
+                    raise TeamError(
+                        f"the current spawner owns {len(children)} worker agent(s); "
+                        "choose a new spawner and transfer them, or stop and remove them"
+                    )
+
+            updated = self.teams.set_spawner(
+                team_obj.team_id, new_id, catalog_sha256=catalog_sha256,
+            )
+            if new_id and not team_obj.host:
+                spawner_harness = self.agents.resolve(new_id)
+                ensure_team_guide(policy._workspace(updated, spawner_harness))
+            self._persist()
+            return updated
+
+    def approve_team_agent_profiles(self, target: str) -> Team:
+        """Pin the current project catalog after an explicit operator review."""
+        policy = self._agent_spawn_policy
+        with policy.lock, self.teams._lock:
+            team = self.teams.get(target)
+            if not team.spawner_id:
+                raise TeamError("assign a spawner before approving project agent profiles")
+            if team.host or getattr(team, "workspace_mode", None) == "worktree":
+                raise TeamError("agent profile approval requires a local shared-workspace Team")
+            spawner = self.agents.resolve(team.spawner_id)
+            catalog = project_agent_catalog(policy._workspace(team, spawner))
+            if catalog["error"]:
+                raise TeamError(catalog["error"])
+            if not catalog["present"] or not catalog["profiles"]:
+                raise TeamError("no valid profiles were found in cwh-agents.json")
+            updated = self.teams.set_spawner(
+                team.team_id, team.spawner_id, catalog_sha256=catalog["sha256"],
+            )
+            self._persist()
+            return updated
 
     def set_team_leads(self, team: str, agents: list[str] | tuple[str, ...]) -> Team:
         result = self.teams.set_leads(team, agents)
@@ -359,10 +501,28 @@ class ServicesTeams:
                     "agent_id": info.agent_id, "name": info.name or "",
                     "kind": info.kind, "state": info.state.value,
                 })
+        spawner_for = None
+        for team in self.teams.list():
+            if team.spawner_id != harness.agent_id:
+                continue
+            workspace = self._agent_spawn_policy._workspace(team, harness)
+            catalog = project_agent_catalog(workspace)
+            spawner_for = {
+                "team_id": team.team_id,
+                "team_name": team.name,
+                "workspace": workspace,
+                "guide": os.path.join(workspace, "cwh-agent.md") if workspace else None,
+                "manifest": catalog["path"],
+                "manifest_present": catalog["present"],
+                "manifest_error": catalog["error"],
+                "profiles": catalog["profiles"],
+            }
+            break
         return {
             "agent": self.agent_summary(harness),
             "teams": team_names,
             "teammates": teammates,
+            "spawner_for": spawner_for,
         }
 
     def teammates(self, target: str) -> list[dict[str, Any]]:

@@ -8,12 +8,14 @@ from crewhall.daemon import Server
 from crewhall.ui import (
     AppModel,
     LocalControl,
+    cursor_position,
     render,
     render_text,
     session_viewport,
     translate_sequence,
 )
 from crewhall.ui.model import COMMANDS
+from crewhall.ui.view import CARET
 
 from .support import FakeHarness
 
@@ -370,6 +372,95 @@ class Navigation(UiBase):
     def test_ungrouped_section(self):
         ungrouped = [a["name"] for a in self.model.ungrouped_agents()]
         self.assertEqual(ungrouped, ["b"])
+
+
+class TextFieldEditing(UiBase):
+    def _name_field(self):
+        self.model.focus = "nav"
+        self.model.handle_key("n")
+        return field(self.model.modal, "name")
+
+    def test_left_right_move_the_caret_and_insert_there(self):
+        name = self._name_field()
+        for char in "abc":
+            self.model.handle_key(char)
+        self.model.handle_key("left")
+        self.assertEqual(name.cursor, 2)
+        self.model.handle_key("left")
+        self.model.handle_key("X")
+        self.assertEqual(name.value, "aXbc")
+        self.assertEqual(name.cursor, 2)
+        self.model.handle_key("right")
+        self.model.handle_key("Y")
+        self.assertEqual(name.value, "aXbYc")
+        self.assertEqual(name.cursor, 4)
+
+    def test_home_end_delete_and_backspace_edit_at_the_caret(self):
+        name = self._name_field()
+        for char in "abc":
+            self.model.handle_key(char)
+        self.model.handle_key("home")
+        self.assertEqual(name.cursor, 0)
+        self.model.handle_key("delete")
+        self.assertEqual(name.value, "bc")
+        self.model.handle_key("end")
+        self.model.handle_key("backspace")
+        self.assertEqual(name.value, "b")
+        self.assertEqual(name.cursor, 1)
+
+    def test_caret_is_rendered_where_typing_will_go(self):
+        self._name_field()
+        for char in "abc":
+            self.model.handle_key(char)
+        self.model.handle_key("left")
+        screen = "\n".join(render_text(self.model, 100, 30))
+        line = next(line for line in screen.splitlines() if "Name:" in line)
+        self.assertIn(f"ab{CARET}c", line)
+
+    def test_long_value_scrolls_so_the_caret_stays_visible(self):
+        name = self._name_field()
+        name.value = "x" * 200
+        name.cursor = len(name.value)
+        screen = render_text(self.model, 100, 30)
+        line = next(line for line in screen if "Name:" in line)
+        self.assertIn(CARET, line)
+        self.assertLessEqual(len(line), 100)
+
+    def test_palette_query_supports_moving_the_caret(self):
+        self.model.focus = "nav"
+        self.model.handle_key("ctrl_p")
+        query = self.model.modal.fields[0]
+        for char in "new":
+            self.model.handle_key(char)
+        self.model.handle_key("left")
+        self.model.handle_key("x")
+        self.assertEqual(query.value, "nexw")
+        self.assertEqual(query.cursor, 3)
+
+
+class InteractiveCursor(UiBase):
+    def setUp(self):
+        super().setUp()
+        self._add_agent("a")
+        self._enter_interactive("a")
+        self.model.capture_cache = "\n".join(f"line-{i}" for i in range(30))
+
+    def test_maps_the_agent_cell_into_the_transcript(self):
+        self.model.cursor_pos = (7, 5)
+        self.assertEqual(cursor_position(self.model, 100, 30), (4 + 5, 34 + 7))
+
+    def test_hidden_when_scrolled_or_without_a_cursor(self):
+        self.model.cursor_pos = (7, 5)
+        self.model.follow = False
+        self.assertIsNone(cursor_position(self.model, 100, 30))
+        self.model.follow = True
+        self.model.cursor_pos = None
+        self.assertIsNone(cursor_position(self.model, 100, 30))
+
+    def test_hidden_outside_interactive_focus(self):
+        self.model.cursor_pos = (7, 5)
+        self.model.focus = "nav"
+        self.assertIsNone(cursor_position(self.model, 100, 30))
 
 
 class Creation(UiBase):

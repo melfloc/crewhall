@@ -88,6 +88,39 @@ class GuardOriginUnit(unittest.TestCase):
         self.assertIsNotNone(denied)
         self.assertIn("not available to agents", denied["error"])
 
+    def test_spawn_authorization_requires_a_stable_peer_pidfd(self) -> None:
+        self.server.controller.agent_root_pids_by_id = lambda: {"a": {os.getpid()}}
+        self.assertFalse(self.server._peer_bound_to_agent(os.getpid(), "a"))
+        pidfd_open = getattr(os, "pidfd_open", None)
+        if pidfd_open is None:
+            self.skipTest("pidfd_open is unavailable")
+        pidfd = pidfd_open(os.getpid())
+        try:
+            self.assertTrue(self.server._peer_bound_to_agent(os.getpid(), "a", pidfd))
+        finally:
+            os.close(pidfd)
+
+    def test_peer_pidfd_is_available_on_accepted_unix_socket(self) -> None:
+        from crewhall.daemon import _peer_pidfd, _peer_pid, _pidfd_pid
+
+        path = os.path.join(self.root, "pidfd.sock")
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(path)
+        server.listen(1)
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(client.close)
+        self.addCleanup(server.close)
+        client.connect(path)
+        peer, _ = server.accept()
+        self.addCleanup(peer.close)
+        pidfd = _peer_pidfd(peer)
+        if pidfd is None:
+            self.skipTest("kernel does not support SO_PEERPIDFD")
+        try:
+            self.assertEqual(_peer_pid(peer), _pidfd_pid(pidfd))
+        finally:
+            os.close(pidfd)
+
 
     def _spawn_with_env(self, env: dict) -> subprocess.Popen:
         """A child whose /proc environ is its own: wait until it has exec'd.
@@ -134,6 +167,45 @@ class GuardOriginUnit(unittest.TestCase):
         # The cross-conversation listing stays control plane only.
         self.assertIsNotNone(self.server._guard_origin(
             {"op": "office_collab_list", "sender": "lead", "token": "t"}, os.getpid()))
+
+    def test_non_string_op_is_left_to_the_dispatcher(self) -> None:
+        self.assertIsNone(self.server._guard_origin({"op": 7}, None))
+
+    def test_spawn_ops_require_an_exact_bound_agent_identity(self) -> None:
+        ctrl = self.server.controller
+        caller = mock.Mock(agent_id="sess_a")
+        ctrl.agents = mock.Mock()
+        ctrl.agents.resolve = lambda name: caller if name in ("sess_a", "A") else (
+            (_ for _ in ()).throw(KeyError(name)))
+        ctrl._check_token = lambda agent_id, token: None if token == "t" else (
+            (_ for _ in ()).throw(ValueError("bad token")))
+        bound = {"value": False}
+        self.server._peer_bound_to_agent = lambda pid, agent_id, pidfd=None: bound["value"]
+        for op in ("agent_create", "agent_stop"):
+            base = {"op": op, "sender": "sess_a", "token": "t"}
+            for bad in ({**base, "token": None}, {**base, "sender": ""},
+                        {**base, "sender": 5}, {**base, "sender": "ghost"},
+                        {**base, "sender": "A"}, {**base, "token": "wrong"}):
+                denied = self.server._guard_origin(bad, os.getpid())
+                self.assertIsNotNone(denied, bad)
+                self.assertIn("valid agent identity", denied["error"])
+            bound["value"] = False
+            denied = self.server._guard_origin(base, os.getpid())
+            self.assertIn("did not come from that agent's process", denied["error"])
+            bound["value"] = True
+            self.assertIsNone(self.server._guard_origin(base, os.getpid()))
+
+    def test_spawn_ops_without_identity_are_control_plane_only(self) -> None:
+        token = self.server._control_token
+        self.server._caller_is_agent = lambda pid, pidfd=None: True
+        denied = self.server._guard_origin(
+            {"op": "agent_create", "_control_token": token}, os.getpid())
+        self.assertIn("not available to agents", denied["error"])
+        self.server._caller_is_agent = lambda pid, pidfd=None: False
+        self.assertIsNone(self.server._guard_origin(
+            {"op": "agent_create", "_control_token": token}, None))
+        self.assertIn("control token", self.server._guard_origin(
+            {"op": "agent_stop"}, None)["error"])
 
 
 class ControlPlaneOverSocket(unittest.TestCase):

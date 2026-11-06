@@ -21,6 +21,12 @@ class ModalField:
     cursor: int = 0
     editable: bool = True
 
+    def __post_init__(self) -> None:
+        self.cursor = max(0, min(self.cursor, len(self.value)))
+        # A prefilled text field starts with the caret after its value.
+        if self.type == "text" and self.value and self.cursor == 0:
+            self.cursor = len(self.value)
+
 
 @dataclass
 class Modal:
@@ -199,10 +205,25 @@ class UiModals:
         if field.type == "text":
             if not field.editable:
                 return
-            if key == "backspace":
-                field.value = field.value[:-1]
+            pos = max(0, min(field.cursor, len(field.value)))
+            if key == "left":
+                field.cursor = max(0, pos - 1)
+            elif key == "right":
+                field.cursor = min(len(field.value), pos + 1)
+            elif key == "home":
+                field.cursor = 0
+            elif key == "end":
+                field.cursor = len(field.value)
+            elif key == "backspace":
+                if pos > 0:
+                    field.value = field.value[: pos - 1] + field.value[pos:]
+                    field.cursor = pos - 1
+            elif key == "delete":
+                if pos < len(field.value):
+                    field.value = field.value[:pos] + field.value[pos + 1:]
             elif len(key) == 1 and key.isprintable():
-                field.value += key
+                field.value = field.value[:pos] + key + field.value[pos:]
+                field.cursor = pos + 1
         elif field.type == "select":
             if key in ("left", "up"):
                 field.index = max(0, field.index - 1)

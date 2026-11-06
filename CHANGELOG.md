@@ -7,6 +7,23 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.87.0] — 2026-11-06
+
+- Seguridad: los Teams locales compartidos pueden asignar un spawner con perfiles
+  de proyecto aprobados explícitamente, límites persistentes de hijos vivos y
+  creaciones en 24 horas, y autorización de proceso ligada a pidfd. No requiere
+  sandbox del sistema operativo; el riesgo de ejecución con el mismo UID queda
+  documentado como límite aceptado, no como aislamiento.
+- Seguridad: los rechazos de creación/parada originados por agentes se limitan a
+  20 eventos de auditoría por operación cada 60 segundos; la auditoría registra
+  cuántos eventos similares se suprimieron.
+- TUI: los campos de texto de los modales y de la paleta de comandos ahora tienen un
+  caret visible y edición en la posición del cursor (`←` `→`, `Home`, `End`, `Supr`,
+  `Backspace`). Los valores largos se desplazan horizontalmente para que el caret nunca
+  quede fuera de la caja.
+- TUI: en Interactive Focus se dibuja el cursor real del agente (tmux/ssh-tmux) en su
+  celda del transcript; se oculta cuando el agente lo oculta, cuando el transcript está
+  desplazado o cuando el foco vuelve al navegador.
 - Endurecido: todas las rutas POST que leen JSON (`/api/login`, `/api/terminal-unlock`,
   `/api/terminal-ticket`, `/api/webauthn/*`, `/api/totp/*` y `/api/office/callback`) rechazan
   cuerpos que no sean objetos con un 400 `body must be a JSON object`, igual que `/api/op`.

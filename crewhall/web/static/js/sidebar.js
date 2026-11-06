@@ -79,12 +79,14 @@ async function moveAgentToTeam(agentId, teamId){
   }
   if(changed) saveAgentOrders(orders);
   const current = (S.state.teams||[]).filter(t => (t.members||[]).some(m => m.agent_id === agentId));
+  let failed = false;
   for(const t of current){
     if(t.team_id !== teamId){
       try{ await op("team_remove_member", {target:t.team_id, agent:agentId}); }
-      catch(e){ flash(e.message); }
+      catch(e){ flash(e.message); failed = true; break; }
     }
   }
+  if(failed){ render(); return; }
   if(teamId && !current.some(t => t.team_id === teamId)){
     try{ await op("team_add_member", {target:teamId, agent:agentId}); toast("Moved to team", "ok", 1800); }
     catch(e){ flash(e.message); }
@@ -111,7 +113,7 @@ function renderFilters(agents){
 function navSignature(agents, teams, filtering){
   const a = agents.map(x => `${x.agent_id}:${x.state}:${(x.interactions||[]).length}`).sort();
   // Not sorted: the array order is the user's drag order, so reordering rebuilds.
-  const t = teams.map(x => `${x.team_id}:${(x.members||[]).map(m=>m.agent_id).join(",")}:${S.collapsed.has(x.team_id)}`);
+  const t = teams.map(x => `${x.team_id}:${(x.members||[]).map(m=>m.agent_id).join(",")}:${x.spawner_id||""}:${S.collapsed.has(x.team_id)}`);
   const tm = (S.terminals||[]).map(x => `${x.session_id}:${x.status}:${x.readonly}:${x.title||""}:${x.host||""}`).sort();
   return JSON.stringify({ a, t, tm, o: agentOrders(), f: S.filter, q: S.q.trim().toLowerCase(),
                           filtering: !!filtering, inbox: inboxItems().length });
@@ -148,7 +150,7 @@ function render(){
     const body = el("div", {className:"team-body"},
       t.workspace || t.host ? el("div", {className:"team-ws", style:"padding:6px 8px 4px", title:t.host ? `${t.host}:${t.workspace||""}` : t.workspace},
         ic("folder","sm"), " ", t.host ? `${t.host}:${t.workspace||"~"}` : t.workspace) : null,
-      orderAgents(shown, t.team_id).map(a => dndAgentRow(a, t.team_id, leadSet.has(a.agent_id))), !members.length ? el("div", {className:"empty-side"}, "No members yet") : null,
+      orderAgents(shown, t.team_id).map(a => dndAgentRow(a, t.team_id, leadSet.has(a.agent_id), t.spawner_id===a.agent_id)), !members.length ? el("div", {className:"empty-side"}, "No members yet") : null,
       t.missing?.length ? el("div", {className:"team-missing"}, `× ${t.missing.join(", ")} (missing)`) : null);
     const more = el("button", {className:"btn icon sm ghost", type:"button", "aria-label":`Actions for team ${t.name}`, title:"Team actions",
       onclick:(e)=>{ e.stopPropagation(); openMenu(more, [
@@ -157,6 +159,8 @@ function render(){
         {label:"Add members…", icon:"users", run:()=>teamAction("add-members", t.team_id)},
         {label:"Remove members…", icon:"x", run:()=>teamAction("rm-members", t.team_id)},
         {label:"Set leads…", icon:"user", run:()=>teamAction("set-leads", t.team_id)},
+        ...(!t.host && t.workspace_mode !== "worktree" ? [{label:"Set spawner…", icon:"user", run:()=>teamAction("set-spawner", t.team_id)}] : []),
+        ...(t.spawner_id ? [{label:"Approve worker profiles…", icon:"check", run:()=>teamAction("approve-profiles", t.team_id)}] : []),
         {label:"Set workspace…", icon:"folder", run:()=>teamAction("set-ws", t.team_id)}, "-",
         {label:"Delete team", icon:"trash", danger:true, run:()=>teamAction("rm-team", t.team_id)}]); }}, ic("more","sm"));
     const head = el("div", {className:"team-head", role:"button", tabIndex:0, "aria-expanded":!collapsed,
@@ -170,6 +174,7 @@ function render(){
       el("div", {className:"team-title"}, el("div", {className:"team-name"}, el("span", {className:"nm"}, t.name),
         el("span", {className:"chip"}, members.length),
         leadSet.size ? el("span", {className:"chip", title:`leads: ${[...leadSet].map(id=>{const m=agentById(id);return m?m.name||id:id;}).join(", ")}`}, "lead", leadSet.size > 1 ? " " + leadSet.size : null) : null,
+        t.spawner_id ? el("span", {className:"chip", title:`spawner: ${(agentById(t.spawner_id)?.name||t.spawner_id)}`}, "spawner") : null,
         working ? el("span", {className:"chip", style:"color:var(--work)", title:`${working} working`}, dot("working"), working) : null)),
       more);
     const teamEl = el("div", {className:"team" + (collapsed ? " collapsed" : ""), dataset:{team:t.team_id},
@@ -223,7 +228,7 @@ function subNodes(a){
   if(st === "working" && !x.detail) out.push(" ", timerSpan(a));
   return out;
 }
-function agentRow(a, lead){
+function agentRow(a, lead, spawner){
   const st = a.state || "unknown", sel = a.agent_id === S.selected;
   const recent = S.doneAt[a.agent_id] && Date.now() - S.doneAt[a.agent_id] < 2400;
   const n = (a.interactions||[]).length;
@@ -238,13 +243,14 @@ function agentRow(a, lead){
     el("span", {className:`avatar ${st}`, style:`--h:${hue(a.kind||a.name)}`}, (a.name||a.agent_id||"?").trim().charAt(0) || "?",
       el("span", {className:"st"}, dot(st, actOf(a).kind))),
     el("span", {className:"info"}, el("span", {className:"nm", title:a.name||a.agent_id}, a.name||a.agent_id,
-        lead ? el("span", {className:"chip", title:"team lead"}, "lead") : null),
+        lead ? el("span", {className:"chip", title:"team lead"}, "lead") : null,
+        spawner ? el("span", {className:"chip", title:"team spawner"}, "spawner") : null),
       el("span", {className:"sub"}, el("span", {className:"mono", style:"opacity:.8"}, a.kind), el("span", {style:"opacity:.5"}, "·"), el("span", {className:"act", title:actText(a), style:"overflow:hidden;text-overflow:ellipsis"}, ...sub))),
     n ? el("span", {className:"badge pulse", title:"waiting for your answer"}, n) : null, more);
   return row;
 }
-function dndAgentRow(a, key, lead){
-  const row = agentRow(a, lead);
+function dndAgentRow(a, key, lead, spawner=false){
+  const row = agentRow(a, lead, spawner);
   row.draggable = true;
   row.addEventListener("dragstart", (e)=>dragStart(e, "agent", a.agent_id));
   row.addEventListener("dragend", dragEnd);

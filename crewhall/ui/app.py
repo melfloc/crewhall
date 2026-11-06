@@ -4,7 +4,7 @@ import time
 
 from .control import ControlPort
 from .model import TERMINAL_STATES, AppModel, translate_sequence
-from .view import render, session_viewport
+from .view import cursor_position, render, session_viewport
 import contextlib
 
 _PAIRS = {
@@ -123,6 +123,13 @@ def run(
                 with contextlib.suppress(curses.error):
                     stdscr.addstr(index, column, chunk, attrs.get(style, 0))
                 column += len(chunk)
+        position = cursor_position(model, width, height)
+        with contextlib.suppress(curses.error):
+            if position is None:
+                curses.curs_set(0)
+            else:
+                stdscr.move(position[0], position[1])
+                curses.curs_set(1)
         stdscr.refresh()
         return width, height
 

@@ -33,6 +33,24 @@ def cmd_agent_identity(args: argparse.Namespace) -> int:
         print("  (none)")
     for member in resp["teammates"]:
         print(f"  - {member['name']} \u00b7 {member['kind']} \u00b7 {member['state']}")
+    spawner = resp.get("spawner_for")
+    if spawner:
+        print(f"SPAWNER FOR: {spawner['team_name']}")
+        print(f"  Guide: {spawner.get('guide') or 'cwh-agent.md'}")
+        if spawner.get("manifest_error"):
+            print(f"  Project profile file has an error: {spawner['manifest_error']}")
+        elif spawner.get("profiles"):
+            print("  Available project profiles:")
+            for profile in spawner["profiles"]:
+                detail = f" — {profile['description']}" if profile.get("description") else ""
+                print(f"    {profile['profile']} ({profile['provider']}){detail}")
+            print("  Create a worker with: crewhall agent create --name <name> --profile <profile>")
+        else:
+            print("  No worker profiles are configured yet.")
+            if spawner.get("manifest_present"):
+                print("  Read cwh-agent.md and preserve the existing cwh-agents.json; change it only when asked.")
+            else:
+                print("  Read cwh-agent.md, review the project, then create cwh-agents.json only when asked.")
     return 0
 
 
@@ -178,6 +196,24 @@ def cmd_agent_hook(args: argparse.Namespace) -> int:
 
 
 def cmd_agent_create(args: argparse.Namespace) -> int:
+    sender = brand.env("AGENT_ID")
+    if sender:
+        # The daemon resolves the profile itself for an agent caller. Do not
+        # send client-expanded kind/args/cwd/backend values that the caller
+        # could replace with a different launch configuration.
+        resp = common._client(args).call(
+            "agent_create",
+            sender=sender,
+            token=brand.env("TOKEN"),
+            profile=args.profile,
+            name=args.name,
+            team=getattr(args, "team", None),
+            cols=args.cols,
+            rows=args.rows,
+        )
+        _print_agent(resp["agent"])
+        return 0
+
     from ..specs import SpecError, apply_profile, load_profiles
 
     entry = {
@@ -414,7 +450,13 @@ def cmd_agent_wait(args: argparse.Namespace) -> int:
 
 
 def cmd_agent_stop(args: argparse.Namespace) -> int:
-    resp = common._client(args).call("agent_stop", target=args.target, force=args.force)
+    sender = brand.env("AGENT_ID")
+    if sender:
+        resp = common._client(args).call(
+            "agent_stop", target=args.target, sender=sender, token=brand.env("TOKEN")
+        )
+    else:
+        resp = common._client(args).call("agent_stop", target=args.target, force=args.force)
     _print_agent(resp["agent"])
     return 0
 

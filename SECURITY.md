@@ -24,56 +24,79 @@ care about:
   automatically. The token is **never** injected into an agent's environment.
 - **The agent is a partial adversary**: an agent runs as the same Unix user as the
   daemon, so filesystem permissions alone cannot separate them. The daemon therefore
-  also checks the caller's process credentials (`SO_PEERCRED`) and walks `/proc`:
+  also checks the caller's process credentials (`SO_PEERCRED`), pins the connected
+  process with `SO_PEERPIDFD` for agent creation/stopping, and walks `/proc`:
   a process that **descends from an agent session** may only use the agent operations
   (`agent.identity`, `team.send`, `request.*`, `agent.new_session`/`team.new_session`,
   lifecycle/permission hooks, `team.members`, `ping`, publishing to and co-editing
-  the chat it leads or crews). The same applies to a process whose environment still
+  the chat it leads or crews). `agent_create` and `agent_stop` have a separate,
+  narrower route described below. The same applies to a process whose environment still
   carries a live agent's `CREWHALL_TOKEN` (e.g. a double-forked child reparented away
   from the agent). Such a caller is refused the control plane even with a valid
   control token. This stops an agent that merely *uses* `crewhall` (or a careless
   tool it runs) from approving its own permission prompts, writing to an unrelated
   agent, or killing sessions.
-- **Limit (read this)**: the control-plane guard alone is **defence in depth**.
-  An agent that deliberately escapes both checks (`setsid`/double fork *and* a
-  scrubbed environment) runs as you and, without the CLI sandbox below, could
-  read the `control-token` file.
-- **Isolation (D1)**: on top of the guard, crewhall asks each provider to keep
-  its agent away from crewhall's private state. The generated Claude settings
-  (`--settings`, `hooks.ensure_claude_settings`) carry `permissions.deny` rules
-  (`Read` and `Edit`, absolute `//` paths) for the control token
-  (`$XDG_STATE_HOME/crewhall/control-token`), the control files next to it
-  (`*.json`, `*.jsonl`, `hooks/`, `mcp/`, `backups/`, `launch/`) and the runtime
-  dir (`$XDG_RUNTIME_DIR/crewhall/**`: socket, log, pid). The chat workspace
-  (`state/conversations/`) stays readable: it is the agent's own working
-  directory.
-  - **Claude Code, what this blocks**: Claude's own file tools and the file
-    commands Claude Code recognises in Bash (`cat`, `head`, `tail`, `sed`, `tee`,
-    redirections). **What it does not block**: a script the agent runs that
-    opens the file itself (for example `python -c "open(...)"`), or a command
-    that reads it without naming it. Per Claude Code's own documentation only
-    its **sandbox** (`sandbox.enabled`) enforces paths at the OS level for every
-    subprocess. crewhall does not enable it for you, because it also restricts
-    the agent's network and writes; enable it in your Claude settings if you
-    need a hard boundary.
-  - **OpenCode / Codex**: use their own permission/sandbox configuration; when
-    their sandbox is off (Codex is launched with `--dangerously-bypass-approvals
-    -and-sandbox` for interactivity), isolation degrades to the control-plane
-    guard. Enable the provider sandbox and restrict its writable roots to your
-    project for a hard boundary.
-  - The deny rules only cover file access. The agent-ops socket stays usable
-    (it is how `crewhall message send` and the MCP server work), and the guard
-    above keeps control ops off it. A real end-to-end check (a Claude agent
-    asked to read `control-token`) runs in the nightly real-agents job.
-  - **Bottom line**: against a confused or prompt-injected agent this is a solid
-    barrier; against an agent deliberately working around it, only an OS sandbox
-    (provider sandbox, a separate Unix user or a container) is a boundary.
+- **Accepted same-user risk**: the process-tree/token checks are defense in
+  depth, not an OS isolation boundary. An agent that escapes both checks
+  (`setsid`/double fork and a scrubbed environment) runs as you and can read
+  same-user files such as `control-token`, use the shared tmux server, invoke
+  provider CLIs directly, access local services available to your account, or
+  stop the daemon. This risk is explicitly accepted for the agent-spawner
+  feature. A separate Unix user, container, VM, or OS sandbox is an optional,
+  separate deployment workstream for untrusted code; none is required to enable
+  or use the spawner.
+- **Provider restrictions are extra defense in depth**: Crewhall supplies
+  Claude Code with `permissions.deny` rules for its own file tools against the
+  control token, state files and runtime directory. These are provider-level
+  rules, not an OS boundary; arbitrary subprocesses may bypass them. Provider
+  permission/sandbox settings can add protection when configured, but the
+  spawner does not depend on them and Crewhall does not promise that every
+  provider launch is OS-contained.
 - **Web UI**: authenticated (token/session) unless bound to localhost and the
   token requirement is off; Host/Origin allow-lists; strict security headers and
   CSP; per-IP login throttling; no inline scripts/styles.
 - **Agents**: a new capability is **off by default** (MCP, worktrees). The
   daemon is authoritative for agent identity and Team membership; a message or
   request is never trusted from a `--from`.
+- **Agent-controlled creation**: each local shared-workspace Team may assign one
+  current member as its spawner. The daemon accepts creation only from that
+  agent's own live process tree, authenticated by its agent token and a stable
+  peer pidfd. Agent-initiated create/stop fails closed on kernels without
+  `SO_PEERPIDFD` support; operator control-plane operations remain available.
+  The daemon checks Team membership, current spawner role, selected project
+  profile, and limits on every request. Project profiles come from
+  `cwh-agents.json`; an operator explicitly approves the catalog fingerprint
+  before it can be used. The fingerprint covers the manifest and project-native
+  agent definitions, and any change requires approval again. The request cannot replace the profile's
+  provider, model, agent, effort, flags, working directory, or backend. Only
+  explicitly supported profile fields and safe flags are accepted. A spawner can
+  stop only its own children. The `max_live` limit is per spawner and counts
+  uncertain process status as live; the rolling `max_created_per_day` limit is
+  per spawner and persists reservations before launch, so failed launch attempts
+  also consume the daily allowance. These are creation-count limits, not a
+  token, compute, or financial budget. `created_by` and the Team's spawner role
+  persist across daemon restarts, and the live-child cap is checked before
+  restarting an exited child. Remote and worktree Teams cannot use a spawner. When a spawner is
+  removed or replaced, Crewhall requires assigning a replacement and blocks the
+  change until its children are transferred to the replacement or explicitly
+  stopped and removed. The catalog SHA-256 is recorded for each agent-created
+  worker for audit. Denied agent create/stop requests are rate-limited to 20
+  audit entries per operation per 60-second window; suppressed denials are
+  summarized on the next window.
+- **Project guide files**: creating a local Team with a workspace creates
+  `cwh-agent.md` only when that path does not already exist. Crewhall reads
+  `cwh-agents.json` but does not create or overwrite it. The guide asks an agent
+  to preserve an existing profile file and propose targeted edits. These files
+  live in a shared workspace, so they are visible to every agent with access to
+  that directory; they are instructions and configuration, not a secret or a
+  permission boundary.
+- **Limit of agent-controlled creation**: this is a rule for requests sent through
+  crewhall. It is not an OS boundary. Agent code still runs as the same user and
+  can run provider CLIs or use the shared tmux server directly, and can read or
+  change same-user files, process information, and local settings where normal
+  permissions allow, including stopping or restarting the daemon. This control
+  narrows Crewhall's own create/stop path; it does not promise to stop arbitrary
+  code from launching another process.
 - **Team leads**: within a Team, a member may be marked a *lead*. A lead can
   interrogate a member (`agent status`), interrupt its current turn
   (`agent interrupt`), signal its background processes (`agent signal`) and
@@ -98,7 +121,9 @@ care about:
   by `uploads.max_mb` and audited (`web_upload`, mode and size only). The agent
   receives a path, never the bytes.
 - **Audit**: privileged operations are appended to `state/audit.jsonl` (0600),
-  with no secret values.
+  with no secret values. Successful spawn actions are always logged; denied
+  agent-originated spawn requests are rate-limited so they cannot rapidly rotate
+  useful audit entries out of the bounded log.
 
 Out of scope: a host that is already compromised (root/another process running
 as you), and the upstream agent CLIs themselves.

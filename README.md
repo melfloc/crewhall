@@ -53,6 +53,12 @@ against, [docs/STABLE-SURFACE.md](docs/STABLE-SURFACE.md).
 
 The Web UI: live agent view, and Mission control with every agent and the message flow.
 
+![A team spawner creates a worker and exchanges messages with it](docs/images/agent-spawn-communication.gif)
+
+This local end-to-end demo uses a deterministic mock provider; it exercises the
+real Crewhall daemon, tmux backend, spawn policy and team messaging without calling
+an external model.
+
 | Dark | Light |
 | --- | --- |
 | ![Live agent view, dark theme](docs/images/agent-live-dark.png) | ![Live agent view, light theme](docs/images/agent-live-light.png) |
@@ -94,6 +100,13 @@ tmux *or* a plain PTY.
   (state, activity, background processes, whether a message could be delivered now) and
   contain them with `agent interrupt`, `agent signal` and `agent restart`, which resumes
   the conversation and has a restart brake.
+- **Agent-created workers.** A local shared-workspace Team can assign one spawner;
+  an operator approves the `cwh-agents.json` profile catalog, and Crewhall caps
+  live children and creation attempts per spawner. No OS sandbox is required for
+  this feature. The policy covers requests through Crewhall; agents run as the
+  same Unix user and can still invoke tools or tmux directly, so this is not a
+  security boundary for untrusted prompts or tools. OS isolation is a separate,
+  optional deployment choice.
 - **A native MCP server** (stdio, stdlib only, off by default) so an agent can call
   `whoami`, `list_teammates`, `send_message`, `request`, `reply`, `handoff`,
   `new_session` and `publish_artifact` as tools.

@@ -56,6 +56,9 @@ class ControlPort(Protocol):
     ) -> dict[str, Any]: ...
     def remove_agent(self, target: str) -> dict[str, Any]: ...
     def capture(self, target: str, recent: bool, max_lines: int) -> str: ...
+    def capture_with_cursor(
+        self, target: str, recent: bool, max_lines: int
+    ) -> tuple[str, tuple[int, int] | None]: ...
     def send_text(self, target: str, text: str) -> None: ...
     def send_key(self, target: str, key: str) -> None: ...
     def resize(self, target: str, cols: int, rows: int) -> None: ...
@@ -111,6 +114,22 @@ class DaemonControl:
         return self.client.call(
             "agent_capture", target=target, recent=recent, max_lines=max_lines
         )["output"]
+
+    def capture_with_cursor(
+        self, target: str, recent: bool = True, max_lines: int = 200
+    ) -> tuple[str, tuple[int, int] | None]:
+        response = self.client.call(
+            "agent_capture", target=target, recent=recent, max_lines=max_lines,
+            cursor=True,
+        )
+        cursor = response.get("cursor")
+        position = None
+        if isinstance(cursor, dict):
+            try:
+                position = (int(cursor["x"]), int(cursor["y"]))
+            except (KeyError, TypeError, ValueError):
+                position = None
+        return response["output"], position
 
     def send_text(self, target, text):
         self.client.call("agent_write", target=target, text=text)
@@ -195,6 +214,17 @@ class LocalControl:
             if recent
             else harness.capture()
         )
+
+    def capture_with_cursor(
+        self, target: str, recent: bool = True, max_lines: int = 200
+    ) -> tuple[str, tuple[int, int] | None]:
+        harness = self.controller.get_agent(target)
+        output = (
+            harness.capture_recent(max_lines=max_lines)
+            if recent
+            else harness.capture()
+        )
+        return output, harness.cursor()
 
     def send_text(self, target, text):
         self.controller.get_agent(target).write_raw(text)

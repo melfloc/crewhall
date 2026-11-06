@@ -45,6 +45,14 @@ class Backend(ABC):
         lines = self.capture().splitlines()
         return "\n".join(lines[-max(1, int(max_lines)):])
 
+    def cursor(self) -> tuple[int, int] | None:
+        """Visible cursor position inside the session, if the backend knows it.
+
+        ``(column, row)`` are 0-based cells within the visible screen. Backends
+        without a terminal emulator (pty) return ``None`` instead of guessing.
+        """
+        return None
+
     @abstractmethod
     def resize(self, cols: int, rows: int) -> None: ...
 

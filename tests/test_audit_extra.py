@@ -64,6 +64,8 @@ class RecordAndRead(unittest.TestCase):
         self._patch = mock.patch.object(audit.paths, "state_dir", return_value=self.dir)
         self._patch.start()
         self.addCleanup(self._patch.stop)
+        with audit._LOCK:
+            audit._AGENT_DENIAL_WINDOWS.clear()
 
     def test_record_recent_rotate(self) -> None:
         for i in range(5):
@@ -92,6 +94,27 @@ class RecordAndRead(unittest.TestCase):
         audit.record("agent_create", summary="x")
         os.chmod(audit.audit_path(), stat.S_IRWXU | stat.S_IRGRP)
         self.assertFalse(audit.file_permissions_ok())
+
+    def test_agent_denial_flood_is_throttled_and_summarized(self) -> None:
+        times = iter([1000.0] * 50 + [1061.0])
+        with mock.patch.object(audit.time, "time", side_effect=lambda: next(times)), \
+                mock.patch("crewhall.settings.get", return_value=0):
+            for index in range(50):
+                audit.record(
+                    "agent_create", actor=f"agent:{index}", result="denied",
+                    summary="rejected request", rate_limit_agent_denial=True,
+                )
+            audit.record(
+                "agent_create", actor="agent:legitimate", result="denied",
+                summary="genuine denial marker", rate_limit_agent_denial=True,
+            )
+
+        entries = audit.recent(limit=100, op="agent_create")
+        self.assertEqual(sum(entry["result"] == "denied" for entry in entries), 21)
+        summaries = [entry for entry in entries if entry["result"] == "throttled"]
+        self.assertEqual(len(summaries), 1)
+        self.assertIn("30 similar agent denial(s) suppressed", summaries[0]["summary"])
+        self.assertTrue(any(entry["summary"] == "genuine denial marker" for entry in entries))
 
 
 if __name__ == "__main__":

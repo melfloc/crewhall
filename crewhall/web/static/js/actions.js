@@ -12,6 +12,7 @@ async function openNewAgent(teamId){
   $("na-team").replaceChildren(el("option", {value:"", textContent:"(none)"}),
     ...(S.state?.teams||[]).map(t=>el("option", {value:t.team_id, textContent:t.name})));
   if(teamId) $("na-team").value = teamId;   // preselect -> inherits workspace
+  $("na-spawner").checked = false;
   let hosts;
   try { hosts = (await op("host_list")).hosts || []; } catch(e){ hosts = S.state?.hosts || []; }
   S.hosts = hosts;   // fresh state for the dialog (the push may be a few seconds old)
@@ -19,12 +20,23 @@ async function openNewAgent(teamId){
     ...hosts.map(h => el("option", {value:h.name,
       textContent:`${h.name} — ${h.ssh}${h.port !== 22 ? ":" + h.port : ""} (${h.state})`})));
   $("na-host").value = "";
-  updateHostUi();
-  updateCwdHint();
   if($("na-workspace-mode")) $("na-workspace-mode").value = "shared";
+  updateHostUi();
+  updateSpawnerUi();
+  updateCwdHint();
   $("na-err").textContent=""; $("na-name").value=""; $("na-cwd").value=""; $("na-args").value="";
   $("na-name").classList.remove("invalid"); $("na-ok").classList.remove("loading");
   $("newAgent").showModal(); $("na-name").focus();
+}
+function updateSpawnerUi(){
+  const wrap = $("na-spawner-wrap"), check = $("na-spawner");
+  if(!wrap || !check) return;
+  const team = teamById($("na-team").value);
+  const eligible = !!team && !team.spawner_id && !team.host
+    && team.workspace_mode !== "worktree" && !$("na-host").value
+    && $("na-workspace-mode")?.value !== "worktree";
+  wrap.classList.toggle("init-hidden", !eligible);
+  if(!eligible) check.checked = false;
 }
 function updateHostUi(){
   // A remote team fixes the host (and its directory): its agents run there.
@@ -52,7 +64,8 @@ function updateHostUi(){
   }
   updateCwdHint();
 }
-$("na-host").onchange = updateHostUi;
+$("na-host").onchange = ()=>{ updateHostUi(); updateSpawnerUi(); };
+$("na-workspace-mode").onchange = updateSpawnerUi;
 let _naPath = false;
 function updateCwdHint(){
   if(!_naPath){ _naPath = true; attachPathComplete($("na-cwd")); }
@@ -65,7 +78,7 @@ function updateCwdHint(){
     ? `Leave empty to inherit the team workspace: ${t.workspace}`
     : "Leave empty to use the server's working directory";
 }
-$("na-team").onchange = ()=>{ updateHostUi(); };
+$("na-team").onchange = ()=>{ updateHostUi(); updateSpawnerUi(); };
 $("na-cancel").onclick = ()=> $("newAgent").close();
 $("newAgent").addEventListener("click", e => { if(e.target === $("newAgent")) $("newAgent").close(); });
 async function createAgent(){
@@ -77,6 +90,7 @@ async function createAgent(){
                    cwd:$("na-cwd").value.trim()||null, team:$("na-team").value||null,
                    args:$("na-args").value.trim()||null,
                    workspace_mode:$("na-workspace-mode")?.value||null };
+  if($("na-spawner").checked) params.spawner_for_team = $("na-team").value;
   $("na-ok").classList.add("loading"); $("na-err").textContent = "";
   try { const r = await op("agent_create", params); $("newAgent").close();
     toast(`Agent ${name} created`, "ok"); select(r.agent.agent_id); }
@@ -130,6 +144,42 @@ async function teamAction(act, teamId){
       if(chosen === undefined) return;
       await op("team_set_leads", {target:teamId, agents:chosen});
       toast(chosen.length ? `Leads updated (${chosen.length})` : "Leads cleared", "ok");
+    } else if(act==="set-spawner"){
+      const options = [...(!team.spawner_id ? [{value:"", label:"No spawner"}] : []),
+        ...((team.members||[]).map(m=>({value:m.agent_id,
+          label:m.name||m.agent_id, sub:`${m.kind}${m.agent_id===team.spawner_id ? " · current spawner" : ""}`})))];
+      const picked = await promptDlg({title:`Spawner for ${team.name}`,
+        sub:team.spawner_id ? "Choose the replacement. The current spawner cannot be removed until its workers are transferred or stopped."
+          : "Choose one existing team member to allow it to create workers.",
+        fields:[{key:"agent", label:"Team spawner", type:"select", value:team.spawner_id||"", options}],
+        ok:"Save spawner"});
+      if(!picked) return;
+      const agent = picked.agent || null;
+      if(agent === (team.spawner_id||null)) return;
+      try {
+        await op("team_set_spawner", {target:teamId, agent});
+      } catch(e){
+        const count = Number((e.message.match(/owns (\d+) worker agent/)||[])[1] || 0);
+        if(!count) throw e;
+        const actions = [];
+        if(agent) actions.push({value:"transfer", label:"Transfer existing workers to the replacement"});
+        actions.push({value:"stop", label:"Stop and remove existing workers; keep the replacement"});
+        const choice = await promptDlg({title:"Current spawner still has workers",
+          sub:`The current spawner owns ${count} worker(s). Before replacing it, decide what Crewhall should do with them.`,
+          fields:[{key:"action", label:"Workers", type:"select", options:actions}], ok:"Continue"});
+        if(!choice) return;
+        await op("team_set_spawner", {target:teamId, agent, children_action:choice.action});
+      }
+      toast(agent ? "Team spawner updated" : "Team spawner removed", "ok");
+      render();
+    } else if(act==="approve-profiles"){
+      if(!team.spawner_id){ toast("Assign a team spawner first", "info"); return; }
+      if(!await confirmDlg({title:`Approve worker profiles for ${team.name}?`,
+        message:"Review cwh-agents.json and its referenced Claude/OpenCode definitions in the shared workspace first. Approval pins their current contents; agents cannot spawn workers after those files change until you approve them again.",
+        ok:"Approve profiles"})) return;
+      await op("team_approve_agent_profiles", {target:teamId});
+      toast("Worker profile catalog approved", "ok");
+      render();
     } else if(act==="set-ws"){
       const hosts = await hostChoices();
       // The host of a team can only change while it has no members.
@@ -179,7 +229,8 @@ async function newTeam(){
   if(hosts.length) fields.push({key:"host", label:"Run on", type:"select", options:hostOptions(hosts),
     hint:"A remote team runs all its agents on that machine, in a directory there."});
   fields.push({key:"workspace", label:"Workspace (optional)", mono:true, path:true, placeholder:"/absolute/path",
-    remoteWhen:hosts.length ? "host" : null, remoteLabel:"Directory on {host} (optional)", remotePlaceholder:"/home/user/project (on the host)"});
+    remoteWhen:hosts.length ? "host" : null, remoteLabel:"Directory on {host} (optional)", remotePlaceholder:"/home/user/project (on the host)",
+    hint:"For a local workspace, Crewhall adds cwh-agent.md only if that file does not already exist."});
   const r = await promptDlg({title:"New team", sub:"Teams let agents message each other and share a workspace.", ok:"Create team", fields});
   if(!r) return;
   try { await op("team_create", {name:r.name, agent_ids:[], workspace:r.workspace||null, host:r.host||null});

@@ -45,6 +45,7 @@ from .commands.system import (
 from .commands.teams import (
     cmd_team_add_member, cmd_team_create, cmd_team_info, cmd_team_list, cmd_team_remove,
     cmd_team_remove_member, cmd_team_set_leads, cmd_team_set_workspace, cmd_team_up,
+    cmd_team_approve_profiles,
 )
 from .commands.terminals import (
     cmd_terminal_attach, cmd_terminal_capture, cmd_terminal_close, cmd_terminal_key,
@@ -322,7 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("-t", "--kind", default=None, help="harness kind (default: opencode)")
     a.add_argument("-n", "--name")
     a.add_argument("-p", "--profile", default=None,
-                   help="defaults from ~/.config/crewhall/profiles.toml")
+                   help="agent caller: project profile from cwh-agents.json; human CLI: defaults from ~/.config/crewhall/profiles.toml")
     a.add_argument("-b", "--backend", default=None, help="backend (default: auto)")
     a.add_argument("-c", "--cwd")
     a.add_argument("--host", default=None,
@@ -476,6 +477,13 @@ def build_parser() -> argparse.ArgumentParser:
     tsl.add_argument("target")
     tsl.add_argument("agents", nargs="*", help="member names or ids that become leads")
     tsl.set_defaults(func=cmd_team_set_leads)
+
+    tap = tsub.add_parser(
+        "approve-profiles",
+        help="pin the current cwh-agents.json and native definitions for this Team",
+    )
+    tap.add_argument("target")
+    tap.set_defaults(func=cmd_team_approve_profiles)
 
     p = sub.add_parser("message", help="agent-to-agent messaging (Team-scoped)")
     msub = p.add_subparsers(dest="message_command", required=True)

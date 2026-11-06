@@ -283,15 +283,15 @@ class ServicesChatBridge:
             new_team = team_obj.team_id
         lead = conv.get("agent_id")
         old_team = self._team_or_none(conv.get("team"))
-        if lead and old_team is not None and old_team.team_id != new_team:
-            try:
-                self.teams.remove_member(old_team.team_id, str(lead))
-            except Exception:  # noqa: BLE001 - not a member anymore
-                log.debug("ignored exception in a boundary guard", exc_info=True)
+        if (lead and old_team is not None and old_team.team_id != new_team
+                and str(lead) in old_team.agent_ids):
+            # Use the service guard so moving a spawner with active workers
+            # cannot silently strip its Team role.
+            self.remove_team_member(old_team.team_id, str(lead))
         if lead and new_team:
             try:
                 if str(lead) not in self.teams.get(new_team).agent_ids:
-                    self.teams.add_member(new_team, str(lead))
+                    self.add_team_member(new_team, str(lead))
             except (KeyError, TeamError):
                 pass  # the lead is not running here; it joins when created
         meta = conversations.set_team(conversation_id, new_team)

@@ -278,6 +278,16 @@ class InteractiveSession:
         with self._lock:
             return self._buffer_bytes
 
+    def cursor(self) -> tuple[int, int] | None:
+        """Visible cursor cell of the session, when the backend can report it."""
+        fn = getattr(self.backend, "cursor", None)
+        if not callable(fn):
+            return None
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001 - a cursor probe must never break capture
+            return None
+
     def capture_recent(self, max_lines: int) -> str:
         """Tail of the screen/history, asking the backend for only that much."""
         fn = getattr(self.backend, "capture_recent", None)

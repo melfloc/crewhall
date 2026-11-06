@@ -48,6 +48,17 @@ class OpsTeams(OpsBase):
         )
         return {"team": self.controller.team_info(team.team_id)}
 
+    def _op_team_set_spawner(self, request: dict[str, Any]) -> dict[str, Any]:
+        team = self.controller.set_team_spawner(
+            request["target"], request.get("agent"),
+            children_action=request.get("children_action"),
+        )
+        return {"team": self.controller.team_info(team.team_id)}
+
+    def _op_team_approve_agent_profiles(self, request: dict[str, Any]) -> dict[str, Any]:
+        team = self.controller.approve_team_agent_profiles(request["target"])
+        return {"team": self.controller.team_info(team.team_id)}
+
     def _op_team_remove(self, request: dict[str, Any]) -> dict[str, Any]:
         team = self.controller.remove_team(request["target"])
         return {"team": team.to_dict()}

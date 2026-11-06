@@ -174,6 +174,39 @@ def session_viewport(model: AppModel, width: int, height: int) -> tuple[int, int
     return right, rows
 
 
+def cursor_position(
+    model: AppModel, width: int, height: int
+) -> tuple[int, int] | None:
+    """Where to draw the terminal cursor for Interactive Focus.
+
+    The agent's pane and the right-hand pane share the same size (the UI sends
+    the viewport to the agent), so the backend's ``(column, row)`` maps directly
+    into the transcript area. ``None`` hides the cursor: modal input has its own
+    caret, and a scrolled transcript no longer matches the pane.
+    """
+    if model.focus != "interactive" or model.modal is not None or not model.connected:
+        return None
+    if not model.follow or model.cursor_pos is None:
+        return None
+    agent = model.selected_agent()
+    if agent is None or agent["state"] in TERMINAL_STATES:
+        return None
+    if width < MIN_W or height < MIN_H:
+        return None
+
+    left_w = _sidebar_width(width)
+    right_w = width - left_w - 1
+    body_h = max(1, height - 4)
+    head = _session_head(model, right_w, body_h)
+    rows = max(1, body_h - len(head) - 1)
+    x, y = model.cursor_pos
+    row = 2 + len(head) + 1 + y
+    column = left_w + 1 + x
+    if 0 <= x < right_w and 0 <= y < rows and row < height - 2:
+        return row, column
+    return None
+
+
 def _session(model: AppModel, width: int, height: int) -> list[Line]:
     lines: list[Line] = [
         [(text, style) for text, style in line]
@@ -287,7 +320,8 @@ def _modal_lines(model: AppModel, width: int) -> list[Segment]:
     if modal.kind in ("help", "activity", "agent_info"):
         body.extend(_window(modal.lines, modal.index, 16))
     elif modal.kind == "palette":
-        body.append(f"> {modal.fields[0].value}")
+        query = modal.fields[0]
+        body.append(f"> {_text_window(query.value, query.cursor, max(1, width - 5))}")
         body.append("")
         commands = model.filtered_commands()
         sel = min(modal.index, len(commands) - 1) if commands else -1
@@ -308,7 +342,7 @@ def _modal_lines(model: AppModel, width: int) -> list[Segment]:
         right = "[ Cancel ]" if modal.button == 1 else "  Cancel  "
         body.append(f"        {left}      {right}")
     else:
-        body.extend(_form_lines(model, modal))
+        body.extend(_form_lines(model, modal, width))
         body.append("")
         body.append("      [ Enter: submit ]   [ Esc: cancel ]")
 
@@ -326,13 +360,40 @@ def _window(lines: list[str], index: int, height: int) -> list[str]:
     return lines[start : start + height]
 
 
-def _form_lines(model: AppModel, modal: Modal) -> list[str]:
+CARET = "\u258f"  # thin vertical bar, one terminal cell
+
+
+def _text_window(value: str, cursor: int, width: int) -> str:
+    """Show the part of ``value`` around ``cursor`` with a visible caret.
+
+    Text fields can hold long values (a working directory, for example): the
+    window scrolls so the caret never falls outside the modal.
+    """
+    if width <= 0:
+        return ""
+    cursor = max(0, min(cursor, len(value)))
+    slots = max(0, width - 1)  # the caret itself occupies one cell
+    start = max(0, cursor - slots // 2)
+    end = min(len(value), start + slots)
+    start = max(0, end - slots)
+    segment = value[start:end]
+    at = max(0, min(cursor - start, len(segment)))
+    return segment[:at] + CARET + segment[at:]
+
+
+def _form_lines(model: AppModel, modal: Modal, width: int) -> list[str]:
     out: list[str] = []
+    text_width = max(1, width - 3)  # box borders + the leading space
     for i, f in enumerate(modal.fields):
         marker = "\u25b8" if i == modal.focus else " "
         if f.type == "text":
-            value = f.value if f.editable else f"{f.value} (fixed)"
-            out.append(f"{marker} {f.label}: {value}")
+            if f.editable and i == modal.focus:
+                prefix = f"{marker} {f.label}: "
+                available = max(1, text_width - len(prefix))
+                out.append(prefix + _text_window(f.value, f.cursor, available))
+            else:
+                value = f.value if f.editable else f"{f.value} (fixed)"
+                out.append(f"{marker} {f.label}: {value}")
         elif f.type == "select":
             current = f.options[min(f.index, len(f.options) - 1)] if f.options else "(none)"
             if f.name == "backend":

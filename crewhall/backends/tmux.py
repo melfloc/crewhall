@@ -314,6 +314,29 @@ class TmuxBackend(Backend):
             return ""
         return proc.stdout
 
+    def cursor(self) -> tuple[int, int] | None:
+        """Cursor cell reported by tmux, or ``None`` when it is hidden.
+
+        ``cursor_flag`` lets the UI respect an app that deliberately hides the
+        cursor (for example an agent that is working instead of waiting for
+        input).
+        """
+        if not self.tmux_name:
+            return None
+        proc = self._run(
+            "display-message", "-p", "-t", self._target(),
+            "#{cursor_x} #{cursor_y} #{cursor_flag}",
+        )
+        if proc.returncode != 0:
+            return None
+        parts = proc.stdout.strip().split()
+        if len(parts) != 3 or not all(part.isdigit() for part in parts):
+            return None
+        x, y, visible = (int(part) for part in parts)
+        if not visible:
+            return None
+        return x, y
+
     def capture_recent(self, max_lines: int) -> str:
         """Capture only the tail: do not ship the whole scrollback over SSH."""
         if not self.tmux_name:

@@ -32,8 +32,7 @@ class Team:
     A Team is identity (``team_id``) + name + a set of ``agent_id`` references,
     optionally a shared **workspace** (a directory used as the default cwd for
     its members). It stores references to agents, never Harness instances,
-    sessions, pids or panes. It is not a workflow, not a role model and not an
-    orchestrator.
+    sessions, pids or panes. A Team may name one member as its agent spawner.
     """
 
     team_id: str
@@ -48,6 +47,10 @@ class Team:
     # Members with authority over the team (a subset of ``agent_ids``). Leads may
     # interrupt/signal/restart the team's members. Empty = no leads (old state).
     leads: tuple[str, ...] = ()
+    # The one member allowed to create worker agents for this team.
+    spawner_id: str | None = None
+    # Operator-approved project agent catalog (manifest plus native definitions).
+    spawner_catalog_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +62,8 @@ class Team:
             "workspace_mode": self.workspace_mode,
             "host": self.host,
             "leads": list(self.leads),
+            "spawner_id": self.spawner_id,
+            "spawner_catalog_sha256": self.spawner_catalog_sha256,
         }
 
 
@@ -192,6 +197,8 @@ class TeamRegistry:
                 workspace_mode=team.workspace_mode,
                 host=new_host,
                 leads=team.leads,
+                spawner_id=team.spawner_id,
+                spawner_catalog_sha256=team.spawner_catalog_sha256,
             )
             self._teams[team.team_id] = updated
             return updated
@@ -219,9 +226,38 @@ class TeamRegistry:
                     f"agent {target_agent!r} is not a member of team "
                     f"{team.team_id}"
                 )
+            if team.spawner_id == agent_id:
+                raise TeamError("assign a replacement spawner before removing this team member")
             remaining = tuple(a for a in team.agent_ids if a != agent_id)
             # Removing a member also removes it from the leads.
-            return self._replace(team, remaining, tuple(lead for lead in team.leads if lead != agent_id))
+            return self._replace(
+                team, remaining,
+                tuple(lead for lead in team.leads if lead != agent_id),
+            )
+
+    def set_spawner(
+        self,
+        target_team: str,
+        target_agent: str | None,
+        *,
+        catalog_sha256: str | None = None,
+    ) -> Team:
+        """Assign the team's single spawner, which must already be a member."""
+        with self._lock:
+            team = self.get(target_team)
+            spawner_id = None
+            if target_agent:
+                agent_id = self._resolve_member_id(team, target_agent)
+                if agent_id not in team.agent_ids:
+                    raise TeamError(f"spawner {target_agent!r} must belong to the team")
+                for other in self._teams.values():
+                    if other.team_id != team.team_id and other.spawner_id == agent_id:
+                        raise TeamError("an agent can be the spawner for only one team")
+                spawner_id = agent_id
+            return self._replace(
+                team, team.agent_ids, spawner_id=spawner_id,
+                spawner_catalog_sha256=catalog_sha256,
+            )
 
     def set_leads(
         self, target_team: str, agents: list[str] | tuple[str, ...]
@@ -235,9 +271,20 @@ class TeamRegistry:
     def _replace(
         self, team: Team, agent_ids: tuple[str, ...],
         leads: tuple[str, ...] | None = None,
+        spawner_id: Any = KEEP,
+        spawner_catalog_sha256: Any = KEEP,
     ) -> Team:
         if leads is None:
             leads = tuple(lead for lead in team.leads if lead in agent_ids)
+        if spawner_id is KEEP:
+            spawner_id = team.spawner_id
+        if spawner_catalog_sha256 is KEEP:
+            spawner_catalog_sha256 = (
+                team.spawner_catalog_sha256 if spawner_id == team.spawner_id else None
+            )
+        if spawner_id not in agent_ids:
+            spawner_id = None
+            spawner_catalog_sha256 = None
         updated = Team(
             team_id=team.team_id,
             name=team.name,
@@ -247,6 +294,8 @@ class TeamRegistry:
             workspace_mode=team.workspace_mode,
             host=team.host,
             leads=tuple(lead for lead in leads if lead in agent_ids),
+            spawner_id=spawner_id,
+            spawner_catalog_sha256=spawner_catalog_sha256,
         )
         self._teams[team.team_id] = updated
         return updated

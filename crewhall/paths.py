@@ -221,9 +221,9 @@ def ensure_control_token() -> str:
     """Return the control token, creating a fresh 0600 one atomically.
 
     The token is *not* injected into agents' environment: it lives only in a
-    file under the state dir. Combined with the daemon's peer-credential check,
-    an agent process (which runs as the same user) cannot use it to reach the
-    control plane.
+    file under the state dir. The daemon also checks peer credentials and
+    process ancestry, but same-user agents are not isolated from this file by
+    Unix permissions; those checks are defense in depth, not a hard boundary.
     """
     import secrets
     import tempfile
