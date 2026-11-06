@@ -7,6 +7,8 @@ to run without it and ships these notes with the release.
 
 ## [Unreleased]
 
+## [0.87.0] — 2026-11-06
+
 - Seguridad: los Teams locales compartidos pueden asignar un spawner con perfiles
   de proyecto aprobados explícitamente, límites persistentes de hijos vivos y
   creaciones en 24 horas, y autorización de proceso ligada a pidfd. No requiere
