@@ -1630,13 +1630,18 @@ class ServicesAgents:
         workspace_mode: str | None = None,
         host: str | None = None,
         conversation: str | None = None,
+        created_by: str | None = None,
+        args_are_effective: bool = False,
     ) -> Harness:
         harness_cls = get_harness(kind)
         if not settings.provider_enabled(kind):
             raise ValueError(f"provider {kind!r} is disabled in Settings")
         self._assert_no_mixed_opencode_db(kind)
         given = parse_agent_args(args)
-        extra_args = [*settings.provider_args(kind, given), *given]  # provider defaults first
+        extra_args = (
+            given if args_are_effective
+            else [*settings.provider_args(kind, given), *given]
+        )  # provider defaults first
         team_obj = self._team_or_none(team)
         if team_obj is not None and team_obj.host:
             # A remote team: its agents run on its host, in its directory.
@@ -1771,7 +1776,32 @@ class ServicesAgents:
         )
         if created_at is not None:
             session.created_at = created_at
-        session.start()
+        if created_by:
+            # Persist creator ownership before launching the process. If the
+            # daemon crashes after tmux starts, startup adoption can still
+            # associate the surviving pane with its creator.
+            if self._store is None:
+                raise ValueError("agent-controlled creation requires persistent state")
+            self._agent_creators[session_id] = created_by
+            self._persist()
+            saved_creators = self._store.load().get("agent_creators", {})
+            if not isinstance(saved_creators, dict) or saved_creators.get(session_id) != created_by:
+                self._agent_creators.pop(session_id, None)
+                raise ValueError("could not persist agent creator ownership; creation cancelled")
+        try:
+            session.start()
+        except Exception:
+            if created_by:
+                # A backend can fail after creating a tmux session. Release the
+                # reservation only when it can confirm the process has exited;
+                # otherwise keep ownership recorded for startup adoption.
+                try:
+                    if session.backend.poll() is not None:
+                        self._agent_creators.pop(session_id, None)
+                        self._persist()
+                except Exception:  # noqa: BLE001 - uncertain state stays reserved
+                    pass
+            raise
         self.registry.add(session)
         harness = harness_cls(session, name=name)
         harness.conversation_id = conversation_id
@@ -1830,15 +1860,16 @@ class ServicesAgents:
         if not token or self._agent_tokens.get(agent_id) != token:
             raise MessagingError("invalid agent identity/token")
 
-    def agent_root_pids(self) -> set[int]:
+    def agent_root_pids_by_id(self) -> dict[str, set[int]]:
         """PIDs of the live agent TUIs (the roots of their process trees).
 
         The daemon uses this to recognise a caller that descends from an agent
         (via ``SO_PEERCRED`` + the ``/proc`` ancestry) and lock it out of the
         control plane, whatever credentials it presents.
         """
-        pids: set[int] = set()
+        roots: dict[str, set[int]] = {}
         for harness in self.agents.all():
+            pids: set[int] = set()
             try:
                 if harness.session.status.alive and harness.session.pid:
                     pids.add(int(harness.session.pid))
@@ -1849,7 +1880,15 @@ class ServicesAgents:
             server = self._opencode_servers.get(harness.agent_id)
             if server is not None and server.poll() is None:
                 pids.add(int(server.pid))
-        return pids
+            if pids:
+                roots[harness.agent_id] = pids
+        return roots
+
+    def agent_root_pids(self) -> set[int]:
+        """All live TUI and private-server roots, for broad agent detection."""
+        return {
+            pid for roots in self.agent_root_pids_by_id().values() for pid in roots
+        }
 
     def agent_tokens(self) -> list[str]:
         """Live agent identity tokens (the daemon matches a caller's environ)."""
@@ -2073,6 +2112,29 @@ class ServicesAgents:
         return self.agent_summary(harness)
 
     def remove_agent(self, target: str, force: bool = False) -> AgentInfo:
+        policy = getattr(self, "_agent_spawn_policy", None)
+        teams = getattr(self, "teams", None)
+        if policy is None or teams is None:
+            return self._remove_agent_unchecked(target, force)
+        with policy.lock, teams._lock:
+            harness = self.agents.resolve(target)
+            for team in teams.list():
+                if team.spawner_id != harness.agent_id:
+                    continue
+                children = policy.child_ids(self, harness.agent_id)
+                if children:
+                    raise ValueError(
+                        f"cannot remove spawner {harness.name or harness.agent_id!r}: "
+                        f"it still owns {len(children)} worker agent(s); transfer them "
+                        "to a replacement spawner or stop and remove them first"
+                    )
+                raise ValueError(
+                    f"cannot remove spawner {harness.name or harness.agent_id!r}: "
+                    "assign a replacement spawner for the Team first"
+                )
+            return self._remove_agent_unchecked(harness.agent_id, force)
+
+    def _remove_agent_unchecked(self, target: str, force: bool = False) -> AgentInfo:
         harness = self.agents.resolve(target)
         agent_id = harness.agent_id
         info = harness.info()
@@ -2090,6 +2152,7 @@ class ServicesAgents:
         except Exception:  # noqa: BLE001
             log.debug("ignored exception in a boundary guard", exc_info=True)
         self._agent_args.pop(agent_id, None)
+        self._agent_creators.pop(agent_id, None)
         self._kill_opencode_server(self._opencode_servers.pop(agent_id, None))
         self._opencode_links.pop(agent_id, None)
         self._v2_config.pop(agent_id, None)

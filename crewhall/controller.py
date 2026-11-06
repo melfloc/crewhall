@@ -162,6 +162,13 @@ class Controller(ServicesAgents, ServicesMessaging, ServicesProcesses, ServicesS
         self.teams = TeamRegistry(self.agents)
         self.teams.remote_validator = self._verify_remote_dir
         self._agent_tokens: dict[str, str] = {}
+        # Creator identity for agents launched through the agent-spawn policy.
+        # This is metadata, not a process-isolation boundary.
+        self._agent_creators: dict[str, str] = {}
+        self._agent_creation_events: dict[str, list[float]] = {}
+        from .spawn_policy import AgentSpawnPolicy
+
+        self._agent_spawn_policy = AgentSpawnPolicy.from_settings()
         self._base_env: dict[str, dict[str, str]] = {}
         # Extra CLI arguments per agent (e.g. ``--agent reviewer``), kept so a
         # restored/restarted agent is relaunched with the same command line.

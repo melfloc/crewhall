@@ -99,6 +99,14 @@ def _validate(item: dict[str, Any], value: Any) -> Any:
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise SettingsError(f"{item['key']}: a list of text lines expected")
         value = [v.strip() for v in value if v.strip()]
+        if item["key"].startswith("agent_spawn."):
+            if len(value) > 50 or any(
+                len(v) > 200 or any(ord(char) < 32 for char in v) for v in value
+            ):
+                raise SettingsError(f"{item['key']}: up to 50 names of at most 200 characters")
+            if len(set(value)) != len(value):
+                raise SettingsError(f"{item['key']}: duplicate names are not allowed")
+            return value
         if len(value) > 50 or any(len(v) > 253 or any(c in v for c in " /\\@") for v in value):
             raise SettingsError(f"{item['key']}: up to 50 plain hostnames")
         return value

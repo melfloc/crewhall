@@ -901,8 +901,9 @@ WebSocket lo usa para el panel de salida.
   input en pantalla (p. ej. `WORKING`), para no cortar la salida por error.
 - Gestión de Teams/agentes desde el Web UI: `+ member`, `- member`, `workspace`,
   `delete` por Team; `delete agent` en la cabecera del agente.
-- La renderización fiel del TUI (colores/cursor) con un emulador (pyte) queda para una
-  fase futura; hoy el transcript es texto (misma limitación de capture que la TUI).
+- La renderización fiel del TUI (colores y repintados) con un emulador (pyte) queda para
+  una fase futura; hoy el transcript es texto y en Interactive Focus se muestra el cursor
+  real del pane de tmux.
 
 ### Herramientas del composer
 

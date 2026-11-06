@@ -15,6 +15,41 @@ from .common import OpsBase, PERMISSION_GRACE, PERMISSION_WAIT, PERMISSION_WAIT_
 class OpsAgents(OpsBase):
 
     def _op_agent_create(self, request: dict[str, Any]) -> dict[str, Any]:
+        sender = request.get("sender")
+        if sender:
+            creator = self.controller.agents.resolve(str(sender))
+            if creator.agent_id != sender:
+                raise ValueError("the sender must be the caller's exact agent id")
+            self.controller._check_token(creator.agent_id, request.get("token"))
+            policy = self.controller._agent_spawn_policy
+            with policy.lock, self.controller.teams._lock:
+                approved = policy.create_request(self.controller, creator, request)
+                policy.check_create_slot(self.controller, creator.agent_id)
+                policy.reserve_create(self.controller, creator.agent_id)
+                # Record the server-selected values for the audit line. All
+                # execution fields come from the approved profile, never the
+                # agent's request.
+                request["kind"] = approved["kind"]
+                request["team"] = self.controller.teams.get(approved["team"]).name
+                request["profile"] = approved["profile"]
+                request["profile_sha256"] = approved["profile_sha256"]
+                harness = self.controller.create_agent(
+                    approved["kind"],
+                    name=approved["name"],
+                    backend=approved["backend"],
+                    cwd=approved["cwd"],
+                    team=approved["team"],
+                    cols=_dim(approved["cols"], "cols"),
+                    rows=_dim(approved["rows"], "rows"),
+                    wait_ready=False,
+                    args=approved["args"],
+                    workspace_mode=approved["workspace_mode"],
+                    host=None,
+                    created_by=approved["created_by"],
+                    args_are_effective=True,
+                )
+            return {"agent": self.controller.agent_summary(harness)}
+
         team = request.get("team")
         if request.get("conversation") and not team:
             # A chat with a crew: its lead joins the Team (isolation of its cwd is
@@ -29,21 +64,44 @@ class OpsAgents(OpsBase):
                     team = None
             except Exception:  # noqa: BLE001 - unknown conversation/team: no crew
                 team = None
-        harness = self.controller.create_agent(
-            request["kind"],
-            name=request.get("name"),
-            backend=request.get("backend"),
-            cwd=request.get("cwd"),
-            team=team,
-            cols=_dim(request.get("cols", 120), "cols"),
-            rows=_dim(request.get("rows", 40), "rows"),
-            wait_ready=bool(request.get("wait_ready", False)),
-            timeout=float(request.get("timeout", 30.0)),
-            args=request.get("args"),
-            workspace_mode=request.get("workspace_mode"),
-            host=request.get("host"),
-            conversation=request.get("conversation"),
-        )
+        create_params = {
+            "kind": request["kind"],
+            "name": request.get("name"),
+            "backend": request.get("backend"),
+            "cwd": request.get("cwd"),
+            "team": team,
+            "cols": _dim(request.get("cols", 120), "cols"),
+            "rows": _dim(request.get("rows", 40), "rows"),
+            "wait_ready": bool(request.get("wait_ready", False)),
+            "timeout": float(request.get("timeout", 30.0)),
+            "args": request.get("args"),
+            "workspace_mode": request.get("workspace_mode"),
+            "host": request.get("host"),
+            "conversation": request.get("conversation"),
+        }
+        spawner_for_team = request.get("spawner_for_team")
+        if spawner_for_team:
+            if request.get("conversation"):
+                raise ValueError("a conversation agent cannot be assigned as a team spawner")
+            policy = self.controller._agent_spawn_policy
+            with policy.lock, self.controller.teams._lock:
+                spawner_team = self.controller.teams.get(str(spawner_for_team))
+                if team and self.controller.teams.get(str(team)).team_id != spawner_team.team_id:
+                    raise ValueError("the new spawner must belong to the selected team")
+                if spawner_team.spawner_id:
+                    raise ValueError("this team already has a spawner; replace it from team actions")
+                if (spawner_team.host
+                        or getattr(spawner_team, "workspace_mode", None) == "worktree"):
+                    raise ValueError("spawners require a local team with a shared workspace")
+                if request.get("host"):
+                    raise ValueError("the team spawner must run on this machine")
+                if request.get("workspace_mode") == "worktree":
+                    raise ValueError("the team spawner must use the shared workspace")
+                create_params["team"] = spawner_team.team_id
+                harness = self.controller.create_agent(**create_params)
+                self.controller.set_team_spawner(spawner_team.team_id, harness.agent_id)
+        else:
+            harness = self.controller.create_agent(**create_params)
         if request.get("conversation"):
             from .. import chat as conversations
 
@@ -246,6 +304,10 @@ class OpsAgents(OpsBase):
             else harness.capture()
         )
         response: dict[str, Any] = {"output": output}
+        if request.get("cursor"):
+            cursor = harness.cursor()
+            if cursor is not None:
+                response["cursor"] = {"x": cursor[0], "y": cursor[1]}
         if request.get("summary"):
             response["agent"] = self.controller.agent_summary(harness)
         return response
@@ -306,6 +368,18 @@ class OpsAgents(OpsBase):
         )
 
     def _op_agent_stop(self, request: dict[str, Any]) -> dict[str, Any]:
+        sender = request.get("sender")
+        if sender:
+            creator = self.controller.agents.resolve(str(sender))
+            if creator.agent_id != sender:
+                raise ValueError("the sender must be the caller's exact agent id")
+            self.controller._check_token(creator.agent_id, request.get("token"))
+            policy = self.controller._agent_spawn_policy
+            with policy.lock:
+                child = policy.authorize_stop(
+                    self.controller, creator, str(request.get("target") or ""))
+                info = self.controller.remove_agent(child.agent_id, force=False)
+            return {"agent": info.to_dict()}
         info = self.controller.remove_agent(
             request["target"], force=bool(request.get("force", False))
         )

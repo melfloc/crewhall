@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "profiles": {
+    "ejecutor": {
+      "description": "Implementa tareas de código y pruebas en crewhall siguiendo las convenciones del proyecto.",
+      "provider": "opencode",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "agent": "ejecutor",
+      "effort": "high"
+    }
+  }
+}

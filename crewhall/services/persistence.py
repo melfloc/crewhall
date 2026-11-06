@@ -46,6 +46,29 @@ class ServicesPersistence:
         if self._store is None:
             return
         data = self._store.load()
+        stored_creators = data.get("agent_creators")
+        if isinstance(stored_creators, dict):
+            self._agent_creators.update({
+                agent_id: creator_id
+                for agent_id, creator_id in stored_creators.items()
+                if isinstance(agent_id, str) and isinstance(creator_id, str)
+            })
+        stored_events = data.get("agent_creation_events")
+        if isinstance(stored_events, dict):
+            now = time.time()
+            for agent_id, values in stored_events.items():
+                if not isinstance(agent_id, str) or not isinstance(values, list):
+                    continue
+                clean: list[float] = []
+                for value in values[-1000:]:
+                    try:
+                        at = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if now - 86400 < at <= now + 60:
+                        clean.append(at)
+                if clean:
+                    self._agent_creation_events[agent_id] = clean
         if self._token_store is not None:
             # Before the agents: a tmux agent that survived the restart still
             # carries its old token, so it must stay valid (Fase A1).
@@ -71,6 +94,12 @@ class ServicesPersistence:
                 self._restore_agent(agent)
             except Exception:  # noqa: BLE001 - best-effort: a failure here is non-fatal (B1 audit)
                 continue
+        registered_ids = {h.agent_id for h in self.agents.all()}
+        for agent_id in list(self._agent_creators):
+            # Drop reservations that never became an adopted or persisted agent.
+            # A surviving tmux pane is registered before this reconciliation.
+            if agent_id not in registered_ids:
+                self._agent_creators.pop(agent_id, None)
         try:
             self.requests.load(data.get("requests", []))
         except Exception:  # noqa: BLE001 - a bad row must not stop the daemon
@@ -100,6 +129,19 @@ class ServicesPersistence:
                 self.teams.set_leads(team["team_id"], list(leads))
             except Exception:  # noqa: BLE001 - a stale lead is skipped
                 log.debug("could not restore leads of %s", team.get("team_id"), exc_info=True)
+        # A spawner must be restored only after its team memberships exist.
+        for team in data.get("teams", []):
+            spawner_id = team.get("spawner_id")
+            if not spawner_id:
+                continue
+            try:
+                digest = team.get("spawner_catalog_sha256")
+                self.teams.set_spawner(
+                    team["team_id"], str(spawner_id),
+                    catalog_sha256=digest if isinstance(digest, str) else None,
+                )
+            except Exception:  # noqa: BLE001 - stale/non-member spawners lose authority
+                log.debug("could not restore spawner of %s", team.get("team_id"), exc_info=True)
         # Resume messages that were still queued when the daemon stopped. The
         # recipients exist as EXITED entities; the queue worker revives them.
         if self._pending_store is not None:
@@ -118,7 +160,13 @@ class ServicesPersistence:
     def _restore_agent(self, agent: dict[str, Any]) -> None:
         agent_id = agent["agent_id"]
         if any(h.agent_id == agent_id for h in self.agents.all()):
+            creator_id = agent.get("created_by")
+            if isinstance(creator_id, str):
+                self._agent_creators.setdefault(agent_id, creator_id)
             return
+        creator_id = agent.get("created_by")
+        if isinstance(creator_id, str):
+            self._agent_creators.setdefault(agent_id, creator_id)
         harness_cls = get_harness(agent["kind"])
         extra_args = parse_agent_args(agent.get("args"))
         self._agent_args[agent_id] = extra_args
@@ -274,6 +322,16 @@ class ServicesPersistence:
         return revived
 
     def restart_agent(self, target: str) -> Harness:
+        """Restart an agent if its creator still has room under max_live."""
+        policy = getattr(self, "_agent_spawn_policy", None)
+        if policy is None:
+            return self._restart_agent_locked(target)
+        with policy.lock:
+            harness = self.agents.resolve(target)
+            policy.check_restart_slot(self, harness)
+            return self._restart_agent_locked(harness.agent_id)
+
+    def _restart_agent_locked(self, target: str) -> Harness:
         """Restart the process of a registered agent, preserving its identity."""
         harness = self.agents.resolve(target)
         agent_id = harness.agent_id

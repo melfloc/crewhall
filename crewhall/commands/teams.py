@@ -102,3 +102,11 @@ def cmd_team_set_leads(args: argparse.Namespace) -> int:
     )["team"]
     _print_team(team)
     return 0
+
+
+def cmd_team_approve_profiles(args: argparse.Namespace) -> int:
+    team = common._client(args).call(
+        "team_approve_agent_profiles", target=args.target
+    )["team"]
+    _print_team(team)
+    return 0

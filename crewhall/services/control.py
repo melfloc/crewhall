@@ -84,6 +84,20 @@ class ServicesControl:
         self, target: str, *, fresh: bool = False, reason: str | None = None,
         by: str = "user", timeout: float = 30.0,
     ) -> dict[str, Any]:
+        policy = getattr(self, "_agent_spawn_policy", None)
+        if policy is None:
+            return self._force_restart_agent_locked(
+                target, fresh=fresh, reason=reason, by=by, timeout=timeout)
+        with policy.lock:
+            harness = self.agents.resolve(target)
+            policy.check_restart_slot(self, harness)
+            return self._force_restart_agent_locked(
+                harness.agent_id, fresh=fresh, reason=reason, by=by, timeout=timeout)
+
+    def _force_restart_agent_locked(
+        self, target: str, *, fresh: bool = False, reason: str | None = None,
+        by: str = "user", timeout: float = 30.0,
+    ) -> dict[str, Any]:
         harness = self.agents.resolve(target)
         # Restart is never gated: it is exactly what relaunches the agent on the
         # compatible binary (the version report is recalculated afterwards).

@@ -715,9 +715,10 @@ política de Host/Origin. Las ops marcadas **audit** escriben una línea en `sta
 |---|---|---|---|
 | `ping`, `meta_info`, `agent_list`, `agent_info`, `agent_state`, `team_list`, `team_info`, `team_members`, `message_history`, `interaction_list`, `agent_history`, `agent_transcript`, `agent_capture`, `agent_processes`, `agent_process_output`, `agent_archive_list`, `agent_archive_get`, `bundle_list`, `settings_get`, `provider_check`, `frontend_status`, `update_status`, `clean_plan`, `reset_plan` | web (local/tailscale autenticado) y CLI local | — | Bajo: solo lectura del plano de control. |
 | `fs_complete` | web/CLI | **sí** (incluye rechazos) | Bajo-medio: revela **nombres** de directorios, acotado a `security.fs_roots` + workspaces/cwd; sin ficheros ni contenido; con tope y límite de frecuencia. |
-| `agent_create`, `agent_send`, `agent_write`, `agent_key`, `agent_resize`, `agent_interrupt`, `agent_stop`, `agent_new_session` | web/CLI | `agent_create`, `agent_send`, `agent_stop`, `agent_new_session` | Alto: lanza procesos/inyecta entrada. No acepta diálogos de confianza ni flags peligrosos. |
+| `agent_create`, `agent_stop` | web/CLI; también un agente autorizado por `agent_spawn` | **sí**, incluidos rechazos de la ruta de agente | Alto: la ruta de agente exige identidad ligada a su proceso, Team y perfil aprobados; solo permite detener hijos propios. |
+| `agent_send`, `agent_write`, `agent_key`, `agent_resize`, `agent_interrupt`, `agent_new_session` | web/CLI; las ops de agente siguen las reglas de identidad y Team | `agent_send`, `agent_new_session` | Alto: inyecta entrada o cambia una sesión. |
 | `message_send`, `team_send` | web/CLI (y agentes con su token) | **sí** | Medio: mensajería limitada por Team; identidad autoritativa por token. |
-| `team_create`, `team_up`, `team_set_workspace`, `team_add_member`, `team_remove_member`, `team_remove` | web/CLI | **sí** | Medio: reorganiza equipos; no borra proyectos. |
+| `team_create`, `team_up`, `team_set_workspace`, `team_set_spawner`, `team_add_member`, `team_remove_member`, `team_remove` | web/CLI | **sí** | Medio: reorganiza equipos; no borra proyectos. |
 | `interaction_respond`, `agent_process_signal` | web/CLI | **sí** | Alto: responde a permisos de agentes / señala procesos; queda auditado con `by`. |
 | `settings_set`, `settings_reset` | web/CLI | **sí** (claves; hash corto si es sensible) | Alto: cambia binarios/entorno de proveedor (**exige `CONFIRM`**), política de red y de acceso. |
 | `frontend_set` | web/CLI (la Web UI no puede apagar el Web UI) | **sí** | Medio-alto: abre/cierra listeners; reinicia la superficie de red. |
@@ -728,3 +729,23 @@ política de Host/Origin. Las ops marcadas **audit** escriben una línea en `sta
 
 Regla: ninguna op con efecto (escritura, proceso, red o borrado) se expone sin autenticación ni
 auditoría. Las ops solo-lectura no se auditan para no inundar el registro.
+
+Cada Team local de espacio compartido puede tener un solo `spawner_id`, que debe ser uno de
+sus miembros y se guarda junto con el Team. Solo ese miembro puede pedir a Crewhall crear
+ejecutores; el daemon liga la identidad del RPC a un `SO_PEERPIDFD` del proceso conectado y
+vuelve a comprobar la pertenencia al Team, el perfil aprobado y los límites. El perfil se lee
+de `cwh-agents.json` dentro del workspace del Team (o de la carpeta del spawner si no hay
+workspace explícito). Una aprobación explícita del operador fija el hash del catálogo, que
+incluye el manifiesto y las definiciones nativas referenciadas; los cambios requieren aprobarse
+de nuevo. Se aceptan solo proveedores, campos y flags definidos por el esquema. `max_live`
+limita hijos vivos por spawner; `max_created_per_day` limita reservas de creación en 24 horas,
+incluidos intentos fallidos. Son límites de cantidad, no de coste o tokens. `cwh-agent.md` se
+crea al crear un Team local con workspace, únicamente si todavía no existe. El equipo no
+permite retirar su spawner sin asignar primero un reemplazo; con hijos activos, la operación
+exige transferirlos o detenerlos y quitarlos.
+
+No se requiere sandbox de sistema operativo para habilitar el spawner. Esto controla las
+operaciones que pasan por Crewhall: los agentes comparten el UID del daemon y pueden invocar
+directamente un CLI, usar el tmux compartido, leer archivos permitidos a ese UID o detener el
+daemon. El aislamiento por UID, contenedor, VM o sandbox del proveedor es una decisión opcional
+de despliegue para ejecutar código no confiable y queda fuera de esta política.

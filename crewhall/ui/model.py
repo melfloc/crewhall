@@ -192,6 +192,9 @@ class AppModel(UiModals, UiPalette):
         self.teams: list[dict[str, Any]] = []
         self.activity: list[dict[str, Any]] = []
         self.capture_cache: str = ""
+        # Visible cursor cell reported by the agent's terminal (Interactive
+        # Focus). ``None`` when it is hidden, unknown, or the view is scrolled.
+        self.cursor_pos: tuple[int, int] | None = None
 
         self.cursor = 0
         self.collapsed: set[str] = set()
@@ -503,11 +506,21 @@ class AppModel(UiModals, UiPalette):
 
     def _capture_selected(self) -> None:
         agent = self.selected_agent()
-        self.capture_cache = (
-            self.control.capture(agent["agent_id"], recent=True, max_lines=400)
-            if agent is not None
-            else ""
+        if agent is None:
+            self.capture_cache = ""
+            self.cursor_pos = None
+            return
+        if self.focus == "interactive":
+            capture = getattr(self.control, "capture_with_cursor", None)
+            if callable(capture):
+                self.capture_cache, self.cursor_pos = capture(
+                    agent["agent_id"], recent=True, max_lines=400
+                )
+                return
+        self.capture_cache = self.control.capture(
+            agent["agent_id"], recent=True, max_lines=400
         )
+        self.cursor_pos = None
 
     def refresh_capture(self) -> None:
         """Refresh only the selected agent's screen (Interactive Focus echo).
@@ -538,6 +551,7 @@ class AppModel(UiModals, UiPalette):
         if agent is None or agent["state"] in TERMINAL_STATES:
             self.focus = "nav"
             self._last_resize = None
+            self.cursor_pos = None
             if agent is not None:
                 self.status = f"{agent.get('name')} {agent['state']}"
                 self.status_kind = "warning" if agent["state"] == "exited" else "error"
@@ -738,6 +752,7 @@ class AppModel(UiModals, UiPalette):
     def _enter_interactive(self) -> None:
         self.focus = "interactive"
         self._last_resize = None
+        self.cursor_pos = None
 
     def _interactive_key(self, key: str) -> None:
         # Agent Interactive Focus: the agent's own TUI owns the keyboard.
@@ -745,6 +760,7 @@ class AppModel(UiModals, UiPalette):
         if key == "exit_interactive":
             self.focus = "nav"
             self._last_resize = None
+            self.cursor_pos = None
             return
         if key == "interactive_prev":
             self.select_agent_by_offset(-1)
@@ -778,6 +794,7 @@ class AppModel(UiModals, UiPalette):
         self._last_resize = None
         self.follow = True
         self.scroll = 0
+        self.cursor_pos = None
         name = next(
             (a.get("name") for a in self.agents if a["agent_id"] == target_id),
             target_id,
@@ -841,7 +858,7 @@ class AppModel(UiModals, UiPalette):
                 return ["\u2191\u2193 Scroll", "Esc Close"]
             if kind == "confirm":
                 return ["y Delete", "n Cancel", "Esc Cancel"]
-            return ["Tab Next", "Enter Confirm", "Esc Cancel"]
+            return ["Tab Next", "\u2190\u2192 Move", "Enter Confirm", "Esc Cancel"]
         if self.focus == "interactive":
             return ["Ctrl+Alt+J/K Prev/Next", "Ctrl+Alt+B Navigator", "Agent input active"]
         if self.selected_team() is not None:

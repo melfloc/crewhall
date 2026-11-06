@@ -5,6 +5,7 @@ import fcntl
 import json
 import logging
 import os
+import select
 import signal
 import socket
 import struct
@@ -76,6 +77,10 @@ AGENT_OPS = frozenset({
 _AGENT_AUTH_OPS = frozenset({"agent_status", "agent_interrupt", "agent_signal", "agent_restart",
                              "agent_effort"})
 
+# These control-plane operations have a narrow agent-authenticated path governed
+# by AgentSpawnPolicy. They intentionally stay out of the general AGENT_OPS set.
+_AGENT_SPAWN_OPS = frozenset({"agent_create", "agent_stop"})
+
 log = logging.getLogger("crewhall.daemon")
 
 
@@ -125,6 +130,51 @@ def _peer_pid(conn: socket.socket) -> int | None:
     except (OSError, struct.error):
         return None
     return pid or None
+
+
+# Linux added SO_PEERPIDFD after SO_PEERCRED.  Python versions do not expose the
+# constant yet on every supported distro, so keep the documented Linux value.
+_SO_PEERPIDFD = getattr(socket, "SO_PEERPIDFD", 77)
+
+
+def _peer_pidfd(conn: socket.socket) -> int | None:
+    """Return a pidfd for the connected peer, pinning its process identity.
+
+    A PID from SO_PEERCRED can be reused between ``accept`` and a later /proc
+    walk. The pidfd keeps the original process object alive until the request
+    has been authorized and dispatched.
+    """
+    try:
+        raw = conn.getsockopt(socket.SOL_SOCKET, _SO_PEERPIDFD, struct.calcsize("i"))
+        fd = struct.unpack("i", raw)[0]
+        return fd if fd >= 0 else None
+    except (OSError, struct.error):
+        return None
+
+
+def _pidfd_pid(pidfd: int | None) -> int | None:
+    if pidfd is None:
+        return None
+    try:
+        with open(f"/proc/self/fdinfo/{pidfd}", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("Pid:"):
+                    value = int(line.split(":", 1)[1].strip())
+                    return value if value > 0 else None
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _pidfd_alive(pidfd: int | None) -> bool:
+    if pidfd is None:
+        return False
+    try:
+        poller = select.poll()
+        poller.register(pidfd, select.POLLIN | select.POLLHUP | select.POLLERR)
+        return not poller.poll(0)
+    except OSError:
+        return False
 
 
 def take_singleton_lock() -> Any:
@@ -390,6 +440,13 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
                 self._sock.close()
     def _handle(self, conn: socket.socket) -> None:
         peer_pid = _peer_pid(conn)
+        peer_pidfd = _peer_pidfd(conn)
+        # If the kernel supplied a pidfd, the PID must still refer to that exact
+        # process. Keep the descriptor open until all requests on this connection
+        # have been dispatched.
+        if peer_pidfd is not None and _pidfd_pid(peer_pidfd) != peer_pid:
+            os.close(peer_pidfd)
+            peer_pidfd = None
         try:
             f = conn.makefile("rwb")
             for raw in f:
@@ -403,7 +460,7 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
                     if not isinstance(request, dict):
                         response = {"ok": False, "error": "request must be a JSON object"}
                     else:
-                        denied = self._guard_origin(request, peer_pid)
+                        denied = self._guard_origin(request, peer_pid, peer_pidfd)
                         response = denied if denied is not None else self.dispatch(request)
                 f.write((json.dumps(response) + "\n").encode("utf-8"))
                 f.flush()
@@ -411,7 +468,10 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             pass
         finally:
             conn.close()
-    def _caller_is_agent(self, peer_pid: int | None) -> bool:
+            if peer_pidfd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(peer_pidfd)
+    def _caller_is_agent(self, peer_pid: int | None, peer_pidfd: int | None = None) -> bool:
         """Whether the peer process looks like an agent or one of its tools.
 
         Agents run as the same Unix user as the daemon, so file permissions alone
@@ -423,11 +483,14 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
         This is **defense in depth, not an isolation boundary**: a process that
         deliberately both escapes the tree (``setsid``/double fork) and scrubs
         its environment can still read the 0600 control-token file, because it
-        runs as the same user. Real isolation needs the agent sandboxed away
-        from the state directory (see SECURITY.md).
+        runs as the same user. This same-user execution risk is accepted for the
+        spawner feature; OS-level isolation is a separate, optional deployment
+        choice (see SECURITY.md).
         """
         if not peer_pid:
             return False
+        if peer_pidfd is not None and _pidfd_pid(peer_pidfd) != peer_pid:
+            return True  # an unverifiable process is never trusted as an operator
         try:
             roots = self.controller.agent_root_pids()
         except Exception:  # noqa: BLE001 - a broken registry is not proof
@@ -437,6 +500,8 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
 
             if set(ancestors(peer_pid)) & roots:
                 return True
+        if peer_pidfd is not None and not _pidfd_alive(peer_pidfd):
+            return True
         return self._environ_has_agent_token(peer_pid)
     def _environ_has_agent_token(self, pid: int) -> bool:
         try:
@@ -456,6 +521,43 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
                     value.decode("utf-8", "replace") in tokens:
                 return True
         return False
+
+    def _peer_bound_to_agent(
+        self, peer_pid: int | None, agent_id: str, peer_pidfd: int | None = None
+    ) -> bool:
+        """Require a spawn/stop RPC to come from the named agent's process tree."""
+        if not peer_pid or peer_pidfd is None or _pidfd_pid(peer_pidfd) != peer_pid:
+            return False
+        try:
+            roots_by_agent = self.controller.agent_root_pids_by_id()
+            own_roots = roots_by_agent.get(agent_id, set())
+            if not own_roots:
+                return False
+            from .processes import ancestors
+
+            chain = set(ancestors(peer_pid))
+            if not (chain & own_roots):
+                return False
+            other_roots = {
+                pid for owner, roots in roots_by_agent.items() if owner != agent_id
+                for pid in roots
+            }
+            return _pidfd_alive(peer_pidfd) and not bool(chain & other_roots)
+        except Exception:  # noqa: BLE001 - inability to prove identity means deny
+            return False
+
+    @staticmethod
+    def _record_spawn_denial(request: dict[str, Any], reason: str) -> None:
+        from . import audit
+
+        op = str(request.get("op") or "agent_create")
+        sender = request.get("sender")
+        actor = f"agent:{sender}" if isinstance(sender, str) else "unknown"
+        audit.record(
+            op, actor=actor, result="denied", summary=reason,
+            rate_limit_agent_denial=True,
+        )
+
     def _agent_office_allowed(self, request: dict[str, Any]) -> bool:
         """An agent drives OnlyOffice only for a chat it leads or crews."""
         sender = request.get("sender")
@@ -467,11 +569,40 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
                 str(sender), request.get("token"), str(conversation_id))
         except Exception:  # noqa: BLE001 - bad identity/conversation: deny
             return False
-    def _guard_origin(self, request: dict[str, Any], peer_pid: int | None) -> dict[str, Any] | None:
+    def _guard_origin(
+        self,
+        request: dict[str, Any],
+        peer_pid: int | None,
+        peer_pidfd: int | None = None,
+    ) -> dict[str, Any] | None:
         """Return a refusal, or None to let the request reach the dispatcher."""
         op = request.get("op")
         if not isinstance(op, str):
             return None  # unknown op is reported by the dispatcher
+        if op in _AGENT_SPAWN_OPS:
+            sender = request.get("sender")
+            token = request.get("token")
+            if sender is not None or token is not None:
+                try:
+                    if not isinstance(sender, str) or not sender or not token:
+                        raise ValueError("missing agent identity")
+                    caller = self.controller.agents.resolve(sender)
+                    if caller.agent_id != sender:
+                        raise ValueError("sender must be the exact agent id")
+                    self.controller._check_token(caller.agent_id, token)
+                except Exception:  # noqa: BLE001 - malformed or stale identity
+                    reason = "agent creation/stopping requires a valid agent identity"
+                    self._record_spawn_denial(request, reason)
+                    return {"ok": False, "error": reason}
+                if not self._peer_bound_to_agent(peer_pid, caller.agent_id, peer_pidfd):
+                    reason = "the request did not come from that agent's process"
+                    self._record_spawn_denial(request, reason)
+                    return {"ok": False, "error": reason}
+                return None
+            if self._caller_is_agent(peer_pid, peer_pidfd):
+                reason = "the control plane is not available to agents"
+                self._record_spawn_denial(request, reason)
+                return {"ok": False, "error": reason}
         allowed_for_agent = op in AGENT_OPS and not (
             op == "request_cancel" and not request.get("agent")
         ) and not (
@@ -484,7 +615,7 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
             if self._agent_office_allowed(request):
                 return None
             return {"ok": False, "error": "permission denied: not this chat's agent or crew"}
-        if self._caller_is_agent(peer_pid):
+        if self._caller_is_agent(peer_pid, peer_pidfd):
             return {"ok": False, "error": "the control plane is not available to agents"}
         token = request.get("_control_token")
         if not self._control_token or token != self._control_token:
@@ -497,12 +628,21 @@ class Server(OpsAgents, OpsTeams, OpsChat, OpsOffice, OpsTerminals, OpsWeb, OpsS
         actor = request.get("_actor", "local")
         if isinstance(actor, dict):
             actor = actor.get("label") or "web"
+        if isinstance(op, str) and op in _AGENT_SPAWN_OPS and isinstance(
+            request.get("sender"), str
+        ):
+            actor = f"agent:{request['sender']}"
         response = self._dispatch(request, op)
         if op in audit.AUDITED:
             audit.record(
                 str(op), actor=str(actor),
                 result="ok" if response.get("ok") else "error",
                 summary=audit.summarize(str(op), request, response if response.get("ok") else None),
+                rate_limit_agent_denial=(
+                    op in _AGENT_SPAWN_OPS
+                    and isinstance(request.get("sender"), str)
+                    and not response.get("ok")
+                ),
             )
         return response
     def _dispatch(self, request: dict[str, Any], op: Any) -> dict[str, Any]:

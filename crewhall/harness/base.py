@@ -527,6 +527,13 @@ class Harness(ABC):
         lines = self.session.capture().splitlines()
         return "\n".join(lines[-max(1, int(max_lines)):])
 
+    def cursor(self) -> tuple[int, int] | None:
+        """Visible cursor cell of the agent's terminal, when the backend knows it."""
+        fn: Callable[[], tuple[int, int] | None] | None = getattr(
+            self.session, "cursor", None
+        )
+        return fn() if callable(fn) else None
+
     def transcript(self) -> str:
         """Captured output with the agent's *own* input area removed.
 

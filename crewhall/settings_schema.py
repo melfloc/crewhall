@@ -36,6 +36,17 @@ def _static_schema() -> list[dict[str, Any]]:
           "Preselected when you create an agent.", choices=_kinds),
         s("agents.default_backend", "agents", "choice", "auto", "Default backend",
           "tmux keeps agents alive and attachable; pty is lighter.", choices=_backends),
+        s("agent_spawn.max_live", "agents", "int", 6,
+          "Max live child agents per spawner",
+          "Caps how many running agents the team's spawner may own. A stopped child also needs "
+          "an available slot to restart.",
+          min=1, max=100),
+        s("agent_spawn.max_created_per_day", "agents", "int", 12,
+          "Max child agents created per day",
+          "Caps agent-controlled spawns per spawner in a rolling 24-hour window, including "
+          "children that have since stopped and failed launch attempts. This is a creation "
+          "count, not a token or cost budget.",
+          min=1, max=1000),
         s("agents.hooks", "agents", "bool", True, "Lifecycle hooks",
           "Lets agents report state and permission requests. Applies to agents created afterwards.",
           env="CREWHALL_HOOKS", restart=True),

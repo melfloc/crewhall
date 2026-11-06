@@ -33,12 +33,20 @@ class StateStore:
             with open(self.path, encoding="utf-8") as fh:
                 data = json.load(fh)
         except FileNotFoundError:
-            return {"schema": SCHEMA_VERSION, "teams": [], "agents": [], "terminals": []}
+            return {
+                "schema": SCHEMA_VERSION, "teams": [], "agents": [],
+                "agent_creators": {}, "agent_creation_events": {}, "terminals": [],
+            }
         except (OSError, json.JSONDecodeError) as exc:
             log.warning("could not read state %s: %s", self.path, exc)
-            return {"schema": SCHEMA_VERSION, "teams": [], "agents": [], "terminals": []}
+            return {
+                "schema": SCHEMA_VERSION, "teams": [], "agents": [],
+                "agent_creators": {}, "agent_creation_events": {}, "terminals": [],
+            }
         data.setdefault("teams", [])
         data.setdefault("agents", [])
+        data.setdefault("agent_creators", {})
+        data.setdefault("agent_creation_events", {})
         data.setdefault("requests", [])
         data.setdefault("terminals", [])
         return data
@@ -71,6 +79,9 @@ class StateStore:
                     "workspace_mode": getattr(team, "workspace_mode", None),
                     "host": getattr(team, "host", None),
                     "leads": list(getattr(team, "leads", ()) or ()),
+                    "spawner_id": getattr(team, "spawner_id", None),
+                    "spawner_catalog_sha256": getattr(
+                        team, "spawner_catalog_sha256", None),
                 }
             )
         agents = []
@@ -79,6 +90,8 @@ class StateStore:
             agents.append(
                 {
                     "agent_id": harness.agent_id,
+                    "created_by": getattr(controller, "_agent_creators", {}).get(
+                        harness.agent_id),
                     "name": harness.name,
                     "kind": harness.kind,
                     "backend": harness.session.backend.name,
@@ -131,8 +144,21 @@ class StateStore:
                 "rows": spec.rows,
                 "created_at": session.created_at,
             })
-        return {"schema": SCHEMA_VERSION, "teams": teams, "agents": agents,
-                "requests": requests, "terminals": terminals}
+        return {
+            "schema": SCHEMA_VERSION,
+            "teams": teams,
+            "agents": agents,
+            # Includes reservations written immediately before a spawn starts;
+            # an adopted pane can recover its creator after a daemon crash.
+            "agent_creators": dict(getattr(controller, "_agent_creators", {}) or {}),
+            "agent_creation_events": {
+                agent_id: list(events)
+                for agent_id, events in getattr(
+                    controller, "_agent_creation_events", {}).items()
+            },
+            "requests": requests,
+            "terminals": terminals,
+        }
 
 
 class PendingQueueStore:

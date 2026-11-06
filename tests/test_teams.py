@@ -27,6 +27,8 @@ class TeamModel(unittest.TestCase):
                 "workspace_mode": None,
                 "host": None,
                 "leads": [],
+                "spawner_id": None,
+                "spawner_catalog_sha256": None,
             },
         )
 

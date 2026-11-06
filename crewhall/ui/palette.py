@@ -65,14 +65,14 @@ class UiPalette:
             modal.index = max(0, modal.index - 1)
         elif key == "down":
             modal.index += 1
-        elif key == "backspace":
-            modal.fields[0].value = modal.fields[0].value[:-1]
-            modal.index = 0
         elif key == "enter":
             self._run_palette()
-        elif len(key) == 1 and key.isprintable():
-            modal.fields[0].value += key
-            modal.index = 0
+        else:
+            field = modal.fields[0]
+            before = field.value
+            self._field_key(field, key)
+            if field.value != before:
+                modal.index = 0
 
     def _run_palette(self) -> None:
         assert self.modal is not None

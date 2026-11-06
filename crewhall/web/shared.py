@@ -34,6 +34,7 @@ ALLOWED_OPS = {
     "agent_state", "agent_wait", "agent_stop", "agent_restart",
     "team_list", "team_info", "team_create", "team_set_workspace",
     "team_add_member", "team_remove_member", "team_remove", "team_members", "team_up",
+    "team_set_spawner", "team_approve_agent_profiles",
     "message_send", "message_history", "agent_identity",
     "interaction_list", "interaction_respond", "agent_new_session",
     "agent_processes", "agent_process_output", "agent_process_signal",
