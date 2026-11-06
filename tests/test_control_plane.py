@@ -168,6 +168,45 @@ class GuardOriginUnit(unittest.TestCase):
         self.assertIsNotNone(self.server._guard_origin(
             {"op": "office_collab_list", "sender": "lead", "token": "t"}, os.getpid()))
 
+    def test_non_string_op_is_left_to_the_dispatcher(self) -> None:
+        self.assertIsNone(self.server._guard_origin({"op": 7}, None))
+
+    def test_spawn_ops_require_an_exact_bound_agent_identity(self) -> None:
+        ctrl = self.server.controller
+        caller = mock.Mock(agent_id="sess_a")
+        ctrl.agents = mock.Mock()
+        ctrl.agents.resolve = lambda name: caller if name in ("sess_a", "A") else (
+            (_ for _ in ()).throw(KeyError(name)))
+        ctrl._check_token = lambda agent_id, token: None if token == "t" else (
+            (_ for _ in ()).throw(ValueError("bad token")))
+        bound = {"value": False}
+        self.server._peer_bound_to_agent = lambda pid, agent_id, pidfd=None: bound["value"]
+        for op in ("agent_create", "agent_stop"):
+            base = {"op": op, "sender": "sess_a", "token": "t"}
+            for bad in ({**base, "token": None}, {**base, "sender": ""},
+                        {**base, "sender": 5}, {**base, "sender": "ghost"},
+                        {**base, "sender": "A"}, {**base, "token": "wrong"}):
+                denied = self.server._guard_origin(bad, os.getpid())
+                self.assertIsNotNone(denied, bad)
+                self.assertIn("valid agent identity", denied["error"])
+            bound["value"] = False
+            denied = self.server._guard_origin(base, os.getpid())
+            self.assertIn("did not come from that agent's process", denied["error"])
+            bound["value"] = True
+            self.assertIsNone(self.server._guard_origin(base, os.getpid()))
+
+    def test_spawn_ops_without_identity_are_control_plane_only(self) -> None:
+        token = self.server._control_token
+        self.server._caller_is_agent = lambda pid, pidfd=None: True
+        denied = self.server._guard_origin(
+            {"op": "agent_create", "_control_token": token}, os.getpid())
+        self.assertIn("not available to agents", denied["error"])
+        self.server._caller_is_agent = lambda pid, pidfd=None: False
+        self.assertIsNone(self.server._guard_origin(
+            {"op": "agent_create", "_control_token": token}, None))
+        self.assertIn("control token", self.server._guard_origin(
+            {"op": "agent_stop"}, None)["error"])
+
 
 class ControlPlaneOverSocket(unittest.TestCase):
     """End-to-end: a live daemon refuses/token-gates control ops."""
